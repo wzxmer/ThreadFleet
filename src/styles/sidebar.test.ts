@@ -31,7 +31,7 @@ describe("sidebar interaction styles", () => {
     expect(interactionRule?.[1]).toContain("transform: none !important");
   });
 
-  it("responds to the session manager content width instead of the window width", () => {
+  it("fills the session workspace and responds to its own content width", () => {
     const sidebarCss = readFileSync(new URL("./sidebar.css", import.meta.url), "utf8");
     const workspaceRule = sidebarCss.match(
       /\.session-manager-workspace\s*\{([\s\S]*?)\n\}/,
@@ -42,10 +42,25 @@ describe("sidebar interaction styles", () => {
 
     expect(workspaceRule?.[1]).toContain("container-name: session-manager-workspace");
     expect(workspaceRule?.[1]).toContain("container-type: inline-size");
-    expect(containerRule?.[1]).toContain(
-      ".session-manager-workspace .session-manager-toolbar",
+    expect(workspaceRule?.[1]).not.toContain("grid-column: 1 / -1");
+    expect(workspaceRule?.[1]).toContain("grid-row: 1 / -1");
+    expect(workspaceRule?.[1]).toContain("width: auto");
+    expect(workspaceRule?.[1]).toContain("height: 100%");
+    expect(sidebarCss).not.toContain("width: min(980px, calc(100% - 48px))");
+    expect(containerRule?.[1]).toContain(".session-manager-workspace-header");
+  });
+
+  it("uses the reserved right area as a selected-session information inspector", () => {
+    const sidebarCss = readFileSync(new URL("./sidebar.css", import.meta.url), "utf8");
+    const detailRule = sidebarCss.match(
+      /\.session-manager-detail\.is-session\s*\{([\s\S]*?)\n\}/,
     );
-    expect(containerRule?.[1]).toContain("grid-template-columns: minmax(0, 1fr)");
+    const inspectorRule = sidebarCss.match(
+      /\.session-manager-detail-inspector\s*\{([\s\S]*?)\n\}/,
+    );
+
+    expect(detailRule?.[1]).toContain("grid-template-columns: minmax(0, 1fr) minmax(260px, 320px)");
+    expect(inspectorRule?.[1]).toContain("border-left: 1px solid var(--border-subtle)");
   });
 
   it("keeps session rows flat and gives selected rows a stable accent surface", () => {
@@ -62,8 +77,8 @@ describe("sidebar interaction styles", () => {
 
     expect(contentRule?.[1]).toContain("padding: 0");
     expect(contentRule?.[1]).toContain("border-radius: 0");
-    expect(selectedRule?.[1]).toContain("var(--accent) 16%");
-    expect(selectedFocusedRule?.[1]).toContain("var(--accent) 20%");
+    expect(selectedRule?.[1]).toContain("var(--border-accent) 16%");
+    expect(selectedFocusedRule?.[1]).toContain("var(--border-accent) 20%");
   });
 
   it("keeps the session manager scrollbar stable without a compositor mask", () => {

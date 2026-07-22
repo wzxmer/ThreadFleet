@@ -118,7 +118,7 @@ describe("useSessionManager", () => {
     ]);
   });
 
-  it("keeps filters local and hides subagents by default", async () => {
+  it("keeps filters local and includes every session type by default", async () => {
     listSessionSources.mockResolvedValue([source]);
     scanManagedSessions.mockResolvedValue({ requestId: "scan", totalSessions: 3, diagnosticCount: 0, cancelled: false });
     fetchManagedSessionsPage.mockResolvedValue({
@@ -135,7 +135,7 @@ describe("useSessionManager", () => {
 
     const { result } = renderHook(() => useSessionManager(true));
     await waitFor(() => expect(result.current.loading).toBe(false));
-    expect(result.current.sessions.map((item) => item.title)).toEqual(["Alpha", "Archived"]);
+    expect(result.current.sessions.map((item) => item.title)).toEqual(["Alpha", "Z", "Archived"]);
 
     act(() => result.current.setStatusFilter("archived"));
     expect(result.current.sessions.map((item) => item.title)).toEqual(["Archived"]);
@@ -145,21 +145,45 @@ describe("useSessionManager", () => {
     expect(result.current.sessions.map((item) => item.title)).toEqual(["Z"]);
   });
 
-  it("loads the next page and cancels when disabled", async () => {
+  it("indexes every metadata page before filtering while keeping rendering paged", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date(2026, 6, 22, 15, 30));
+    const firstPage = Array.from({ length: 100 }, (_, index) => session({
+      key: `source-a:older-${index}`,
+      threadId: `older-${index}`,
+      title: `Older ${index}`,
+      updatedAt: new Date(2026, 6, 20, 12, index % 60).getTime(),
+    }));
+    const today = session({
+      key: "source-a:today",
+      threadId: "today",
+      title: "Today",
+      updatedAt: new Date(2026, 6, 22, 8, 30).getTime(),
+    });
     listSessionSources.mockResolvedValue([source]);
-    scanManagedSessions.mockResolvedValue({ requestId: "scan", totalSessions: 2, diagnosticCount: 0, cancelled: false });
+    scanManagedSessions.mockResolvedValue({ requestId: "scan", totalSessions: 101, diagnosticCount: 0, cancelled: false });
     fetchManagedSessionsPage
-      .mockResolvedValueOnce({ requestId: "scan", items: [session({})], diagnostics: [], total: 2, nextOffset: 1 })
-      .mockResolvedValueOnce({ requestId: "scan", items: [session({ key: "source-a:thread-b", threadId: "thread-b", title: "Beta" })], diagnostics: [], total: 2, nextOffset: null });
+      .mockResolvedValueOnce({ requestId: "scan", items: [...firstPage, firstPage[0]], diagnostics: [], total: 101, nextOffset: 100 })
+      .mockResolvedValueOnce({ requestId: "scan", items: [firstPage[0], today, today], diagnostics: [], total: 101, nextOffset: null });
 
     const { result, rerender } = renderHook(({ enabled }) => useSessionManager(enabled), { initialProps: { enabled: true } });
-    await waitFor(() => expect(result.current.nextOffset).toBe(1));
-    expect(result.current.totalSessionCount).toBe(2);
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.indexedSessions).toHaveLength(101);
+    expect(result.current.totalSessionCount).toBe(101);
+
+    act(() => result.current.setDatePreset("today"));
+    expect(result.current.filteredSessionCount).toBe(1);
+    expect(result.current.sessions.map((item) => item.title)).toEqual(["Today"]);
+
+    act(() => result.current.setDatePreset("all"));
+    expect(result.current.sessions).toHaveLength(100);
+    expect(result.current.nextOffset).toBe(100);
     await act(async () => result.current.loadMore());
-    expect(result.current.sessions.map((item) => item.title)).toEqual(["Alpha", "Beta"]);
+    expect(result.current.sessions).toHaveLength(101);
 
     rerender({ enabled: false });
     await waitFor(() => expect(cancelSessionTask).toHaveBeenCalled());
+    vi.useRealTimers();
   });
   it("starts content search at two characters and cancels stale queries", async () => {
     listSessionSources.mockResolvedValue([source]);
@@ -219,19 +243,11 @@ describe("useSessionManager", () => {
     expect([...result.current.selectedSessionKeys]).toEqual(["source-a:thread-b"]);
   });
 
-  it("archives active sessions before permanently deleting them", async () => {
+  it("does not permanently delete an active session", async () => {
     const active = session({});
     listSessionSources.mockResolvedValue([source]);
     scanManagedSessions.mockResolvedValue({ requestId: "scan", totalSessions: 1, diagnosticCount: 0, cancelled: false });
-    fetchManagedSessionsPage
-      .mockResolvedValueOnce({ requestId: "scan", items: [active], diagnostics: [], total: 1, nextOffset: null })
-      .mockResolvedValueOnce({ requestId: "scan", items: [{ ...active, isArchived: true, archivedAt: 10 }], diagnostics: [], total: 1, nextOffset: null })
-      .mockResolvedValueOnce({ requestId: "scan", items: [], diagnostics: [], total: 0, nextOffset: null });
-    archiveManagedSessions.mockResolvedValue({
-      results: [{ sourceId: "source-a", threadId: "thread-a", success: true, archivedAt: 10, error: null }],
-      successCount: 1,
-      failureCount: 0,
-    });
+    fetchManagedSessionsPage.mockResolvedValue({ requestId: "scan", items: [active], diagnostics: [], total: 1, nextOffset: null });
     permanentlyDeleteManagedSession.mockResolvedValue({
       results: [{ sourceId: "source-a", threadId: "thread-a", success: true, error: null }],
       successCount: 1,
@@ -244,15 +260,8 @@ describe("useSessionManager", () => {
       await result.current.permanentlyDeleteSessions([active], true);
     });
 
-    expect(archiveManagedSessions).toHaveBeenCalledWith({
-      items: [{ sourceId: "source-a", threadId: "thread-a" }],
-    });
-    expect(permanentlyDeleteManagedSession).toHaveBeenCalledWith({
-      sourceId: "source-a",
-      threadId: "thread-a",
-      archivedAt: 10,
-      cascadeRequested: true,
-    });
+    expect(archiveManagedSessions).not.toHaveBeenCalled();
+    expect(permanentlyDeleteManagedSession).not.toHaveBeenCalled();
   });
 
   it("refreshes successful batch deletes and keeps transport failures selected", async () => {

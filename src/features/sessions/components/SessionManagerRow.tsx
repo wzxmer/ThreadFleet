@@ -48,12 +48,11 @@ export function SessionManagerRow({ session, source, depth = 0, selected, resumi
         <span className="session-manager-row-title">{session.title}</span>
         <span className="session-manager-row-path">{session.cwd ?? t("sessionManager.unknownProject")}</span>
         {!compact && session.preview && <span className="session-manager-row-preview">{session.preview}</span>}
-        {!compact && <span className="session-manager-row-tags">
+        <span className="session-manager-row-tags">
           <span>{source?.name ?? session.sourceId}</span>
-          <span>{session.isArchived ? t("sessionManager.archived") : t("sessionManager.active")}</span>
+          <span>{session.isSubagent ? (session.subagentNickname ?? t("sessionManager.subagent")) : t("sessionManager.mainSession")}</span>
           {!session.projectExists && <span className="is-warning">{t("sessionManager.projectMissing")}</span>}
-          {session.isSubagent && <span>{session.subagentNickname ?? t("sessionManager.subagent")}</span>}
-        </span>}
+        </span>
       </button>
       <span className="session-manager-row-time" title={relativeTime ?? undefined}>
         {absoluteTime ?? "—"}

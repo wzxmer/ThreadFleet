@@ -5,7 +5,7 @@ import { SessionManagerContextMenu, type ContextMenuBoundary } from "./SessionMa
 import { useCallback, useState } from "react";
 import { buildManagedSessionTrees, type ManagedSessionTree } from "../utils/sessionHierarchy";
 
-type Props = { sessions: ManagedSession[]; sources: SessionSource[]; selected: Set<string>; focusedKey?: string | null; compact?: boolean; resumingKey: string | null; archivingKeys: Set<string>; deletingKeys?: Set<string>; loading: boolean; loadingMore: boolean; error: string | null; hasMore: boolean; searchProgress?: SessionSearchProgress | null; onToggleSelected: (key: string) => void; onSelectSingle?: (key: string) => void; onFocus?: (session: ManagedSession) => void; onResume: (session: ManagedSession) => void; onArchive: (session: ManagedSession) => void; onArchiveSelected?: (sessions: ManagedSession[]) => void; onDerive: (session: ManagedSession) => void; onDeriveSelected?: (sessions: ManagedSession[]) => void; onPermanentDelete?: (sessions: ManagedSession[]) => void; onLoadMore: () => void };
+type Props = { sessions: ManagedSession[]; sources: SessionSource[]; selected: Set<string>; focusedKey?: string | null; compact?: boolean; localCount?: number; archivedCount?: number; resumingKey: string | null; archivingKeys: Set<string>; deletingKeys?: Set<string>; loading: boolean; loadingMore: boolean; error: string | null; hasMore: boolean; searchProgress?: SessionSearchProgress | null; onToggleSelected: (key: string) => void; onSelectSingle?: (key: string) => void; onFocus?: (session: ManagedSession) => void; onResume: (session: ManagedSession) => void; onArchive: (session: ManagedSession) => void; onArchiveSelected?: (sessions: ManagedSession[]) => void; onDerive: (session: ManagedSession) => void; onDeriveSelected?: (sessions: ManagedSession[]) => void; onPermanentDelete?: (sessions: ManagedSession[]) => void; onLoadMore: () => void };
 
 export function SessionManagerList(props: Props) {
   const { t } = useI18n();
@@ -29,9 +29,10 @@ export function SessionManagerList(props: Props) {
   const trees = buildManagedSessionTrees(props.sessions);
   const active = trees.filter((tree) => !tree.root.isArchived);
   const archived = trees.filter((tree) => tree.root.isArchived);
-  const renderGroup = (label: string, groupTrees: ManagedSessionTree[]) => groupTrees.length > 0 && (
+  const renderGroup = (label: string, emptyLabel: string, groupTrees: ManagedSessionTree[], count: number) => (
     <section className="session-manager-group" aria-label={label}>
-      <h2 className="session-manager-group-title">{label}</h2>
+      <h2 className="session-manager-group-title"><span>{label}</span><strong>{count}</strong></h2>
+      {groupTrees.length === 0 && <div className="session-manager-group-empty">{emptyLabel}</div>}
       {groupTrees.flatMap((tree) => tree.rows).map(({ session, depth }) => (
         <SessionManagerRow key={session.key} session={session} source={sourceById.get(session.sourceId)} depth={depth} selected={props.selected.has(session.key)} focused={props.focusedKey === session.key} compact={props.compact} resuming={props.resumingKey === session.key} archiving={props.archivingKeys.has(session.key)} deleting={props.deletingKeys?.has(session.key) ?? false} onToggleSelected={() => props.onToggleSelected(session.key)} onSelectSingle={props.onSelectSingle ? () => props.onSelectSingle?.(session.key) : undefined} onFocus={props.onFocus ? () => props.onFocus?.(session) : undefined} onResume={() => props.onResume(session)} onArchive={() => props.onArchive(session)} onDerive={() => props.onDerive(session)} onPermanentDelete={() => props.onPermanentDelete?.([session])} onContextMenu={showContextMenu} />
       ))}
@@ -45,7 +46,7 @@ export function SessionManagerList(props: Props) {
       {props.searchProgress?.incomplete && <div className="session-manager-search-progress is-warning">{t("sessionManager.searchIncomplete")}</div>}
       {props.loading && props.sessions.length > 0 && <div className="session-manager-search-progress">{t("sidebar.loading")}</div>}
       {props.error && props.sessions.length > 0 && <div className="session-manager-search-progress is-warning">{props.error}</div>}
-      {props.sessions.length === 0 ? <div className="session-manager-state">{t("sessionManager.empty")}</div> : <>{renderGroup(t("sessionManager.activeGroup"), active)}{renderGroup(t("sessionManager.archivedGroup"), archived)}</>}
+      {props.sessions.length === 0 ? <div className="session-manager-state">{t("sessionManager.empty")}</div> : <>{renderGroup(t("sessionManager.activeGroup"), t("sessionManager.localEmpty"), active, props.localCount ?? active.length)}{renderGroup(t("sessionManager.archivedGroup"), t("sessionManager.archivedEmpty"), archived, props.archivedCount ?? archived.length)}</>}
       {props.hasMore && <button type="button" className="session-manager-load-more" onClick={props.onLoadMore} disabled={props.loadingMore}>{props.loadingMore ? t("sidebar.loading") : t("sessionManager.loadMore")}</button>}
     </div>
   );

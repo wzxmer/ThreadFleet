@@ -170,17 +170,17 @@ describe("Sidebar", () => {
     const sessionManagerToggle = document.querySelector<HTMLButtonElement>(".sidebar-title-group button[aria-pressed]");
     expect(sessionManagerToggle).not.toBeNull();
     fireEvent.click(sessionManagerToggle!);
-    const input = document.querySelector<HTMLInputElement>(".session-manager-sidebar-search .sidebar-search-input");
+    const input = document.querySelector<HTMLInputElement>(".session-manager-search-field input");
     expect(input).not.toBeNull();
-    expect(document.querySelector(".session-manager-search-clear")).toBeNull();
+    expect(document.querySelector(".session-manager-search-field button")).toBeNull();
 
     fireEvent.change(input!, { target: { value: "019f6eb8" } });
-    const clearButton = document.querySelector<HTMLButtonElement>(".session-manager-search-clear");
+    const clearButton = document.querySelector<HTMLButtonElement>(".session-manager-search-field button");
     expect(clearButton).not.toBeNull();
     fireEvent.click(clearButton!);
 
     expect(input!.value).toBe("");
-    expect(document.querySelector(".session-manager-search-clear")).toBeNull();
+    expect(document.querySelector(".session-manager-search-field button")).toBeNull();
   });
 
   it("keeps session manager open when a thread is already active", () => {

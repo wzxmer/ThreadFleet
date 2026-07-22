@@ -10,7 +10,7 @@ import type {
 } from "../../../types";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent, RefObject } from "react";
-import { FolderOpen, X } from "lucide-react";
+import { FolderOpen } from "lucide-react";
 import { SidebarBottomRail } from "./SidebarBottomRail";
 import { SidebarHeader } from "./SidebarHeader";
 import { SidebarSearchBar } from "./SidebarSearchBar";
@@ -45,6 +45,8 @@ import { formatRelativeTimeShort } from "../../../utils/time";
 import type { ThreadStatusById } from "../../../utils/threadStatus";
 import type { CodexKeyProfile } from "@/types";
 import { SessionManagerList } from "@/features/sessions/components/SessionManagerList";
+import { SessionManagerToolbar } from "@/features/sessions/components/SessionManagerToolbar";
+import { SessionManagerBatchBar } from "@/features/sessions/components/SessionManagerBatchBar";
 import { useSessionManagerContext } from "@/features/sessions/context/SessionManagerContext";
 
 const COLLAPSED_GROUPS_STORAGE_KEY = "codexmonitor.collapsedGroups";
@@ -1117,7 +1119,7 @@ export const Sidebar = memo(function Sidebar({
 
   return (
     <aside
-      className={`sidebar${sidebarMode === "workspaces" && isSearchOpen ? " search-open" : ""}`}
+      className={`sidebar${sidebarMode === "workspaces" && isSearchOpen ? " search-open" : ""}${sidebarMode === "sessionManager" ? " is-session-manager" : ""}`}
       ref={workspaceDropTargetRef}
       onDragOver={onWorkspaceDragOver}
       onDragEnter={onWorkspaceDragEnter}
@@ -1146,10 +1148,8 @@ export const Sidebar = memo(function Sidebar({
         onSearchQueryChange={setSearchQuery}
         onClearSearch={() => setSearchQuery("")}
       />}
-      {sidebarMode === "sessionManager" && <div className="session-manager-sidebar-search">
-        <input className="sidebar-search-input" value={sessionManager.query} onChange={(event) => sessionManager.setQuery(event.target.value)} placeholder={t("sessionManager.search")} aria-label={t("sessionManager.search")} />
-        {sessionManager.query.length > 0 && <button type="button" className="sidebar-search-clear session-manager-search-clear" onClick={() => sessionManager.setQuery("")} aria-label={t("sidebar.clearSearch")} data-tauri-drag-region="false"><X size={12} aria-hidden /></button>}
-      </div>}
+      {sidebarMode === "sessionManager" && <SessionManagerToolbar manager={sessionManager} />}
+      {sidebarMode === "sessionManager" && <SessionManagerBatchBar />}
       <div
         className={`workspace-drop-overlay${
           isWorkspaceDropActive ? " is-active" : ""
@@ -1181,7 +1181,7 @@ export const Sidebar = memo(function Sidebar({
         onScroll={handleSidebarScroll}
         ref={sidebarBodyRef}
       >
-        {sidebarMode === "sessionManager" ? <SessionManagerList sessions={sessionManager.sessions} sources={sessionManager.sources} selected={sessionManager.selectedSessionKeys} focusedKey={focusedSessionKey} compact resumingKey={resumingKey} archivingKeys={sessionManager.archivingKeys} deletingKeys={sessionManager.deletingKeys} loading={sessionManager.loading} loadingMore={sessionManager.loadingMore} error={sessionManager.error} searchProgress={sessionManager.searchProgress} hasMore={sessionManager.nextOffset !== null} onToggleSelected={sessionManager.toggleSelected} onSelectSingle={sessionManager.selectSingle} onFocus={focusSession} onResume={(session) => void resumeSession(session)} onArchive={(session) => void sessionManager.archiveSessions([session])} onArchiveSelected={(sessions) => void sessionManager.archiveSessions(sessions)} onDerive={deriveSession} onDeriveSelected={deriveSessions} onPermanentDelete={(sessions) => void requestPermanentDelete(sessions)} onLoadMore={sessionManager.loadMore}/> : <div className="workspace-list">
+        {sidebarMode === "sessionManager" ? <SessionManagerList sessions={sessionManager.sessions} sources={sessionManager.sources} selected={sessionManager.selectedSessionKeys} focusedKey={focusedSessionKey} compact localCount={sessionManager.stats.local} archivedCount={sessionManager.stats.archived} resumingKey={resumingKey} archivingKeys={sessionManager.archivingKeys} deletingKeys={sessionManager.deletingKeys} loading={sessionManager.loading} loadingMore={sessionManager.loadingMore} error={sessionManager.error} searchProgress={sessionManager.searchProgress} hasMore={sessionManager.nextOffset !== null} onToggleSelected={sessionManager.toggleSelected} onSelectSingle={sessionManager.selectSingle} onFocus={focusSession} onResume={(session) => void resumeSession(session)} onArchive={(session) => void sessionManager.archiveSessions([session])} onArchiveSelected={(sessions) => void sessionManager.archiveSessions(sessions)} onDerive={deriveSession} onDeriveSelected={deriveSessions} onPermanentDelete={(sessions) => void requestPermanentDelete(sessions)} onLoadMore={sessionManager.loadMore}/> : <div className="workspace-list">
           {pinnedThreadRows.length > 0 && (
             <div className="pinned-section">
               <div className="sidebar-section-header">

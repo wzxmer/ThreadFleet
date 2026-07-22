@@ -119,9 +119,9 @@ export function SessionManagerContextMenu({ sessions, x, y, boundary, busy, onCl
           {sessions.length === 1 ? t("sessionManager.archive") : t("sessionManager.archiveSelected")}
         </PopoverMenuItem>
       )}
-      <PopoverMenuItem role="menuitem" disabled={busy} className="is-danger" icon={<Trash2 size={14} />} onClick={() => run(() => onPermanentDelete(sessions))}>
+      {active.length === 0 && <PopoverMenuItem role="menuitem" disabled={busy} className="is-danger" icon={<Trash2 size={14} />} onClick={() => run(() => onPermanentDelete(sessions))}>
           {sessions.length === 1 ? t("sessionManager.permanentDelete") : t("sessionManager.permanentDeleteSelected")}
-      </PopoverMenuItem>
+      </PopoverMenuItem>}
       <PopoverMenuItem role="menuitem" icon={<Copy size={14} />} onClick={() => run(() => { void navigator.clipboard?.writeText(sessions.map((session) => session.threadId).join("\n")).catch(() => undefined); })}>
         {sessions.length === 1 ? t("sessionManager.copySessionId") : t("sessionManager.copySessionIds")}
       </PopoverMenuItem>

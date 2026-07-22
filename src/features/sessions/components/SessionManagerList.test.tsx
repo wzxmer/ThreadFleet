@@ -80,11 +80,11 @@ describe("SessionManagerList", () => {
     );
   });
 
-  it("renders source, archive, missing-project, and subagent metadata", () => {
+  it("renders source, archive grouping, missing-project, and subagent metadata", () => {
     const onToggleSelected = vi.fn();
     render(<SessionManagerList sessions={[managedSession]} sources={[source]} selected={new Set()} resumingKey={null} archivingKeys={new Set()} loading={false} loadingMore={false} error={null} hasMore={false} onToggleSelected={onToggleSelected} onResume={vi.fn()} onArchive={vi.fn()} onDerive={vi.fn()} onLoadMore={vi.fn()} />);
     expect(screen.getByText("Primary")).toBeTruthy();
-    expect(screen.getByText("已归档")).toBeTruthy();
+    expect(screen.getByRole("region", { name: "归档会话" })).toBeTruthy();
     expect(screen.getByText("项目缺失")).toBeTruthy();
     expect(screen.getByText("worker")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "选择 Archived child" }));
@@ -126,7 +126,7 @@ describe("SessionManagerList", () => {
     render(<SessionManagerList sessions={[active, archived]} sources={[source]} selected={new Set([archived.key])} resumingKey={null} archivingKeys={new Set()} loading={false} loadingMore={false} error={null} hasMore={false} onToggleSelected={vi.fn()} onResume={vi.fn()} onArchive={onArchive} onDerive={vi.fn()} onLoadMore={vi.fn()} />);
     fireEvent.contextMenu(screen.getByText("Active"));
     expect(screen.getByRole("menu").querySelector(".ds-popover-item")).toBeTruthy();
-    expect(screen.getByRole("menu").textContent).toContain("永久删除");
+    expect(screen.getByRole("menu").textContent).not.toContain("永久删除");
     fireEvent.keyDown(window, { key: "Escape" });
     fireEvent.contextMenu(screen.getByText("Archived"));
     expect(screen.getByRole("menu").textContent).toContain("永久删除");
@@ -245,10 +245,19 @@ describe("SessionManagerList", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "归档所选" }));
     expect(onArchiveSelected).toHaveBeenCalledWith([active]);
     fireEvent.contextMenu(screen.getByText("Archived"));
-    fireEvent.click(screen.getByRole("menuitem", { name: "永久删除所选" }));
-    expect(onPermanentDelete).toHaveBeenCalledWith([active, archived]);
+    expect(screen.queryByRole("menuitem", { name: "永久删除所选" })).toBeNull();
+    fireEvent.keyDown(window, { key: "Escape" });
     fireEvent.contextMenu(screen.getByText("Active"));
     fireEvent.click(screen.getByRole("menuitem", { name: "复制所选会话 ID" }));
     expect(writeText).toHaveBeenCalledWith("active\narchived");
+  });
+
+  it("offers permanent deletion only when every selected session is archived", () => {
+    const onPermanentDelete = vi.fn();
+    const archived = { ...managedSession, key: "source-a:archived", threadId: "archived", title: "Archived", projectExists: true };
+    render(<SessionManagerList sessions={[archived]} sources={[source]} selected={new Set([archived.key])} resumingKey={null} archivingKeys={new Set()} loading={false} loadingMore={false} error={null} hasMore={false} onToggleSelected={vi.fn()} onResume={vi.fn()} onArchive={vi.fn()} onDerive={vi.fn()} onPermanentDelete={onPermanentDelete} onLoadMore={vi.fn()} />);
+    fireEvent.contextMenu(screen.getByText("Archived"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "永久删除" }));
+    expect(onPermanentDelete).toHaveBeenCalledWith([archived]);
   });
 });

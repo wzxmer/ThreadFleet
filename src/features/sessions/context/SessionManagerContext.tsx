@@ -49,7 +49,7 @@ function normalizeProjectPath(path: string | null | undefined) {
 }
 
 export function SessionManagerProvider({ active, onActiveChange, onResumeSession, onDeriveSession, onDeriveSessions, currentWorkspace = null, children }: Props) {
-  const manager = useSessionManager(active);
+  const manager = useSessionManager(active, currentWorkspace?.path ?? null);
   const [focusedSessionKey, setFocusedSessionKey] = useState<string | null>(null);
   const [sessionPreview, setSessionPreview] = useState<ManagedSessionPreviewResponse | null>(null);
   const [sessionPreviewLoading, setSessionPreviewLoading] = useState(false);
@@ -135,7 +135,7 @@ export function SessionManagerProvider({ active, onActiveChange, onResumeSession
     else sessions.forEach(onDeriveSession);
   }, [onDeriveSession, onDeriveSessions]);
   const requestPermanentDelete = useCallback(async (sessions: ManagedSession[]) => {
-    if (sessions.length === 0) return;
+    if (sessions.length === 0 || sessions.some((session) => !session.isArchived || session.archivedAt == null)) return;
     const counts = await Promise.all(sessions.map((session) => manager.getPermanentDeleteChildCount(session)));
     if (counts.some((count) => count == null)) return;
     setPendingPermanentDeleteChildCount(counts.reduce<number>((total, count) => total + (count ?? 0), 0));
