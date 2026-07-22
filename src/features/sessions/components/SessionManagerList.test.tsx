@@ -101,6 +101,22 @@ describe("SessionManagerList", () => {
     expect(onToggleSelected).not.toHaveBeenCalled();
   });
 
+  it("keeps resume actions enabled when the original project is missing", () => {
+    const onResume = vi.fn();
+    render(<SessionManagerList sessions={[managedSession]} sources={[source]} selected={new Set()} resumingKey={null} archivingKeys={new Set()} loading={false} loadingMore={false} error={null} hasMore={false} onToggleSelected={vi.fn()} onResume={onResume} onArchive={vi.fn()} onDerive={vi.fn()} onLoadMore={vi.fn()} />);
+
+    const resumeButton = screen.getByRole("button", { name: "继续" }) as HTMLButtonElement;
+    expect(resumeButton.disabled).toBe(false);
+    fireEvent.click(resumeButton);
+    expect(onResume).toHaveBeenCalledWith(managedSession);
+
+    fireEvent.contextMenu(screen.getByText(managedSession.title));
+    const resumeMenuItem = screen.getByRole("menuitem", { name: "继续会话" }) as HTMLButtonElement;
+    expect(resumeMenuItem.disabled).toBe(false);
+    fireEvent.click(resumeMenuItem);
+    expect(onResume).toHaveBeenCalledTimes(2);
+  });
+
   it("archives an active row but disables archived rows", () => {
     const onArchive = vi.fn();
     const active = { ...managedSession, isArchived: false, archivedAt: null };

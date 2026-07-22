@@ -928,7 +928,7 @@ pub(crate) async fn resolve_managed_session_core(
     app_settings: &Mutex<AppSettings>,
     runtime: &SessionManagerRuntime,
 ) -> Result<(SessionSource, ManagedSession), String> {
-    resolve_indexed_managed_session(source_id, thread_id, app_settings, runtime, true).await
+    resolve_indexed_managed_session(source_id, thread_id, app_settings, runtime, false).await
 }
 
 pub(crate) async fn fetch_managed_session_preview_core(
@@ -953,13 +953,14 @@ pub(crate) async fn fetch_managed_session_preview_core(
         .map(|file| file.path.clone())
         .ok_or_else(|| "Managed session preview file is unavailable".to_string())?;
     let full = request.full;
-    let limit = request.limit.clamp(1, 12);
+    let cursor = request.cursor;
+    let limit = request.limit.clamp(1, 80);
     let preview = tokio::task::spawn_blocking(move || {
         if full {
             crate::shared::session_manager_core::preview::read_session_conversation(&path)
         } else {
-            crate::shared::session_manager_core::preview::read_session_conversation_preview(
-                &path, limit,
+            crate::shared::session_manager_core::preview::read_session_conversation_page(
+                &path, cursor, limit,
             )
         }
     })
@@ -968,6 +969,7 @@ pub(crate) async fn fetch_managed_session_preview_core(
     Ok(crate::types::ManagedSessionPreviewResponse {
         opening_message: preview.opening_message,
         items: preview.items,
+        next_cursor: preview.next_cursor,
         incomplete: preview.incomplete,
     })
 }
@@ -1822,6 +1824,7 @@ mod tests {
                     source_id: sources[0].id.clone(),
                     thread_id: "thread-a".to_string(),
                     limit: 6,
+                    cursor: None,
                     full: true,
                 },
                 &settings,
@@ -1834,6 +1837,7 @@ mod tests {
                     source_id: sources[0].id.clone(),
                     thread_id: "thread-a".to_string(),
                     limit: 6,
+                    cursor: None,
                     full: false,
                 },
                 &settings,
@@ -1843,6 +1847,7 @@ mod tests {
             .unwrap();
             assert_eq!(full.items.len(), 14);
             assert_eq!(limited.items.len(), 6);
+            assert!(limited.next_cursor.is_some());
             cancel_session_task_core("scan-a".to_string(), &runtime)
                 .await
                 .unwrap();
@@ -1862,7 +1867,7 @@ mod tests {
     }
 
     #[test]
-    fn resolves_only_verified_sessions_with_available_projects() {
+    fn resolves_verified_sessions_even_when_the_original_project_is_missing() {
         let runtime_executor = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -1894,7 +1899,7 @@ mod tests {
             let (_, session) = resolve_managed_session_core(&sources[0].id, "thread-resume", &settings, &runtime).await.unwrap();
             assert_eq!(session.cwd.as_deref(), project.to_str());
             fs::remove_dir_all(&project).unwrap();
-            assert!(resolve_managed_session_core(&sources[0].id, "thread-resume", &settings, &runtime).await.is_err());
+            assert!(resolve_managed_session_core(&sources[0].id, "thread-resume", &settings, &runtime).await.is_ok());
             let _ = fs::remove_dir_all(root);
         });
     }

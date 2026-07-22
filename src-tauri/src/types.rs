@@ -251,6 +251,8 @@ pub(crate) struct ManagedSessionPreviewRequest {
     #[serde(default = "default_managed_session_preview_limit")]
     pub(crate) limit: usize,
     #[serde(default)]
+    pub(crate) cursor: Option<u64>,
+    #[serde(default)]
     pub(crate) full: bool,
 }
 
@@ -277,6 +279,7 @@ pub(crate) struct ManagedSessionPreviewItem {
 pub(crate) struct ManagedSessionPreviewResponse {
     pub(crate) opening_message: Option<String>,
     pub(crate) items: Vec<ManagedSessionPreviewItem>,
+    pub(crate) next_cursor: Option<u64>,
     pub(crate) incomplete: bool,
 }
 

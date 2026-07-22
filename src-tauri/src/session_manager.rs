@@ -45,6 +45,7 @@ fn workspace_info(entry: &WorkspaceEntry, connected: bool) -> WorkspaceInfo {
 
 async fn resolve_or_prepare_workspace(
     cwd: &str,
+    display_name: Option<&str>,
     state: &AppState,
 ) -> Result<(WorkspaceEntry, bool), String> {
     let normalized = crate::shared::workspaces_core::normalize_workspace_path_input(cwd);
@@ -62,11 +63,13 @@ async fn resolve_or_prepare_workspace(
     {
         return Ok((entry, false));
     }
-    let name = normalized
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("Workspace")
-        .to_string();
+    let name = display_name.map(str::to_string).unwrap_or_else(|| {
+        normalized
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("Workspace")
+            .to_string()
+    });
     Ok((
         WorkspaceEntry {
             id: Uuid::new_v4().to_string(),
@@ -286,11 +289,17 @@ pub(crate) async fn resume_managed_session(
             &state.session_manager,
         )
         .await?;
-    let cwd = managed
-        .cwd
-        .as_deref()
-        .ok_or_else(|| "Managed session has no project path".to_string())?;
-    let (entry, is_new) = resolve_or_prepare_workspace(cwd, &state).await?;
+    let storage_dir = state.storage_path.parent().unwrap_or(&state.storage_path);
+    let target =
+        crate::shared::session_manager_core::mount::resolve_managed_session_workspace_target(
+            storage_dir,
+            &source.id,
+            &managed.thread_id,
+            managed.cwd.as_deref(),
+        )?;
+    let target_path = target.path.to_string_lossy();
+    let (entry, is_new) =
+        resolve_or_prepare_workspace(&target_path, target.display_name.as_deref(), &state).await?;
     let (default_codex_bin, codex_args) = {
         let settings = state.app_settings.lock().await;
         (
@@ -379,7 +388,8 @@ pub(crate) async fn archive_managed_sessions(
                     .as_deref()
                     .filter(|cwd| PathBuf::from(cwd).is_dir())
                     .unwrap_or(&source.codex_home_path);
-                let (entry, _) = resolve_or_prepare_workspace(workspace_context, state).await?;
+                let (entry, _) =
+                    resolve_or_prepare_workspace(workspace_context, None, state).await?;
                 let (default_codex_bin, codex_args) = {
                     let settings = state.app_settings.lock().await;
                     (

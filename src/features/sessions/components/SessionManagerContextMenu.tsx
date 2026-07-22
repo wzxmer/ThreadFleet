@@ -106,7 +106,7 @@ export function SessionManagerContextMenu({ sessions, x, y, boundary, busy, onCl
     >
       {sessions.length === 1 && (
         <>
-          <PopoverMenuItem role="menuitem" disabled={busy || !target.projectExists} icon={<Play size={14} />} onClick={() => run(() => onResume(target))}>
+          <PopoverMenuItem role="menuitem" disabled={busy} icon={<Play size={14} />} onClick={() => run(() => onResume(target))}>
             {t("sessionManager.continueSession")}
           </PopoverMenuItem>
         </>

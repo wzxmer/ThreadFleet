@@ -3227,6 +3227,12 @@
   overscroll-behavior: contain;
 }
 
+.session-manager-preview-content {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
 .session-manager-preview-item {
   padding: 10px 12px;
   border: 1px solid var(--border-subtle);

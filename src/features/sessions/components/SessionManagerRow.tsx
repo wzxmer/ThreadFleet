@@ -58,7 +58,7 @@ export function SessionManagerRow({ session, source, depth = 0, selected, resumi
         {absoluteTime ?? "—"}
       </span>
       {!compact && <span className="session-manager-row-actions">
-        <button type="button" className="session-manager-row-resume" data-button-elevation="none" onClick={onResume} disabled={resuming || archiving || !session.projectExists}>
+        <button type="button" className="session-manager-row-resume" data-button-elevation="none" onClick={onResume} disabled={resuming || archiving}>
           {resuming ? t("sessionManager.resuming") : t("sessionManager.resume")}
         </button>
         <button type="button" className="session-manager-row-archive" data-button-elevation="none" onClick={onArchive} disabled={archiving || session.isArchived}>

@@ -16,7 +16,7 @@ function displayTime(value: number | null) {
 
 export function SessionManagerWorkspace() {
   const { t } = useI18n();
-  const { manager, focusedSession, sessionPreview, sessionPreviewLoading, sessionPreviewError, resumingKey, resumeSession, deriveSession, currentWorkspace, pendingPermanentDeleteSessions, pendingPermanentDeleteChildCount, requestPermanentDelete, confirmPermanentDelete, cancelPermanentDelete } = useSessionManagerContext();
+  const { manager, focusedSession, sessionPreview, sessionPreviewLoading, sessionPreviewLoadingMore, sessionPreviewError, loadEarlierSessionPreview, resumingKey, resumeSession, deriveSession, currentWorkspace, pendingPermanentDeleteSessions, pendingPermanentDeleteChildCount, requestPermanentDelete, confirmPermanentDelete, cancelPermanentDelete } = useSessionManagerContext();
   const source = focusedSession ? manager.sources.find((candidate) => candidate.id === focusedSession.sourceId) : null;
   const focusedRelativeTime = focusedSession?.updatedAt ? formatRelativeTimeShort(focusedSession.updatedAt) : null;
 
@@ -34,7 +34,7 @@ export function SessionManagerWorkspace() {
       <div className={`session-manager-detail${focusedSession ? " is-session" : " is-overview"}`}>
         {!focusedSession ? <SessionManagerOverview stats={manager.stats} sources={manager.sources} /> : <>
           <div className="session-manager-conversation-preview">
-            <SessionManagerConversation sessionKey={focusedSession.key} items={sessionPreview?.items ?? []} loading={sessionPreviewLoading} error={sessionPreviewError} incomplete={sessionPreview?.incomplete ?? false} fallback={focusedSession.preview} />
+            <SessionManagerConversation sessionKey={focusedSession.key} items={sessionPreview?.items ?? []} loading={sessionPreviewLoading} loadingMore={sessionPreviewLoadingMore} error={sessionPreviewError} incomplete={sessionPreview?.incomplete ?? false} fallback={focusedSession.preview} hasMore={sessionPreview?.nextCursor != null} onLoadEarlier={loadEarlierSessionPreview} />
           </div>
           <aside className="session-manager-detail-inspector" aria-label={t("sessionManager.sessionMetadata")}>
             <h2>{t("sessionManager.sessionMetadata")}</h2>
@@ -51,7 +51,7 @@ export function SessionManagerWorkspace() {
               <code title={focusedSession.cwd ?? undefined}>{focusedSession.cwd ?? t("sessionManager.unknownProject")}</code>
             </div>
             <div className="session-manager-detail-actions">
-              <button type="button" className="primary" data-button-elevation="none" onClick={() => void resumeSession(focusedSession)} disabled={resumingKey === focusedSession.key || !focusedSession.projectExists} title={t("sessionManager.continueSession")}>
+              <button type="button" className="primary" data-button-elevation="none" onClick={() => void resumeSession(focusedSession)} disabled={resumingKey === focusedSession.key} title={t("sessionManager.continueSession")}>
                 <Play size={15} aria-hidden /><span>{resumingKey === focusedSession.key ? t("sessionManager.resuming") : t("sessionManager.resume")}</span>
               </button>
               <button type="button" data-button-elevation="none" onClick={() => deriveSession(focusedSession)} disabled={resumingKey === focusedSession.key || !currentWorkspace} title={t("sessionManager.deriveToCurrentProject")}>

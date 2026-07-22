@@ -414,6 +414,7 @@ export type ManagedSessionPreviewRequest = {
   sourceId: string;
   threadId: string;
   limit?: number;
+  cursor?: number | null;
   full?: boolean;
 };
 
@@ -425,6 +426,7 @@ export type ManagedSessionPreviewItem = {
 export type ManagedSessionPreviewResponse = {
   openingMessage: string | null;
   items: ManagedSessionPreviewItem[];
+  nextCursor?: number | null;
   incomplete: boolean;
 };
 

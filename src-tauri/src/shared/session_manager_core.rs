@@ -4,6 +4,7 @@ pub(crate) mod delete;
 pub(crate) mod derivation;
 pub(crate) mod file_map;
 pub(crate) mod ledger;
+pub(crate) mod mount;
 pub(crate) mod parser;
 pub(crate) mod preview;
 pub(crate) mod runtime;

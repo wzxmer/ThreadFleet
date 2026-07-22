@@ -985,11 +985,14 @@ impl DaemonState {
                 &self.session_manager,
             )
             .await?;
-        let cwd = managed
-            .cwd
-            .as_deref()
-            .ok_or_else(|| "Managed session has no project path".to_string())?;
-        let normalized = workspaces_core::normalize_workspace_path_input(cwd);
+        let target = shared::session_manager_core::mount::resolve_managed_session_workspace_target(
+            &self.data_dir,
+            &source.id,
+            &managed.thread_id,
+            managed.cwd.as_deref(),
+        )?;
+        let target_path = target.path.to_string_lossy();
+        let normalized = workspaces_core::normalize_workspace_path_input(&target_path);
         let path = workspaces_core::workspace_path_to_string(&normalized);
         let existing = self
             .workspaces
@@ -1001,11 +1004,13 @@ impl DaemonState {
         let is_new = existing.is_none();
         let entry = existing.unwrap_or_else(|| WorkspaceEntry {
             id: uuid::Uuid::new_v4().to_string(),
-            name: normalized
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("Workspace")
-                .to_string(),
+            name: target.display_name.unwrap_or_else(|| {
+                normalized
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("Workspace")
+                    .to_string()
+            }),
             path,
             kind: types::WorkspaceKind::Main,
             parent_id: None,

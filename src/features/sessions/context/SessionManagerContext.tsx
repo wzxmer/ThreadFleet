@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { ManagedSession, ManagedSessionPreviewResponse } from "@/types";
+import type { ManagedSession, ManagedSessionPreviewItem, ManagedSessionPreviewResponse } from "@/types";
 import { fetchManagedSessionPreview } from "@services/tauri";
 import { useSessionManager } from "../hooks/useSessionManager";
 
@@ -14,7 +14,9 @@ type SessionManagerContextValue = {
   focusSession: (session: ManagedSession) => void;
   sessionPreview: ManagedSessionPreviewResponse | null;
   sessionPreviewLoading: boolean;
+  sessionPreviewLoadingMore: boolean;
   sessionPreviewError: string | null;
+  loadEarlierSessionPreview: () => Promise<void>;
   resumingKey: string | null;
   resumeSession: (session: ManagedSession) => Promise<void>;
   pendingResumeSession: ManagedSession | null;
@@ -33,6 +35,7 @@ type SessionManagerContextValue = {
 
 const SessionManagerContext = createContext<SessionManagerContextValue | null>(null);
 const SESSION_CONTENT_LOAD_DELAY_MS = 80;
+const SESSION_CONTENT_PAGE_SIZE = 40;
 
 type Props = {
   active: boolean;
@@ -48,11 +51,21 @@ function normalizeProjectPath(path: string | null | undefined) {
   return (path ?? "").trim().replace(/\\/g, "/").replace(/\/+$/g, "").toLowerCase();
 }
 
+function prependPreviewItems(
+  older: ManagedSessionPreviewItem[],
+  current: ManagedSessionPreviewItem[],
+) {
+  return [...older, ...current].filter((item, index, items) => (
+    index === 0 || item.role !== items[index - 1]?.role || item.text !== items[index - 1]?.text
+  ));
+}
+
 export function SessionManagerProvider({ active, onActiveChange, onResumeSession, onDeriveSession, onDeriveSessions, currentWorkspace = null, children }: Props) {
   const manager = useSessionManager(active, currentWorkspace?.path ?? null);
   const [focusedSessionKey, setFocusedSessionKey] = useState<string | null>(null);
   const [sessionPreview, setSessionPreview] = useState<ManagedSessionPreviewResponse | null>(null);
   const [sessionPreviewLoading, setSessionPreviewLoading] = useState(false);
+  const [sessionPreviewLoadingMore, setSessionPreviewLoadingMore] = useState(false);
   const [sessionPreviewError, setSessionPreviewError] = useState<string | null>(null);
   const previewRequestRef = useRef(0);
   const [resumingKey, setResumingKey] = useState<string | null>(null);
@@ -65,7 +78,15 @@ export function SessionManagerProvider({ active, onActiveChange, onResumeSession
   );
   const focusedSourceId = focusedSession?.sourceId ?? null;
   const focusedThreadId = focusedSession?.threadId ?? null;
-  const focusSession = useCallback((session: ManagedSession) => setFocusedSessionKey(session.key), []);
+  const focusSession = useCallback((session: ManagedSession) => {
+    if (session.key === focusedSessionKey) return;
+    previewRequestRef.current += 1;
+    setSessionPreview(null);
+    setSessionPreviewError(null);
+    setSessionPreviewLoading(true);
+    setSessionPreviewLoadingMore(false);
+    setFocusedSessionKey(session.key);
+  }, [focusedSessionKey]);
   useEffect(() => {
     if (!active) setFocusedSessionKey(null);
   }, [active]);
@@ -74,6 +95,7 @@ export function SessionManagerProvider({ active, onActiveChange, onResumeSession
     previewRequestRef.current = requestId;
     setSessionPreview(null);
     setSessionPreviewError(null);
+    setSessionPreviewLoadingMore(false);
     if (!active || !focusedSourceId || !focusedThreadId) {
       setSessionPreviewLoading(false);
       return;
@@ -83,10 +105,12 @@ export function SessionManagerProvider({ active, onActiveChange, onResumeSession
       void fetchManagedSessionPreview({
         sourceId: focusedSourceId,
         threadId: focusedThreadId,
-        full: true,
+        limit: SESSION_CONTENT_PAGE_SIZE,
       })
         .then((preview) => {
-          if (previewRequestRef.current === requestId) setSessionPreview(preview);
+          if (previewRequestRef.current === requestId) {
+            setSessionPreview({ ...preview, nextCursor: preview.nextCursor ?? null });
+          }
         })
         .catch((caught) => {
           if (previewRequestRef.current === requestId) {
@@ -99,6 +123,41 @@ export function SessionManagerProvider({ active, onActiveChange, onResumeSession
     }, SESSION_CONTENT_LOAD_DELAY_MS);
     return () => window.clearTimeout(timer);
   }, [active, focusedSourceId, focusedThreadId]);
+  const loadEarlierSessionPreview = useCallback(async () => {
+    const cursor = sessionPreview?.nextCursor ?? null;
+    if (
+      !active ||
+      !focusedSourceId ||
+      !focusedThreadId ||
+      cursor === null ||
+      sessionPreviewLoadingMore
+    ) {
+      return;
+    }
+    const requestId = previewRequestRef.current;
+    setSessionPreviewLoadingMore(true);
+    try {
+      const older = await fetchManagedSessionPreview({
+        sourceId: focusedSourceId,
+        threadId: focusedThreadId,
+        limit: SESSION_CONTENT_PAGE_SIZE,
+        cursor,
+      });
+      if (previewRequestRef.current !== requestId) return;
+      setSessionPreview((current) => current ? {
+        openingMessage: current.openingMessage ?? older.openingMessage,
+        items: prependPreviewItems(older.items, current.items),
+        nextCursor: older.nextCursor ?? null,
+        incomplete: current.incomplete || older.incomplete,
+      } : current);
+    } catch (caught) {
+      if (previewRequestRef.current === requestId) {
+        setSessionPreview((current) => current ? { ...current, incomplete: true } : current);
+      }
+    } finally {
+      if (previewRequestRef.current === requestId) setSessionPreviewLoadingMore(false);
+    }
+  }, [active, focusedSourceId, focusedThreadId, sessionPreview?.nextCursor, sessionPreviewLoadingMore]);
   const resumeDirectly = useCallback(async (session: ManagedSession) => {
     setResumingKey(session.key);
     try {
@@ -109,6 +168,10 @@ export function SessionManagerProvider({ active, onActiveChange, onResumeSession
     }
   }, [onActiveChange, onResumeSession]);
   const resumeSession = useCallback(async (session: ManagedSession) => {
+    if (!session.projectExists) {
+      await resumeDirectly(session);
+      return;
+    }
     const sourcePath = normalizeProjectPath(session.cwd);
     const destinationPath = normalizeProjectPath(currentWorkspace?.path);
     if (sourcePath && destinationPath && sourcePath !== destinationPath) {
@@ -156,7 +219,9 @@ export function SessionManagerProvider({ active, onActiveChange, onResumeSession
     focusSession,
     sessionPreview,
     sessionPreviewLoading,
+    sessionPreviewLoadingMore,
     sessionPreviewError,
+    loadEarlierSessionPreview,
     resumingKey,
     resumeSession,
     pendingResumeSession,
@@ -171,7 +236,7 @@ export function SessionManagerProvider({ active, onActiveChange, onResumeSession
     requestPermanentDelete,
     confirmPermanentDelete,
     cancelPermanentDelete: () => setPendingPermanentDeleteSessions(null),
-  }), [active, confirmPermanentDelete, currentWorkspace, deriveSessions, focusSession, focusedSession, manager, migrateToCurrentProject, onActiveChange, onDeriveSession, pendingPermanentDeleteChildCount, pendingPermanentDeleteSessions, pendingResumeSession, requestPermanentDelete, resumeInOriginalProject, resumeSession, resumingKey, sessionPreview, sessionPreviewError, sessionPreviewLoading]);
+  }), [active, confirmPermanentDelete, currentWorkspace, deriveSessions, focusSession, focusedSession, loadEarlierSessionPreview, manager, migrateToCurrentProject, onActiveChange, onDeriveSession, pendingPermanentDeleteChildCount, pendingPermanentDeleteSessions, pendingResumeSession, requestPermanentDelete, resumeInOriginalProject, resumeSession, resumingKey, sessionPreview, sessionPreviewError, sessionPreviewLoading, sessionPreviewLoadingMore]);
 
   return <SessionManagerContext.Provider value={value}>{children}</SessionManagerContext.Provider>;
 }
