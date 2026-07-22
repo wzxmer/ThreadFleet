@@ -8,11 +8,7 @@ const TURN_STALL_CHECK_INTERVAL_MS = 30 * 1000;
 type UseThreadStallWarningsOptions = {
   threadStatusById: ThreadState["threadStatusById"];
   lastActivityAtByThreadRef?: MutableRefObject<Record<string, number>>;
-  activeThreadId?: string | null;
-  onReconcileThread?: (
-    threadId: string,
-    reason: "stall" | "focus",
-  ) => void | Promise<void>;
+  onReconcileThread?: (threadId: string) => void | Promise<void>;
   pushThreadErrorMessage: (threadId: string, message: string) => void;
   safeMessageActivity: () => void;
 };
@@ -20,7 +16,6 @@ type UseThreadStallWarningsOptions = {
 export function useThreadStallWarnings({
   threadStatusById,
   lastActivityAtByThreadRef,
-  activeThreadId,
   onReconcileThread,
   pushThreadErrorMessage,
   safeMessageActivity,
@@ -28,12 +23,9 @@ export function useThreadStallWarnings({
   const warnedProcessingStartByThreadRef = useRef<Record<string, number>>({});
 
   useEffect(() => {
-    const reconcileThread = (
-      threadId: string,
-      reason: "stall" | "focus",
-    ) => {
+    const reconcileThread = (threadId: string) => {
       try {
-        void Promise.resolve(onReconcileThread?.(threadId, reason)).catch(() => {
+        void Promise.resolve(onReconcileThread?.(threadId)).catch(() => {
           // Reconciliation is best-effort and must not break event handling.
         });
       } catch {
@@ -68,7 +60,7 @@ export function useThreadStallWarnings({
           "Turn may be stalled: Codex has been working for over 10 minutes without a completion or error event.",
         );
         safeMessageActivity();
-        reconcileThread(threadId, "stall");
+        reconcileThread(threadId);
       }
 
       for (const threadId of Object.keys(warnedProcessingStartByThreadRef.current)) {
@@ -85,33 +77,15 @@ export function useThreadStallWarnings({
       }
     };
 
-    const reconcileActiveThread = () => {
-      if (!activeThreadId || !threadStatusById[activeThreadId]?.isProcessing) {
-        return;
-      }
-      reconcileThread(activeThreadId, "focus");
-    };
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") {
-        reconcileActiveThread();
-      }
-    };
-
     checkStalledThreads();
     const interval = window.setInterval(
       checkStalledThreads,
       TURN_STALL_CHECK_INTERVAL_MS,
     );
-    window.addEventListener("focus", reconcileActiveThread);
-    document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
       window.clearInterval(interval);
-      window.removeEventListener("focus", reconcileActiveThread);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [
-    activeThreadId,
     lastActivityAtByThreadRef,
     onReconcileThread,
     pushThreadErrorMessage,

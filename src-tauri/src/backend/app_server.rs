@@ -650,6 +650,10 @@ impl WorkspaceSession {
         removed
     }
 
+    pub(crate) async fn has_active_turn(&self, thread_id: &str) -> bool {
+        self.active_turns.lock().await.contains_key(thread_id)
+    }
+
     pub(crate) async fn wait_for_turn_inactive(
         &self,
         thread_id: &str,

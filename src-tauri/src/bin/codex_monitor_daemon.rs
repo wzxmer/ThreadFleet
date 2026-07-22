@@ -82,8 +82,8 @@ use shared::codex_core::CodexLoginCancelState;
 use shared::process_core::kill_child_process_tree;
 use shared::prompts_core::{self, CustomPromptEntry};
 use shared::session_manager_core::runtime::{
-    SessionSourceRuntimePool, SourceRuntimePurpose, SourceThreadRuntimeBinding,
-    SourceThreadRuntimeBindings,
+    active_execution_runtime_for_thread, SessionSourceRuntimePool, SourceRuntimePurpose,
+    SourceThreadRuntimeBinding, SourceThreadRuntimeBindings,
 };
 use shared::session_manager_core::service::SessionManagerRuntime;
 use shared::{
@@ -1389,10 +1389,33 @@ impl DaemonState {
     }
 
     async fn read_thread(&self, workspace_id: String, thread_id: String) -> Result<Value, String> {
+        let active_session = active_execution_runtime_for_thread(
+            &self.sessions,
+            &self.session_source_runtimes,
+            &self.source_thread_runtimes,
+            &workspace_id,
+            &thread_id,
+        )
+        .await;
+        if let Some(session) = active_session {
+            let response =
+                codex_core::read_thread_with_session_core(&session, workspace_id, thread_id)
+                    .await?;
+            return Ok(codex_core::annotate_thread_read_authority(
+                response,
+                "execution",
+            ));
+        }
+
         let session = self
             .history_runtime_for_thread(&workspace_id, &thread_id)
             .await?;
-        codex_core::read_thread_with_session_core(&session, workspace_id, thread_id).await
+        let response =
+            codex_core::read_thread_with_session_core(&session, workspace_id, thread_id).await?;
+        Ok(codex_core::annotate_thread_read_authority(
+            response,
+            "history-no-active-execution",
+        ))
     }
 
     async fn turn_execution_summary_get(

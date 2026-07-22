@@ -73,6 +73,30 @@ pub(crate) struct SourceRuntimePool<T> {
 
 pub(crate) type SessionSourceRuntimePool = SourceRuntimePool<WorkspaceSession>;
 
+pub(crate) async fn active_execution_runtime_for_thread(
+    sessions: &Mutex<HashMap<String, Arc<WorkspaceSession>>>,
+    source_runtimes: &SessionSourceRuntimePool,
+    source_thread_runtimes: &SourceThreadRuntimeBindings,
+    workspace_id: &str,
+    thread_id: &str,
+) -> Option<Arc<WorkspaceSession>> {
+    let primary_session = sessions.lock().await.get(workspace_id).cloned();
+    if let Some(session) = primary_session {
+        if session.has_active_turn(thread_id).await {
+            return Some(session);
+        }
+    }
+    let binding = source_thread_runtimes.get(workspace_id, thread_id).await?;
+    let key = SourceRuntimeKey::for_purpose(
+        &binding.source.codex_home_path,
+        &binding.workspace.path,
+        SourceRuntimePurpose::Execution,
+    )
+    .ok()?;
+    let session = source_runtimes.get(&key).await?;
+    session.has_active_turn(thread_id).await.then_some(session)
+}
+
 #[derive(Default)]
 pub(crate) struct SourceThreadRuntimeBindings {
     entries: Mutex<HashMap<(String, String), SourceThreadRuntimeBinding>>,

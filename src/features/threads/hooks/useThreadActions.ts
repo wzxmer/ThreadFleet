@@ -21,9 +21,7 @@ import {
   verifySessionThreads as verifySessionThreadsService,
 } from "@services/tauri";
 import { LOCAL_CODEX_WORKSPACE_ID } from "@/features/workspaces/domain/localCodexWorkspace";
-import {
-  getThreadTimestamp,
-} from "@utils/threadItems";
+import { getThreadTimestamp } from "@utils/threadItems";
 import { extractThreadCodexMetadata } from "@threads/utils/threadCodexMetadata";
 import {
   buildThreadSummaryFromThread,
@@ -36,6 +34,7 @@ import {
 } from "@threads/utils/threadNormalize";
 import {
   getParentThreadIdFromThread,
+  getThreadReadAuthority,
   shouldHideSubagentThreadFromSidebar,
 } from "@threads/utils/threadRpc";
 import { saveThreadActivity } from "@threads/utils/threadStorage";
@@ -349,6 +348,24 @@ export function useThreadActions({
           return null;
         }
         if (thread) {
+          const localActiveTurnId =
+            activeTurnIdByThreadRef.current[threadId] ?? null;
+          if (readOnly && localActiveTurnId && !getThreadReadAuthority(response)) {
+            onDebug?.({
+              id: `${Date.now()}-client-thread-read-legacy-active-skipped`,
+              timestamp: Date.now(),
+              source: "client",
+              label: "thread/read active-state hydration skipped",
+              payload: {
+                workspaceId,
+                threadId,
+                reason: "missing-read-authority",
+              },
+            });
+            loadedThreadsRef.current[threadId] = true;
+            loadedThreadRuntimeKeyRef.current[threadId] = requestRuntimeKey;
+            return threadId;
+          }
           if (
             resumeGeneration <
             (resumeAppliedGenerationByThreadRef.current[resumeKey] ?? 0)
@@ -452,8 +469,6 @@ export function useThreadActions({
               payload: { workspaceId, threadId },
             });
           }
-          const localActiveTurnId =
-            activeTurnIdByThreadRef.current[threadId] ?? null;
           if (
             !hydrationPlan.shouldMarkProcessing &&
             localActiveTurnId &&

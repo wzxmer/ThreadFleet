@@ -173,7 +173,7 @@ describe("useThreads UX integration", () => {
     }
   });
 
-  it("reconciles a missed terminal event from history when the window regains focus", async () => {
+  it("does not let window focus reconcile an active turn from history", async () => {
     vi.mocked(readThread).mockResolvedValue({
       result: {
         thread: {
@@ -217,17 +217,16 @@ describe("useThreads UX integration", () => {
       },
     });
 
-    act(() => window.dispatchEvent(new Event("focus")));
-
-    await waitFor(() => {
-      expect(vi.mocked(readThread)).toHaveBeenCalledWith("ws-1", "thread-focus");
-      expect(result.current.threadStatusById["thread-focus"]?.isProcessing).toBe(
-        false,
-      );
-      expect(result.current.turnExecutionSummaryByThread["thread-focus"]?.status).toBe(
-        "completed",
-      );
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await Promise.resolve();
     });
+
+    expect(vi.mocked(readThread)).not.toHaveBeenCalled();
+    expect(result.current.threadStatusById["thread-focus"]?.isProcessing).toBe(true);
+    expect(result.current.turnExecutionSummaryByThread["thread-focus"]?.status).toBe(
+      "active",
+    );
   });
 
   it("hydrates subagent titles discovered while reading parent history", async () => {

@@ -1008,7 +1008,7 @@ export function useThreads({
   }, []);
 
   const reconcileStalledThread = useCallback(
-    async (threadId: string, _reason: "stall" | "focus") => {
+    async (threadId: string) => {
       const workspaceId = findWorkspaceIdForThread(threadId);
       if (!workspaceId) {
         return;
@@ -1030,7 +1030,6 @@ export function useThreads({
   useThreadStallWarnings({
     threadStatusById: state.threadStatusById,
     lastActivityAtByThreadRef: lastTurnActivityAtByThreadRef,
-    activeThreadId,
     onReconcileThread: reconcileStalledThread,
     pushThreadErrorMessage,
     safeMessageActivity,

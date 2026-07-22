@@ -856,6 +856,16 @@ pub(crate) async fn read_thread_with_session_core(
     Ok(response)
 }
 
+pub(crate) fn annotate_thread_read_authority(mut response: Value, authority: &str) -> Value {
+    if let Some(object) = response.as_object_mut() {
+        object.insert(
+            "codexMonitorReadAuthority".to_string(),
+            Value::String(authority.to_string()),
+        );
+    }
+    response
+}
+
 pub(crate) async fn thread_live_subscribe_core(
     sessions: &Mutex<HashMap<String, Arc<WorkspaceSession>>>,
     workspace_id: String,
@@ -1947,6 +1957,19 @@ base_url = "{base_url}"
         assert!(should_inline_image_path_for_codex("/tmp/photo.heic"));
         assert!(should_inline_image_path_for_codex("/tmp/photo.HEIF"));
         assert!(!should_inline_image_path_for_codex("/tmp/photo.png"));
+    }
+
+    #[test]
+    fn thread_read_authority_is_added_without_changing_the_app_server_result() {
+        let response = json!({
+            "id": 7,
+            "result": { "thread": { "id": "thread-1" } }
+        });
+
+        let annotated = annotate_thread_read_authority(response, "execution");
+
+        assert_eq!(annotated["codexMonitorReadAuthority"], "execution");
+        assert_eq!(annotated["result"]["thread"]["id"], "thread-1");
     }
 
     #[test]

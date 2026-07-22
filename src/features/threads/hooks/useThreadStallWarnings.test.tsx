@@ -40,7 +40,7 @@ describe("useThreadStallWarnings", () => {
       "Turn may be stalled: Codex has been working for over 10 minutes without a completion or error event.",
     );
     expect(safeMessageActivity).toHaveBeenCalledTimes(1);
-    expect(onReconcileThread).toHaveBeenCalledWith("thread-1", "stall");
+    expect(onReconcileThread).toHaveBeenCalledWith("thread-1");
 
     vi.advanceTimersByTime(60 * 1000);
 
@@ -76,7 +76,7 @@ describe("useThreadStallWarnings", () => {
     expect(onReconcileThread).not.toHaveBeenCalled();
   });
 
-  it("reconciles the active processing thread on window focus without warning", () => {
+  it("does not reconcile an active processing thread merely because the window regains focus", () => {
     const pushThreadErrorMessage = vi.fn();
     const onReconcileThread = vi.fn();
 
@@ -98,7 +98,6 @@ describe("useThreadStallWarnings", () => {
             lastDurationMs: null,
           },
         },
-        activeThreadId: "thread-1",
         pushThreadErrorMessage,
         safeMessageActivity: vi.fn(),
         onReconcileThread,
@@ -107,8 +106,7 @@ describe("useThreadStallWarnings", () => {
 
     act(() => window.dispatchEvent(new Event("focus")));
 
-    expect(onReconcileThread).toHaveBeenCalledTimes(1);
-    expect(onReconcileThread).toHaveBeenCalledWith("thread-1", "focus");
+    expect(onReconcileThread).not.toHaveBeenCalled();
     expect(pushThreadErrorMessage).not.toHaveBeenCalled();
   });
 

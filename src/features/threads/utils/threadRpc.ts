@@ -324,6 +324,20 @@ function classifyTurnStatus(status: string): TurnStatusKind {
   return "unknown";
 }
 
+export type ThreadReadAuthority = "execution" | "history-no-active-execution";
+
+export function getThreadReadAuthority(response: unknown): ThreadReadAuthority | null {
+  const responseRecord = asRecord(response);
+  const resultRecord = asRecord(responseRecord?.result);
+  const authority = asString(
+    responseRecord?.codexMonitorReadAuthority ??
+      resultRecord?.codexMonitorReadAuthority,
+  );
+  return authority === "execution" || authority === "history-no-active-execution"
+    ? authority
+    : null;
+}
+
 function getTerminalTurnStatus(
   status: string,
 ): ResumedTerminalTurnState["status"] | null {

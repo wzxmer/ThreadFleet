@@ -4,11 +4,25 @@ import {
   getLatestTerminalTurnState,
   getResumedActiveTurnId,
   getResumedTurnState,
+  getThreadReadAuthority,
   isSubagentThreadSource,
   shouldHideSubagentThreadFromSidebar,
 } from "./threadRpc";
 
 describe("threadRpc", () => {
+  it("accepts only explicit CodexMonitor thread-read authority markers", () => {
+    expect(
+      getThreadReadAuthority({ codexMonitorReadAuthority: "execution" }),
+    ).toBe("execution");
+    expect(
+      getThreadReadAuthority({
+        result: { codexMonitorReadAuthority: "history-no-active-execution" },
+      }),
+    ).toBe("history-no-active-execution");
+    expect(getThreadReadAuthority({ codexMonitorReadAuthority: "history" })).toBeNull();
+    expect(getThreadReadAuthority({ result: { thread: { id: "thread-1" } } })).toBeNull();
+  });
+
   it("prefers explicit activeTurnId when present", () => {
     const state = getResumedTurnState({
       id: "thread-1",

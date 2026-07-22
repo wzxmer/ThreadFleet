@@ -203,7 +203,9 @@ These are v2 request methods ThreadFleet currently sends to Codex app-server:
 - `app/list`
 
 Runtime ownership:
-- `thread/list` and read-only `thread/read` use a Provider-neutral session-source history runtime for the target `CODEX_HOME` and workspace.
+- `thread/list` uses a Provider-neutral session-source history runtime for the target `CODEX_HOME` and workspace.
+- Read-only `thread/read` first checks the primary and source-bound execution pools. When the target thread has a tracked active turn, the request uses that owning execution runtime and returns `codexMonitorReadAuthority: "execution"`. Otherwise it uses the history runtime and returns `codexMonitorReadAuthority: "history-no-active-execution"`.
+- The frontend never runs active-thread reconciliation merely because the window regains focus. Stall reconciliation remains bounded to the inactivity threshold. A legacy daemon response without `codexMonitorReadAuthority` cannot terminate or replace a locally active turn.
 - `thread/resume` and turn execution use the execution runtime selected by the active Provider. History and execution runtimes have distinct pool identities, so a custom Provider cannot replace or hide the local history index.
 - When an active ThreadFleet Provider profile exists, `thread/start` and `thread/resume` explicitly send `modelProvider: "codex_monitor"`; this rebinds threads created under an older Provider instead of allowing persisted `model_provider: "openai"` metadata to route turns to the official endpoint.
 

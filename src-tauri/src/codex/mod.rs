@@ -259,6 +259,24 @@ pub(crate) async fn read_thread(
         .await;
     }
 
+    let active_session =
+        crate::shared::session_manager_core::runtime::active_execution_runtime_for_thread(
+            &state.sessions,
+            &state.session_source_runtimes,
+            &state.source_thread_runtimes,
+            &workspace_id,
+            &thread_id,
+        )
+        .await;
+    if let Some(session) = active_session {
+        let response =
+            codex_core::read_thread_with_session_core(&session, workspace_id, thread_id).await?;
+        return Ok(codex_core::annotate_thread_read_authority(
+            response,
+            "execution",
+        ));
+    }
+
     let session = crate::session_manager::history_runtime_for_thread(
         &workspace_id,
         &thread_id,
@@ -266,7 +284,12 @@ pub(crate) async fn read_thread(
         app.clone(),
     )
     .await?;
-    codex_core::read_thread_with_session_core(&session, workspace_id, thread_id).await
+    let response =
+        codex_core::read_thread_with_session_core(&session, workspace_id, thread_id).await?;
+    Ok(codex_core::annotate_thread_read_authority(
+        response,
+        "history-no-active-execution",
+    ))
 }
 
 #[tauri::command]

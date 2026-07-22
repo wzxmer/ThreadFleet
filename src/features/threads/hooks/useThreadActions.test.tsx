@@ -796,6 +796,84 @@ describe("useThreadActions", () => {
     });
   });
 
+  it("does not let an unmarked read response terminate a local active turn", async () => {
+    vi.mocked(readThread).mockResolvedValue({
+      result: {
+        thread: {
+          id: "thread-1",
+          turns: [{ id: "turn-live", status: "interrupted", items: [] }],
+        },
+      },
+    });
+    vi.mocked(buildItemsFromThread).mockReturnValue([]);
+
+    const { result, dispatch } = renderActions({
+      activeTurnIdByThread: { "thread-1": "turn-live" },
+      threadStatusById: {
+        "thread-1": {
+          isProcessing: true,
+          hasUnread: false,
+          isReviewing: false,
+          processingStartedAt: 10,
+          lastDurationMs: null,
+        },
+      },
+    });
+
+    await act(async () => {
+      await result.current.readThreadForWorkspace("ws-1", "thread-1", true, false);
+    });
+
+    expect(dispatch).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "completeTurnExecution" }),
+    );
+    expect(dispatch).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "markProcessing", isProcessing: false }),
+    );
+    expect(dispatch).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "setThreadItems" }),
+    );
+  });
+
+  it("accepts a terminal read after the backend confirms no active execution runtime", async () => {
+    vi.mocked(readThread).mockResolvedValue({
+      codexMonitorReadAuthority: "history-no-active-execution",
+      result: {
+        thread: {
+          id: "thread-1",
+          turns: [{ id: "turn-live", status: "interrupted", items: [] }],
+        },
+      },
+    });
+    vi.mocked(buildItemsFromThread).mockReturnValue([]);
+    vi.mocked(isReviewingFromThread).mockReturnValue(false);
+
+    const { result, dispatch } = renderActions({
+      activeTurnIdByThread: { "thread-1": "turn-live" },
+      threadStatusById: {
+        "thread-1": {
+          isProcessing: true,
+          hasUnread: false,
+          isReviewing: false,
+          processingStartedAt: 10,
+          lastDurationMs: null,
+        },
+      },
+    });
+
+    await act(async () => {
+      await result.current.readThreadForWorkspace("ws-1", "thread-1", true, false);
+    });
+
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "completeTurnExecution",
+      threadId: "thread-1",
+      turnId: "turn-live",
+      status: "interrupted",
+      timestamp: expect.any(Number),
+    });
+  });
+
   it("does not overwrite live token usage during async restoration", async () => {
     let resolveUsage!: (value: Record<string, unknown> | null) => void;
     vi.mocked(getThreadTokenUsage).mockReturnValue(
