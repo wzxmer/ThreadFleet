@@ -131,7 +131,7 @@ export function WorktreeSection({
             totalRoots: totalWorktreeRoots,
           } = getThreadRows(
             worktreeThreads,
-            searchExpanded,
+            true,
             worktree.id,
             getPinTimestamp,
             pinnedThreadsVersion,

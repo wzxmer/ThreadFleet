@@ -687,7 +687,7 @@ function SidebarWorkspaceEntry({
     totalRoots: totalThreadRoots,
   } = getThreadRows(
     threads,
-    searchExpanded,
+    true,
     workspace.id,
     getPinTimestamp,
     pinnedThreadsVersion,

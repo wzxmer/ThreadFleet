@@ -1,10 +1,11 @@
-import { useMemo, type MouseEvent } from "react";
+import { useEffect, useMemo, useState, type MouseEvent } from "react";
 
 import type { ThreadSummary } from "../../../types";
 import type { ThreadStatusById } from "../../../utils/threadStatus";
 import { useI18n } from "@/features/i18n/I18nProvider";
 import { ThreadRow } from "./ThreadRow";
 import { buildThreadRowVisibility } from "./threadRowVisibility";
+import { countRootRows, splitRowsByRoot } from "./threadSearchUtils";
 import { COLLAPSED_THREAD_ROOT_LIMIT } from "../hooks/useThreadRows";
 import { useSubagentAutoCollapse } from "../hooks/useSubagentAutoCollapse";
 
@@ -61,13 +62,18 @@ export function ThreadList({
   getThreadTime,
   getThreadArgsBadge,
   isThreadPinned,
-  onToggleExpanded,
   onLoadOlderThreads,
   onSelectThread,
   onShowThreadMenu,
   onToggleThreadPin,
 }: ThreadListProps) {
   const { t } = useI18n();
+  const [visibleRootLimit, setVisibleRootLimit] = useState(
+    COLLAPSED_THREAD_ROOT_LIMIT,
+  );
+  useEffect(() => {
+    setVisibleRootLimit(COLLAPSED_THREAD_ROOT_LIMIT);
+  }, [workspaceId]);
   const indentUnit = nested ? 10 : 14;
   const pinnedRowsWithWorkspace = useMemo(
     () => pinnedRows.map((row) => ({ ...row, workspaceId })),
@@ -99,11 +105,42 @@ export function ThreadList({
   const unpinnedVisibility = useMemo(
     () =>
       buildThreadRowVisibility(
-        unpinnedRows,
+        splitRowsByRoot(unpinnedRows)
+          .slice(
+            0,
+            Math.max(
+              0,
+              (isExpanded ? totalThreadRoots : visibleRootLimit) -
+                countRootRows(pinnedRows),
+            ),
+          )
+          .flatMap((group) => group.rows),
         (row) => unpinnedSubagentCollapse.isCollapsed(workspaceId, row.thread.id),
       ),
-    [unpinnedRows, unpinnedSubagentCollapse, workspaceId],
+    [
+      isExpanded,
+      pinnedRows,
+      totalThreadRoots,
+      unpinnedRows,
+      unpinnedSubagentCollapse,
+      visibleRootLimit,
+      workspaceId,
+    ],
   );
+
+  const pinnedRootCount = countRootRows(pinnedRows);
+  const visibleRootCount = pinnedRootCount + countRootRows(unpinnedVisibility.visibleRows);
+  const hasMoreRoots = totalThreadRoots > visibleRootCount;
+  const canCollapse =
+    !isExpanded && visibleRootLimit > COLLAPSED_THREAD_ROOT_LIMIT && !hasMoreRoots;
+
+  const handleShowMore = () => {
+    setVisibleRootLimit((currentLimit) => {
+      const effectiveLimit = Math.max(currentLimit, visibleRootCount);
+      const nextLimit = effectiveLimit < 10 ? 10 : effectiveLimit + 10;
+      return Math.min(totalThreadRoots, nextLimit);
+    });
+  };
 
   return (
     <div className={`thread-list${nested ? " thread-list-nested" : ""}`}>
@@ -154,20 +191,24 @@ export function ThreadList({
           onToggleSubagents={unpinnedSubagentCollapse.toggle}
         />
       ))}
-      {showExpandToggle && totalThreadRoots > COLLAPSED_THREAD_ROOT_LIMIT && (
+      {showExpandToggle && (hasMoreRoots || canCollapse) && (
         <button
           className="thread-more"
           onClick={(event) => {
             event.stopPropagation();
-            onToggleExpanded(workspaceId);
+            if (hasMoreRoots) {
+              handleShowMore();
+            } else {
+              setVisibleRootLimit(COLLAPSED_THREAD_ROOT_LIMIT);
+            }
           }}
         >
-          {isExpanded ? t("sidebar.collapseList") : t("sidebar.showMore")}
+          {hasMoreRoots ? t("sidebar.showMore") : t("sidebar.collapseList")}
         </button>
       )}
       {showLoadOlder &&
         nextCursor &&
-        (isExpanded || totalThreadRoots <= COLLAPSED_THREAD_ROOT_LIMIT) && (
+        !hasMoreRoots && (
           <button
             className="thread-more"
             onClick={(event) => {

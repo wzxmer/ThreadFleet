@@ -81,19 +81,68 @@ describe("ThreadList", () => {
     );
   });
 
-  it("shows the more button and toggles expanded", () => {
-    const onToggleExpanded = vi.fn();
-    render(
+  it("shows 10 roots after the first click and 10 more after each later click", () => {
+    const rows = Array.from({ length: 25 }, (_, index) => ({
+      thread: {
+        id: `thread-${index}`,
+        name: `Thread ${index}`,
+        updatedAt: 1000 - index,
+      },
+      depth: 0,
+    }));
+    const { container } = render(
       <ThreadList
         {...baseProps}
-        totalThreadRoots={7}
-        onToggleExpanded={onToggleExpanded}
+        unpinnedRows={rows}
+        totalThreadRoots={rows.length}
       />,
     );
 
-    const moreButton = screen.getByRole("button", { name: "更多..." });
+    expect(container.querySelectorAll(".thread-row")).toHaveLength(6);
+
+    let moreButton = screen.getByRole("button", { name: "更多..." });
     fireEvent.click(moreButton);
-    expect(onToggleExpanded).toHaveBeenCalledWith("ws-1");
+    expect(container.querySelectorAll(".thread-row")).toHaveLength(10);
+
+    moreButton = screen.getByRole("button", { name: "更多..." });
+    fireEvent.click(moreButton);
+    expect(container.querySelectorAll(".thread-row")).toHaveLength(20);
+
+    moreButton = screen.getByRole("button", { name: "更多..." });
+    fireEvent.click(moreButton);
+    expect(container.querySelectorAll(".thread-row")).toHaveLength(25);
+    expect(screen.getByRole("button", { name: "收起" })).toBeTruthy();
+  });
+
+  it("counts pinned roots toward each visible batch", () => {
+    const pinnedRows = Array.from({ length: 2 }, (_, index) => ({
+      thread: {
+        id: `pinned-${index}`,
+        name: `Pinned ${index}`,
+        updatedAt: 2000 - index,
+      },
+      depth: 0,
+    }));
+    const unpinnedRows = Array.from({ length: 18 }, (_, index) => ({
+      thread: {
+        id: `unpinned-${index}`,
+        name: `Unpinned ${index}`,
+        updatedAt: 1000 - index,
+      },
+      depth: 0,
+    }));
+    const { container } = render(
+      <ThreadList
+        {...baseProps}
+        pinnedRows={pinnedRows}
+        unpinnedRows={unpinnedRows}
+        totalThreadRoots={pinnedRows.length + unpinnedRows.length}
+      />,
+    );
+
+    expect(container.querySelectorAll(".thread-row")).toHaveLength(6);
+    fireEvent.click(screen.getByRole("button", { name: "更多..." }));
+    expect(container.querySelectorAll(".thread-row")).toHaveLength(10);
   });
 
   it("loads older threads when a cursor is available", () => {
