@@ -1700,6 +1700,82 @@ describe("useThreadActions", () => {
     );
   });
 
+  it("falls back to the current configured source when the runtime source is stale", async () => {
+    vi.mocked(listThreads).mockResolvedValue({
+      result: { data: [], nextCursor: null },
+    });
+    const recovered: ManagedSession = {
+      key: "source-a:thread-recovered",
+      sourceId: "source-a",
+      threadId: "thread-recovered",
+      sourceKind: "vscode",
+      cwd: "/tmp/codex",
+      title: "Recovered from current source",
+      preview: null,
+      createdAt: 4000,
+      updatedAt: 5000,
+      archivedAt: null,
+      isArchived: false,
+      parentThreadId: null,
+      isSubagent: false,
+      subagentNickname: null,
+      subagentRole: null,
+      projectExists: true,
+      fileStatus: "mapped",
+      fileConfidence: "exact",
+    };
+    vi.mocked(scanManagedSessions).mockResolvedValue({
+      requestId: "scan",
+      totalSessions: 1,
+      diagnosticCount: 0,
+      cancelled: false,
+      sourceSnapshots: [],
+    });
+    vi.mocked(fetchManagedSessionsPage).mockResolvedValue({
+      requestId: "scan",
+      items: [recovered],
+      diagnostics: [],
+      total: 1,
+      nextOffset: null,
+    });
+    vi.mocked(getThreadTimestamp).mockImplementation((thread) =>
+      Number(thread.updatedAt ?? thread.updated_at ?? 0),
+    );
+    vi.mocked(getThreadCreatedTimestamp).mockImplementation((thread) =>
+      Number(thread.createdAt ?? thread.created_at ?? 0),
+    );
+
+    const { result, dispatch } = renderActions({
+      getThreadListRuntimeContext: () => ({
+        sourceId: "source-stale-runtime-id",
+        runtimeGeneration: 3,
+      }),
+    });
+
+    await act(async () => {
+      await result.current.listThreadsForWorkspace(workspace);
+    });
+
+    expect(scanManagedSessions).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceIds: ["source-a"],
+        includeArchived: false,
+      }),
+    );
+    expect(dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "setThreads",
+        workspaceId: "ws-1",
+        threads: [
+          expect.objectContaining({
+            id: "thread-recovered",
+            name: "Recovered from current source",
+          }),
+        ],
+      }),
+    );
+  });
+
   it("marks an uncovered thread stale until source verification completes", async () => {
     vi.mocked(listThreads).mockResolvedValue({
       result: { data: [], nextCursor: null },
@@ -1947,9 +2023,13 @@ describe("useThreadActions", () => {
       }),
     });
     let firstRequest!: Promise<void>;
-    await act(async () => {
+    act(() => {
       firstRequest = result.current.listThreadsForWorkspace(workspace);
-      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(listThreads).toHaveBeenCalledTimes(1);
+    });
+    await act(async () => {
       await result.current.listThreadsForWorkspace(workspace);
     });
     resolveFirst({
@@ -2078,6 +2158,32 @@ describe("useThreadActions", () => {
   });
 
   it("does not carry a verified snapshot across a session source change", async () => {
+    vi.mocked(listSessionSources).mockResolvedValue([
+      {
+        id: "source-a",
+        name: "Source A",
+        codexHomePath: "/tmp/codex-a",
+        enabled: true,
+        isCurrent: true,
+        isDefault: true,
+        discoveredAt: 0,
+        lastScanAt: null,
+        status: "ready",
+        error: null,
+      },
+      {
+        id: "source-b",
+        name: "Source B",
+        codexHomePath: "/tmp/codex-b",
+        enabled: true,
+        isCurrent: false,
+        isDefault: false,
+        discoveredAt: 0,
+        lastScanAt: null,
+        status: "ready",
+        error: null,
+      },
+    ]);
     vi.mocked(listThreads)
       .mockResolvedValueOnce({
         result: {

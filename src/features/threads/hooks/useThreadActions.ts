@@ -735,13 +735,20 @@ export function useThreadActions({
 
   const resolveThreadListSourceId = useCallback(
     async (runtimeContext: ThreadListRuntimeContext) => {
-      if (runtimeContext.sourceId) {
-        return runtimeContext.sourceId;
-      }
       try {
         const sources = await listSessionSourcesService();
+        const runtimeSource = runtimeContext.sourceId
+          ? sources.find(
+              (source) => source.enabled && source.id === runtimeContext.sourceId,
+            )
+          : null;
+        if (runtimeSource) {
+          return runtimeSource.id;
+        }
         return (
           sources.find((source) => source.enabled && source.isCurrent)?.id ??
+          sources.find((source) => source.enabled && source.isDefault)?.id ??
+          sources.find((source) => source.enabled)?.id ??
           null
         );
       } catch (error) {
@@ -807,6 +814,9 @@ export function useThreadActions({
       const currentRuntime = getThreadListRuntimeContext();
       if (currentRuntime.runtimeGeneration !== runtimeContext.runtimeGeneration) {
         return false;
+      }
+      if (runtimeContext.sourceId) {
+        return currentRuntime.sourceId === runtimeContext.sourceId;
       }
       return !currentRuntime.sourceId || currentRuntime.sourceId === sourceId;
     },
