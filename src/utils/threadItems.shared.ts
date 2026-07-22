@@ -63,8 +63,26 @@ export function sameMessageImages(
   const rightImages = right ?? [];
   return (
     leftImages.length === rightImages.length &&
-    leftImages.every((image, index) => image === rightImages[index])
+    leftImages.every(
+      (image, index) =>
+        normalizeMessageImageIdentity(image) ===
+        normalizeMessageImageIdentity(rightImages[index] ?? ""),
+    )
   );
+}
+
+function normalizeMessageImageIdentity(image: string) {
+  const trimmed = image.trim();
+  if (
+    trimmed.startsWith("data:") ||
+    trimmed.startsWith("http://") ||
+    trimmed.startsWith("https://")
+  ) {
+    return trimmed;
+  }
+  const windowsPath = /^[a-z]:[\\/]/i.test(trimmed) || /^\\\\/.test(trimmed);
+  const normalized = trimmed.replace(/\\/g, "/").replace(/\/{2,}/g, "/");
+  return windowsPath ? normalized.toLowerCase() : normalized;
 }
 
 export function sameMessageAttachments(

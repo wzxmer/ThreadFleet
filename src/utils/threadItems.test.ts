@@ -635,6 +635,45 @@ describe("threadItems", () => {
     expect(next[0]).toEqual(incoming);
   });
 
+  it("replaces image echoes when equivalent Windows paths use different case and separators", () => {
+    const local: ConversationItem = {
+      id: "local-user-windows-image",
+      kind: "message",
+      role: "user",
+      text: "看这张图",
+      images: ["C:\\Users\\Lenovo\\.codex\\attachments\\IMAGE.PNG"],
+    };
+    const incoming: ConversationItem = {
+      id: "server-user-windows-image",
+      kind: "message",
+      role: "user",
+      text: "看这张图",
+      images: ["c:/users/lenovo/.codex/attachments/image.png"],
+    };
+
+    expect(upsertItem([local], incoming)).toEqual([incoming]);
+    expect(mergeThreadItems([incoming], [local])).toEqual([incoming]);
+  });
+
+  it("keeps same-text user messages when their image identities differ", () => {
+    const local: ConversationItem = {
+      id: "local-user-image-a",
+      kind: "message",
+      role: "user",
+      text: "看这张图",
+      images: ["C:/tmp/image-a.png"],
+    };
+    const incoming: ConversationItem = {
+      id: "server-user-image-b",
+      kind: "message",
+      role: "user",
+      text: "看这张图",
+      images: ["C:/tmp/image-b.png"],
+    };
+
+    expect(mergeThreadItems([incoming], [local])).toEqual([incoming, local]);
+  });
+
   it("replaces matching local user messages when file attachment echoes as a name", () => {
     const local: ConversationItem = {
       id: "local-user-attachment",

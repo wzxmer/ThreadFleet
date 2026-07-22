@@ -1,4 +1,5 @@
 export type { PrepareThreadItemsOptions } from "./threadItems.shared";
+export { sameMessageAttachments, sameMessageImages } from "./threadItems.shared";
 export {
   buildCollabActualBinding,
   buildCollabExecutionBindingObservation,

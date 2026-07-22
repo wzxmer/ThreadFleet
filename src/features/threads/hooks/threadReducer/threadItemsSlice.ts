@@ -1,6 +1,11 @@
 import type { ConversationItem } from "@/types";
-import { normalizeItem, prepareThreadItems, upsertItem } from "@utils/threadItems";
-import { attachmentDisplayName } from "@utils/attachments";
+import {
+  normalizeItem,
+  prepareThreadItems,
+  sameMessageAttachments,
+  sameMessageImages,
+  upsertItem,
+} from "@utils/threadItems";
 import type { ThreadAction, ThreadState } from "../useThreadsReducer";
 import {
   addSummaryBoundary,
@@ -14,28 +19,6 @@ import {
   mergeStreamingText,
   prefersUpdatedSort,
 } from "./common";
-
-function sameMessageImages(left?: string[], right?: string[]) {
-  const leftImages = left ?? [];
-  const rightImages = right ?? [];
-  return (
-    leftImages.length === rightImages.length &&
-    leftImages.every((image, index) => image === rightImages[index])
-  );
-}
-
-function sameMessageAttachments(left?: string[], right?: string[]) {
-  const leftAttachments = left ?? [];
-  const rightAttachments = right ?? [];
-  return (
-    leftAttachments.length === rightAttachments.length &&
-    leftAttachments.every(
-      (attachment, index) =>
-        attachmentDisplayName(attachment) ===
-        attachmentDisplayName(rightAttachments[index] ?? ""),
-    )
-  );
-}
 
 function clearInterruptedThread(
   state: ThreadState,

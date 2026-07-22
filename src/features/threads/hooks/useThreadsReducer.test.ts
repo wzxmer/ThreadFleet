@@ -1350,6 +1350,56 @@ describe("threadReducer", () => {
     expect(echoed.pendingUserMessageReplacementByThread["thread-1"]).toBeUndefined();
   });
 
+  it("replaces edited image messages when Windows path formatting changes", () => {
+    const base = threadReducer(
+      {
+        ...initialState,
+        itemsByThread: {
+          "thread-1": [
+            {
+              id: "msg-user-image-1",
+              kind: "message",
+              role: "user",
+              text: "old text",
+              images: ["C:\\Temp\\IMAGE.PNG"],
+            },
+          ],
+        },
+      },
+      {
+        type: "upsertItem",
+        workspaceId: "ws-1",
+        threadId: "thread-1",
+        replaceExisting: true,
+        item: {
+          id: "msg-user-image-1",
+          kind: "message",
+          role: "user",
+          text: "edited text",
+          images: ["C:\\Temp\\IMAGE.PNG"],
+        },
+      },
+    );
+
+    const echoed = threadReducer(base, {
+      type: "upsertItem",
+      workspaceId: "ws-1",
+      threadId: "thread-1",
+      item: {
+        id: "server-user-image-2",
+        kind: "message",
+        role: "user",
+        text: "edited text",
+        images: ["c:/temp/image.png"],
+      },
+    });
+
+    expect(echoed.itemsByThread["thread-1"]?.map((item) => item.id)).toEqual([
+      "server-user-image-2",
+    ]);
+    expect(echoed.pendingUserMessageReplacementByThread["thread-1"]).toBeUndefined();
+  });
+
   it("replaces edited user messages when file attachments echo as names", () => {
     const base = threadReducer(
       {
