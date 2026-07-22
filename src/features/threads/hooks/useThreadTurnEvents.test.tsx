@@ -499,6 +499,127 @@ describe("useThreadTurnEvents", () => {
     nowSpy.mockRestore();
   });
 
+  it("records fallback terminal status as thread activity", () => {
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(1_700_000_124_000);
+    const { result, dispatch, recordThreadActivity } = makeOptions();
+
+    act(() => {
+      result.current.onTurnStarted("ws-1", "thread-1", "turn-1");
+      result.current.onThreadStatusChanged("ws-1", "thread-1", { type: "idle" });
+    });
+
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "setThreadTimestamp",
+      workspaceId: "ws-1",
+      threadId: "thread-1",
+      timestamp: 1_700_000_124_000,
+    });
+    expect(recordThreadActivity).toHaveBeenCalledWith(
+      "ws-1",
+      "thread-1",
+      1_700_000_124_000,
+    );
+    nowSpy.mockRestore();
+  });
+
+  it.each([
+    ["interrupted", "interrupted"],
+    ["system error", "system_error"],
+    ["not loaded", "notLoaded"],
+  ])("records %s terminal status as thread activity", (_label, statusType) => {
+    const { result, recordThreadActivity } = makeOptions();
+
+    act(() => {
+      result.current.onTurnStarted("ws-1", "thread-1", "turn-1");
+      result.current.onThreadStatusChanged("ws-1", "thread-1", {
+        type: statusType,
+      });
+    });
+
+    expect(recordThreadActivity).toHaveBeenCalledWith(
+      "ws-1",
+      "thread-1",
+      expect.any(Number),
+    );
+  });
+
+  it("finalizes terminal activity once when completion is followed by idle", () => {
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(1_700_000_125_000);
+    const { result, dispatch, recordThreadActivity } = makeOptions();
+
+    act(() => {
+      result.current.onTurnStarted("ws-1", "thread-1", "turn-1");
+      result.current.onTurnCompleted("ws-1", "thread-1", "turn-1");
+      result.current.onThreadStatusChanged("ws-1", "thread-1", { type: "idle" });
+    });
+
+    expect(recordThreadActivity).toHaveBeenCalledTimes(1);
+    expect(
+      dispatch.mock.calls.filter(
+        ([action]) => action.type === "setThreadTimestamp" && action.threadId === "thread-1",
+      ),
+    ).toHaveLength(1);
+    nowSpy.mockRestore();
+  });
+
+  it("records a new status-only lifecycle after the previous turn was finalized", () => {
+    const { result, dispatch, recordThreadActivity } = makeOptions();
+
+    act(() => {
+      result.current.onTurnStarted("ws-1", "thread-1", "turn-1");
+      result.current.onTurnCompleted("ws-1", "thread-1", "turn-1");
+      result.current.onThreadStatusChanged("ws-1", "thread-1", { type: "active" });
+      result.current.onThreadStatusChanged("ws-1", "thread-1", { type: "idle" });
+    });
+
+    expect(recordThreadActivity).toHaveBeenCalledTimes(2);
+    expect(
+      dispatch.mock.calls.filter(
+        ([action]) =>
+          action.type === "completeTurnExecution" && action.turnId === "turn-1",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("does not record activity for an isolated idle status", () => {
+    const { result, dispatch, recordThreadActivity } = makeOptions();
+
+    act(() => {
+      result.current.onThreadStatusChanged("ws-1", "thread-1", { type: "idle" });
+    });
+
+    expect(recordThreadActivity).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "setThreadTimestamp",
+        workspaceId: "ws-1",
+        threadId: "thread-1",
+      }),
+    );
+  });
+
+  it("does not finalize idle status while a retry continuation is pending", () => {
+    const { result, dispatch, recordThreadActivity } = makeOptions();
+
+    act(() => {
+      result.current.onTurnStarted("ws-1", "thread-1", "turn-1");
+      result.current.onTurnError("ws-1", "thread-1", "turn-1", {
+        message: "retrying",
+        willRetry: true,
+      });
+      result.current.onThreadStatusChanged("ws-1", "thread-1", { type: "idle" });
+    });
+
+    expect(recordThreadActivity).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "setThreadTimestamp",
+        workspaceId: "ws-1",
+        threadId: "thread-1",
+      }),
+    );
+  });
+
   it("ignores turn completed events for stale turns", () => {
     const { result, markProcessing, setActiveTurnId } = makeOptions({
       activeTurnByThread: {
@@ -644,9 +765,11 @@ describe("useThreadTurnEvents", () => {
   it("adds a visible error when an active turn closes unexpectedly", () => {
     const {
       result,
+      dispatch,
       markProcessing,
       setActiveTurnId,
       pushThreadErrorMessage,
+      recordThreadActivity,
       safeMessageActivity,
     } = makeOptions();
 
@@ -663,6 +786,18 @@ describe("useThreadTurnEvents", () => {
       "thread-1",
       "Turn failed: Codex app-server stopped unexpectedly.",
       "turn-1",
+    );
+    expect(dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "setThreadTimestamp",
+        workspaceId: "ws-1",
+        threadId: "thread-1",
+      }),
+    );
+    expect(recordThreadActivity).toHaveBeenCalledWith(
+      "ws-1",
+      "thread-1",
+      expect.any(Number),
     );
     expect(safeMessageActivity).toHaveBeenCalled();
   });
@@ -892,6 +1027,7 @@ describe("useThreadTurnEvents", () => {
       markReviewing,
       setActiveTurnId,
       pushThreadErrorMessage,
+      recordThreadActivity,
       safeMessageActivity,
     } = makeOptions();
 
@@ -914,6 +1050,11 @@ describe("useThreadTurnEvents", () => {
       "thread-1",
       "Turn failed: boom",
       "turn-1",
+    );
+    expect(recordThreadActivity).toHaveBeenCalledWith(
+      "ws-1",
+      "thread-1",
+      expect.any(Number),
     );
     expect(safeMessageActivity).toHaveBeenCalled();
   });

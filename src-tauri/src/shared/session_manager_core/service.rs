@@ -21,8 +21,8 @@ use crate::shared::session_manager_core::ledger::{
     apply_archive_ledger, record_confirmed_archive_time, remove_archive_times,
 };
 use crate::shared::session_manager_core::scanner::{
-    scan_session_source, scan_session_sources, MultiSourceSessionScanResult,
-    SourceSessionScanResult,
+    scan_session_source, scan_session_sources, scan_session_sources_with_archive_mode,
+    MultiSourceSessionScanResult, SourceSessionScanResult,
 };
 use crate::shared::session_manager_core::search::{
     search_scan_results, SearchCacheKey, SearchDocument,
@@ -578,6 +578,7 @@ pub(crate) async fn scan_managed_sessions_core(
     if request_id.is_empty() {
         return Err("Session scan request id is required".to_string());
     }
+    let include_archived = request.include_archived.unwrap_or(true);
     runtime.cancelled_requests.lock().await.remove(&request_id);
     let requested_sources: HashSet<&str> = request.source_ids.iter().map(String::as_str).collect();
     let sources = app_settings
@@ -596,13 +597,15 @@ pub(crate) async fn scan_managed_sessions_core(
         .map(|source| source.id.clone())
         .collect::<Vec<_>>();
     let mut source_generations = HashMap::with_capacity(source_ids.len());
-    for source_id in &source_ids {
-        source_generations.insert(
-            source_id.clone(),
-            reserve_source_generation(runtime, source_id).await,
-        );
+    if include_archived {
+        for source_id in &source_ids {
+            source_generations.insert(
+                source_id.clone(),
+                reserve_source_generation(runtime, source_id).await,
+            );
+        }
     }
-    let mut result = scan_session_sources(sources, 4).await;
+    let mut result = scan_session_sources_with_archive_mode(sources, 4, include_archived).await;
     let snapshot_result = result.clone();
     if let Some(path) = runtime.archive_ledger_path.as_deref() {
         let _ledger_guard = runtime.archive_ledger_lock.lock().await;
@@ -629,6 +632,9 @@ pub(crate) async fn scan_managed_sessions_core(
     let scanned_at = current_time_ms();
     let mut source_snapshots = Vec::with_capacity(source_ids.len());
     for source_id in source_ids {
+        if !include_archived {
+            continue;
+        }
         let source_scan = SourceSessionScanResult {
             source_id: source_id.clone(),
             sessions: snapshot_result
@@ -666,7 +672,9 @@ pub(crate) async fn scan_managed_sessions_core(
         cancelled: false,
         source_snapshots,
     };
-    *runtime.latest_scan.lock().await = Some(result.clone());
+    if include_archived {
+        *runtime.latest_scan.lock().await = Some(result.clone());
+    }
     runtime.scans.lock().await.insert(request_id, result);
     Ok(summary)
 }
@@ -907,12 +915,10 @@ pub(crate) async fn cancel_session_task_core(
     if request_id.is_empty() {
         return Err("Session task request id is required".to_string());
     }
-    runtime
-        .cancelled_requests
-        .lock()
-        .await
-        .insert(request_id.clone());
-    runtime.scans.lock().await.remove(&request_id);
+    let completed_scan_removed = runtime.scans.lock().await.remove(&request_id).is_some();
+    if !completed_scan_removed {
+        runtime.cancelled_requests.lock().await.insert(request_id);
+    }
     Ok(())
 }
 
@@ -1644,6 +1650,7 @@ mod tests {
                 SessionScanRequest {
                     request_id: "delete-attachment-scan".to_string(),
                     source_ids: vec![sources[0].id.clone()],
+                    include_archived: None,
                 },
                 &settings,
                 &runtime,
@@ -1739,6 +1746,7 @@ mod tests {
                 SessionScanRequest {
                     request_id: "scan-a".to_string(),
                     source_ids: vec![sources[0].id.clone()],
+                    include_archived: None,
                 },
                 &settings,
                 &runtime,
@@ -1838,6 +1846,7 @@ mod tests {
             cancel_session_task_core("scan-a".to_string(), &runtime)
                 .await
                 .unwrap();
+            assert!(!runtime.cancelled_requests.lock().await.contains("scan-a"));
             assert!(fetch_managed_sessions_page_core(
                 ManagedSessionPageRequest {
                     request_id: "scan-a".to_string(),
@@ -1878,7 +1887,7 @@ mod tests {
                 &settings_path,
             ).await.unwrap();
             scan_managed_sessions_core(
-                SessionScanRequest { request_id: "resume-scan".to_string(), source_ids: vec![sources[0].id.clone()] },
+                SessionScanRequest { request_id: "resume-scan".to_string(), source_ids: vec![sources[0].id.clone()], include_archived: None },
                 &settings,
                 &runtime,
             ).await.unwrap();
@@ -1934,6 +1943,7 @@ mod tests {
                 SessionScanRequest {
                     request_id: "archive-scan".to_string(),
                     source_ids: source_ids.clone(),
+                    include_archived: None,
                 },
                 &settings,
                 &runtime,
@@ -2051,6 +2061,7 @@ mod tests {
                 SessionScanRequest {
                     request_id: "legacy-scan-a".to_string(),
                     source_ids: vec![source_id.clone()],
+                    include_archived: None,
                 },
                 &settings,
                 &runtime,
@@ -2073,6 +2084,7 @@ mod tests {
                 SessionScanRequest {
                     request_id: "legacy-scan-b".to_string(),
                     source_ids: vec![source_id.clone()],
+                    include_archived: None,
                 },
                 &settings,
                 &runtime,

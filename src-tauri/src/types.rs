@@ -160,6 +160,8 @@ pub(crate) struct SessionScanRequest {
     pub(crate) request_id: String,
     #[serde(default)]
     pub(crate) source_ids: Vec<String>,
+    #[serde(default)]
+    pub(crate) include_archived: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]

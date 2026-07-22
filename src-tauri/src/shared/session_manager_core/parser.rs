@@ -157,8 +157,24 @@ fn parse_source_kind(source: Option<&Value>, thread_source: Option<&str>) -> Opt
     if let Some(source) = source.and_then(Value::as_str) {
         return non_empty(source);
     }
+    if let Some(subagent) = source
+        .and_then(Value::as_object)
+        .and_then(|value| value.get("subagent"))
+        .and_then(Value::as_object)
+    {
+        if subagent.contains_key("thread_spawn") {
+            return Some("subAgentThreadSpawn".to_string());
+        }
+        if subagent.contains_key("review") {
+            return Some("subAgentReview".to_string());
+        }
+        if subagent.contains_key("compact") {
+            return Some("subAgentCompact".to_string());
+        }
+        return Some("subAgent".to_string());
+    }
     if source.and_then(Value::as_object).is_some() {
-        return Some("subagent".to_string());
+        return Some("unknown".to_string());
     }
     thread_source.and_then(non_empty)
 }
@@ -232,9 +248,32 @@ mod tests {
         .unwrap();
 
         assert!(parsed.is_subagent);
+        assert_eq!(parsed.source_kind.as_deref(), Some("subAgentThreadSpawn"));
         assert_eq!(parsed.parent_thread_id.as_deref(), Some("thread-parent"));
         assert_eq!(parsed.subagent_nickname.as_deref(), Some("Gauss"));
         assert_eq!(parsed.subagent_role.as_deref(), Some("explorer"));
+    }
+
+    #[test]
+    fn preserves_explicit_visible_subagent_source_kinds() {
+        for (source_key, expected) in [("review", "subAgentReview"), ("compact", "subAgentCompact")]
+        {
+            let parsed = parse_session_meta_value(&json!({
+                "type": "session_meta",
+                "payload": {
+                    "id": format!("thread-{source_key}"),
+                    "source": {
+                        "subagent": {
+                            (source_key): true
+                        }
+                    }
+                }
+            }))
+            .unwrap();
+
+            assert!(parsed.is_subagent);
+            assert_eq!(parsed.source_kind.as_deref(), Some(expected));
+        }
     }
 
     #[test]

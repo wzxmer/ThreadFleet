@@ -228,13 +228,15 @@ mod tests {
         let request: SessionScanRequest = parse_request(&json!({
             "request": {
                 "requestId": "scan-a",
-                "sourceIds": ["source-a"]
+                "sourceIds": ["source-a"],
+                "includeArchived": false
             }
         }))
         .unwrap();
 
         assert_eq!(request.request_id, "scan-a");
         assert_eq!(request.source_ids, vec!["source-a"]);
+        assert_eq!(request.include_archived, Some(false));
     }
 
     #[test]

@@ -1,9 +1,16 @@
 // @vitest-environment jsdom
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ConversationItem, ThreadSummary, WorkspaceInfo } from "@/types";
+import type {
+  ConversationItem,
+  ManagedSession,
+  ThreadSummary,
+  WorkspaceInfo,
+} from "@/types";
 import {
   archiveThread,
+  cancelSessionTask,
+  fetchManagedSessionsPage,
   forkThread,
   getThreadTokenUsage,
   listSessionSources,
@@ -12,8 +19,10 @@ import {
   readThread,
   resumeThread,
   startThread,
+  scanManagedSessions,
   verifySessionThreads,
 } from "@services/tauri";
+import { clearActiveManagedSessionsCache } from "@threads/utils/activeManagedSessions";
 import {
   buildItemsFromThread,
   getThreadCreatedTimestamp,
@@ -35,6 +44,9 @@ vi.mock("@services/tauri", () => ({
   listWorkspaces: vi.fn(),
   readThread: vi.fn(),
   archiveThread: vi.fn(),
+  cancelSessionTask: vi.fn(),
+  fetchManagedSessionsPage: vi.fn(),
+  scanManagedSessions: vi.fn(),
   verifySessionThreads: vi.fn(),
 }));
 
@@ -75,6 +87,7 @@ describe("useThreadActions", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    clearActiveManagedSessionsCache();
     vi.mocked(listWorkspaces).mockResolvedValue([]);
     vi.mocked(getThreadTokenUsage).mockResolvedValue(null);
     vi.mocked(listSessionSources).mockResolvedValue([
@@ -91,6 +104,21 @@ describe("useThreadActions", () => {
         error: null,
       },
     ]);
+    vi.mocked(scanManagedSessions).mockResolvedValue({
+      requestId: "scan",
+      totalSessions: 0,
+      diagnosticCount: 0,
+      cancelled: false,
+      sourceSnapshots: [],
+    });
+    vi.mocked(fetchManagedSessionsPage).mockResolvedValue({
+      requestId: "scan",
+      items: [],
+      diagnostics: [],
+      total: 0,
+      nextOffset: null,
+    });
+    vi.mocked(cancelSessionTask).mockResolvedValue(undefined);
     vi.mocked(getThreadCreatedTimestamp).mockReturnValue(0);
   });
 
@@ -1600,6 +1628,78 @@ describe("useThreadActions", () => {
     );
   });
 
+  it("merges exact active sessions omitted by thread/list", async () => {
+    vi.mocked(listThreads).mockResolvedValue({
+      result: { data: [], nextCursor: null },
+    });
+    const recovered: ManagedSession = {
+      key: "source-a:thread-recovered",
+      sourceId: "source-a",
+      threadId: "thread-recovered",
+      sourceKind: "vscode",
+      cwd: "/tmp/codex",
+      title: "Recovered",
+      preview: null,
+      createdAt: 4000,
+      updatedAt: 5000,
+      archivedAt: null,
+      isArchived: false,
+      parentThreadId: null,
+      isSubagent: false,
+      subagentNickname: null,
+      subagentRole: null,
+      projectExists: true,
+      fileStatus: "mapped",
+      fileConfidence: "exact",
+    };
+    vi.mocked(scanManagedSessions).mockResolvedValue({
+      requestId: "scan",
+      totalSessions: 1,
+      diagnosticCount: 0,
+      cancelled: false,
+      sourceSnapshots: [],
+    });
+    vi.mocked(fetchManagedSessionsPage).mockResolvedValue({
+      requestId: "scan",
+      items: [recovered],
+      diagnostics: [],
+      total: 1,
+      nextOffset: null,
+    });
+    vi.mocked(getThreadTimestamp).mockImplementation((thread) =>
+      Number(thread.updatedAt ?? thread.updated_at ?? 0),
+    );
+    vi.mocked(getThreadCreatedTimestamp).mockImplementation((thread) =>
+      Number(thread.createdAt ?? thread.created_at ?? 0),
+    );
+
+    const { result, dispatch } = renderActions();
+
+    await act(async () => {
+      await result.current.listThreadsForWorkspace(workspace);
+    });
+
+    expect(scanManagedSessions).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceIds: ["source-a"],
+        includeArchived: false,
+      }),
+    );
+    expect(dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "setThreads",
+        workspaceId: "ws-1",
+        threads: [
+          expect.objectContaining({
+            id: "thread-recovered",
+            name: "Recovered",
+            updatedAt: 5000,
+          }),
+        ],
+      }),
+    );
+  });
+
   it("marks an uncovered thread stale until source verification completes", async () => {
     vi.mocked(listThreads).mockResolvedValue({
       result: { data: [], nextCursor: null },
@@ -2874,17 +2974,17 @@ describe("useThreadActions", () => {
   });
 
   it("stores a per-workspace cursor boundary for older pagination", async () => {
-    const firstPage = Array.from({ length: 10 }, (_, index) => ({
+    const firstPage = Array.from({ length: 50 }, (_, index) => ({
       id: `thread-${index + 1}`,
       cwd: "/tmp/codex",
       preview: `Thread ${index + 1}`,
       updated_at: 5000 - index,
     }));
-    const secondPage = Array.from({ length: 15 }, (_, index) => ({
-      id: `thread-${index + 11}`,
+    const secondPage = Array.from({ length: 55 }, (_, index) => ({
+      id: `thread-${index + 51}`,
       cwd: "/tmp/codex",
-      preview: `Thread ${index + 11}`,
-      updated_at: 4990 - index,
+      preview: `Thread ${index + 51}`,
+      updated_at: 4950 - index,
     }));
     vi.mocked(listThreads)
       .mockResolvedValueOnce({

@@ -1,19 +1,23 @@
 // @vitest-environment jsdom
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { WorkspaceInfo } from "@/types";
+import type { ManagedSession, WorkspaceInfo } from "@/types";
 import type { useAppServerEvents } from "@app/hooks/useAppServerEvents";
 import { useThreadRows } from "@app/hooks/useThreadRows";
 import {
   archiveThread,
+  cancelSessionTask,
+  fetchManagedSessionsPage,
   generateRunMetadata,
   getThreadTokenUsage,
   getTurnExecutionSummaries,
   interruptTurn,
+  listSessionSources,
   listThreads,
   listWorkspaces,
   readThread,
   resumeThread,
+  scanManagedSessions,
   sendUserMessage as sendUserMessageService,
   setThreadName,
   startThread,
@@ -23,6 +27,9 @@ import {
 } from "@services/tauri";
 import { STORAGE_KEY_DETACHED_REVIEW_LINKS } from "@threads/utils/threadStorage";
 import { LOCAL_CODEX_WORKSPACE_ID } from "@/features/workspaces/domain/localCodexWorkspace";
+import {
+  clearActiveManagedSessionsCache,
+} from "@threads/utils/activeManagedSessions";
 import { useQueuedSend } from "./useQueuedSend";
 import { MAX_RESIDENT_THREAD_HISTORIES } from "./useResidentThreadHistory";
 import { useThreads } from "./useThreads";
@@ -62,10 +69,14 @@ vi.mock("@services/tauri", () => ({
   steerTurn: vi.fn(),
   startReview: vi.fn(),
   startThread: vi.fn(),
+  cancelSessionTask: vi.fn(),
+  fetchManagedSessionsPage: vi.fn(),
+  listSessionSources: vi.fn(),
   listThreads: vi.fn(),
   listWorkspaces: vi.fn(),
   resumeThread: vi.fn(),
   readThread: vi.fn(),
+  scanManagedSessions: vi.fn(),
   archiveThread: vi.fn(),
   generateRunMetadata: vi.fn(),
   getThreadTokenUsage: vi.fn(),
@@ -86,6 +97,33 @@ const workspace: WorkspaceInfo = {
 };
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+const managedSession = (
+  threadId: string,
+  cwd: string,
+  updatedAt: number,
+  overrides: Partial<ManagedSession> = {},
+): ManagedSession => ({
+  key: `source-a:${threadId}`,
+  sourceId: "source-a",
+  threadId,
+  sourceKind: "vscode",
+  cwd,
+  title: threadId,
+  preview: null,
+  createdAt: updatedAt,
+  updatedAt,
+  archivedAt: null,
+  isArchived: false,
+  parentThreadId: null,
+  isSubagent: false,
+  subagentNickname: null,
+  subagentRole: null,
+  projectExists: true,
+  fileStatus: "mapped",
+  fileConfidence: "exact",
+  ...overrides,
+});
+
 describe("useThreads UX integration", () => {
   let now: number;
   let nowSpy: ReturnType<typeof vi.spyOn>;
@@ -94,8 +132,38 @@ describe("useThreads UX integration", () => {
     handlers = null;
     localStorage.clear();
     vi.clearAllMocks();
+    clearActiveManagedSessionsCache();
     vi.mocked(readThread).mockReset();
     vi.mocked(listWorkspaces).mockResolvedValue([]);
+    vi.mocked(listSessionSources).mockResolvedValue([
+      {
+        id: "source-a",
+        name: "Default",
+        codexHomePath: "/tmp/codex-home",
+        enabled: true,
+        isCurrent: true,
+        isDefault: true,
+        discoveredAt: 0,
+        lastScanAt: null,
+        status: "ready",
+        error: null,
+      },
+    ]);
+    vi.mocked(scanManagedSessions).mockResolvedValue({
+      requestId: "scan",
+      totalSessions: 0,
+      diagnosticCount: 0,
+      cancelled: false,
+      sourceSnapshots: [],
+    });
+    vi.mocked(fetchManagedSessionsPage).mockResolvedValue({
+      requestId: "scan",
+      items: [],
+      diagnostics: [],
+      total: 0,
+      nextOffset: null,
+    });
+    vi.mocked(cancelSessionTask).mockResolvedValue(undefined);
     vi.mocked(getThreadTokenUsage).mockResolvedValue(null);
     vi.mocked(getTurnExecutionSummaries).mockResolvedValue([]);
     vi.mocked(upsertTurnExecutionSummary).mockImplementation(async (summary) => summary);
@@ -1139,27 +1207,23 @@ describe("useThreads UX integration", () => {
 
   it("auto-archives inactive old threads", async () => {
     now = Date.UTC(2026, 0, 10);
-    vi.mocked(listThreads).mockResolvedValue({
-      result: {
-        data: [
-          {
-            id: "thread-fresh",
-            cwd: "/tmp/codex",
-            updated_at: now - DAY_MS,
-          },
-          {
-            id: "thread-old",
-            cwd: "/tmp/codex",
-            updated_at: now - 5 * DAY_MS,
-          },
-          {
-            id: "thread-other-workspace",
-            cwd: "/tmp/other",
-            updated_at: now - 5 * DAY_MS,
-          },
-        ],
-        nextCursor: null,
-      },
+    vi.mocked(scanManagedSessions).mockResolvedValue({
+      requestId: "scan",
+      totalSessions: 3,
+      diagnosticCount: 0,
+      cancelled: false,
+      sourceSnapshots: [],
+    });
+    vi.mocked(fetchManagedSessionsPage).mockResolvedValue({
+      requestId: "scan",
+      items: [
+        managedSession("thread-fresh", "/tmp/codex", now - DAY_MS),
+        managedSession("thread-old", "/tmp/codex", now - 5 * DAY_MS),
+        managedSession("thread-other-workspace", "/tmp/other", now - 5 * DAY_MS),
+      ],
+      diagnostics: [],
+      total: 3,
+      nextOffset: null,
     });
     vi.mocked(archiveThread).mockResolvedValue({});
 
@@ -1181,6 +1245,51 @@ describe("useThreads UX integration", () => {
       "ws-1",
       "thread-other-workspace",
     );
+  });
+
+  it("clears the active-session cache after a partial auto-archive failure", async () => {
+    now = Date.UTC(2026, 0, 10);
+    vi.mocked(scanManagedSessions).mockResolvedValue({
+      requestId: "scan",
+      totalSessions: 2,
+      diagnosticCount: 0,
+      cancelled: false,
+      sourceSnapshots: [],
+    });
+    vi.mocked(fetchManagedSessionsPage).mockResolvedValue({
+      requestId: "scan",
+      items: [
+        managedSession("thread-old-a", "/tmp/codex", now - 5 * DAY_MS),
+        managedSession("thread-old-b", "/tmp/codex", now - 5 * DAY_MS),
+      ],
+      diagnostics: [],
+      total: 2,
+      nextOffset: null,
+    });
+    vi.mocked(archiveThread)
+      .mockRejectedValue(new Error("archive failed"))
+      .mockResolvedValueOnce({})
+      .mockRejectedValueOnce(new Error("archive failed"));
+
+    renderHook(() =>
+      useThreads({
+        activeWorkspace: workspace,
+        workspaces: [workspace],
+        autoArchiveThreadsEnabled: true,
+        autoArchiveThreadsDays: 3,
+        onWorkspaceConnected: vi.fn(),
+      }),
+    );
+
+    await waitFor(() => {
+      expect(vi.mocked(archiveThread)).toHaveBeenCalledWith(
+        "ws-1",
+        "thread-old-b",
+      );
+    });
+    await waitFor(() => {
+      expect(vi.mocked(scanManagedSessions)).toHaveBeenCalledTimes(2);
+    });
   });
 
   it("does not scan the local Codex history workspace during auto archive", async () => {
@@ -1220,7 +1329,7 @@ describe("useThreads UX integration", () => {
       await Promise.resolve();
     });
     expect(vi.mocked(archiveThread)).not.toHaveBeenCalled();
-    expect(vi.mocked(listThreads)).not.toHaveBeenCalled();
+    expect(vi.mocked(scanManagedSessions)).not.toHaveBeenCalled();
   });
 
   it("auto-archives old local Codex history threads that do not belong to a workspace", async () => {
@@ -1232,27 +1341,27 @@ describe("useThreads UX integration", () => {
       connected: true,
       settings: { sidebarCollapsed: false },
     };
-    vi.mocked(listThreads).mockResolvedValue({
-      result: {
-        data: [
-          {
-            id: "thread-local-old",
-            cwd: "/tmp/untracked-project",
-            updated_at: now - 5 * DAY_MS,
-          },
-          {
-            id: "thread-project-old",
-            cwd: "/tmp/codex",
-            updated_at: now - 5 * DAY_MS,
-          },
-          {
-            id: "thread-known-project-old",
-            cwd: "/tmp/known-project",
-            updated_at: now - 5 * DAY_MS,
-          },
-        ],
-        nextCursor: null,
-      },
+    vi.mocked(scanManagedSessions).mockResolvedValue({
+      requestId: "scan",
+      totalSessions: 3,
+      diagnosticCount: 0,
+      cancelled: false,
+      sourceSnapshots: [],
+    });
+    vi.mocked(fetchManagedSessionsPage).mockResolvedValue({
+      requestId: "scan",
+      items: [
+        managedSession("thread-local-old", "/tmp/untracked-project", now - 5 * DAY_MS),
+        managedSession("thread-project-old", "/tmp/codex", now - 5 * DAY_MS),
+        managedSession(
+          "thread-known-project-old",
+          "/tmp/known-project",
+          now - 5 * DAY_MS,
+        ),
+      ],
+      diagnostics: [],
+      total: 3,
+      nextOffset: null,
     });
     vi.mocked(listWorkspaces).mockResolvedValue([
       {
@@ -1290,27 +1399,23 @@ describe("useThreads UX integration", () => {
 
   it("skips active and pinned threads during auto archive", async () => {
     now = Date.UTC(2026, 0, 10);
-    vi.mocked(listThreads).mockResolvedValue({
-      result: {
-        data: [
-          {
-            id: "thread-active",
-            cwd: "/tmp/codex",
-            updated_at: now - 5 * DAY_MS,
-          },
-          {
-            id: "thread-pinned",
-            cwd: "/tmp/codex",
-            updated_at: now - 5 * DAY_MS,
-          },
-          {
-            id: "thread-old",
-            cwd: "/tmp/codex",
-            updated_at: now - 5 * DAY_MS,
-          },
-        ],
-        nextCursor: null,
-      },
+    vi.mocked(scanManagedSessions).mockResolvedValue({
+      requestId: "scan",
+      totalSessions: 3,
+      diagnosticCount: 0,
+      cancelled: false,
+      sourceSnapshots: [],
+    });
+    vi.mocked(fetchManagedSessionsPage).mockResolvedValue({
+      requestId: "scan",
+      items: [
+        managedSession("thread-active", "/tmp/codex", now - 5 * DAY_MS),
+        managedSession("thread-pinned", "/tmp/codex", now - 5 * DAY_MS),
+        managedSession("thread-old", "/tmp/codex", now - 5 * DAY_MS),
+      ],
+      diagnostics: [],
+      total: 3,
+      nextOffset: null,
     });
     vi.mocked(archiveThread).mockResolvedValue({});
 
@@ -3070,6 +3175,77 @@ describe("useThreads UX integration", () => {
       "thread-a",
     ]);
     expect(unpinnedRows.map((row) => row.thread.id)).toEqual(["thread-b"]);
+  });
+
+  it("keeps fallback-completed background threads ordered across stale list refreshes", async () => {
+    vi.mocked(listThreads).mockResolvedValue({
+      result: {
+        data: [
+          {
+            id: "thread-newer",
+            preview: "Newer",
+            updated_at: 1_700_000_003,
+            cwd: workspace.path,
+          },
+          {
+            id: "thread-running",
+            preview: "Running",
+            updated_at: 1_700_000_001,
+            cwd: workspace.path,
+          },
+        ],
+        nextCursor: null,
+      },
+    });
+
+    const { result } = renderHook(() =>
+      useThreads({
+        activeWorkspace: workspace,
+        onWorkspaceConnected: vi.fn(),
+      }),
+    );
+
+    await act(async () => {
+      await result.current.listThreadsForWorkspace(workspace);
+    });
+    expect(result.current.threadsByWorkspace["ws-1"]?.map((thread) => thread.id)).toEqual([
+      "thread-newer",
+      "thread-running",
+    ]);
+
+    now = 1_700_000_010_000;
+    act(() => {
+      handlers?.onTurnStarted?.("ws-1", "thread-running", "turn-running");
+    });
+    await waitFor(() => {
+      expect(result.current.threadStatusById["thread-running"]?.isProcessing).toBe(true);
+    });
+
+    await act(async () => {
+      await result.current.listThreadsForWorkspace(workspace);
+    });
+    expect(result.current.threadsByWorkspace["ws-1"]?.map((thread) => thread.id)).toEqual([
+      "thread-running",
+      "thread-newer",
+    ]);
+
+    act(() => {
+      handlers?.onThreadStatusChanged?.("ws-1", "thread-running", { type: "idle" });
+    });
+    await waitFor(() => {
+      expect(result.current.threadStatusById["thread-running"]?.isProcessing).toBe(false);
+    });
+
+    await act(async () => {
+      await result.current.listThreadsForWorkspace(workspace);
+    });
+    expect(result.current.threadsByWorkspace["ws-1"]?.map((thread) => thread.id)).toEqual([
+      "thread-running",
+      "thread-newer",
+    ]);
+    expect(result.current.threadsByWorkspace["ws-1"]?.[0]?.updatedAt).toBeGreaterThan(
+      1_700_000_003_000,
+    );
   });
 
   it("keeps parent rows anchored when refresh only returns subagent children", async () => {

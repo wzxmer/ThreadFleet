@@ -62,6 +62,14 @@ pub(crate) async fn scan_session_sources(
     sources: Vec<SessionSource>,
     concurrency: usize,
 ) -> MultiSourceSessionScanResult {
+    scan_session_sources_with_archive_mode(sources, concurrency, true).await
+}
+
+pub(crate) async fn scan_session_sources_with_archive_mode(
+    sources: Vec<SessionSource>,
+    concurrency: usize,
+    include_archived: bool,
+) -> MultiSourceSessionScanResult {
     let concurrency = concurrency.clamp(MIN_SCAN_CONCURRENCY, MAX_SCAN_CONCURRENCY);
     let semaphore = Arc::new(Semaphore::new(concurrency));
     let mut tasks = Vec::new();
@@ -74,7 +82,10 @@ pub(crate) async fn scan_session_sources(
                 Ok(permit) => permit,
                 Err(error) => return (source_id, Err(error.to_string())),
             };
-            let result = tokio::task::spawn_blocking(move || scan_session_source(&source)).await;
+            let result = tokio::task::spawn_blocking(move || {
+                scan_session_source_with_archive_mode(&source, include_archived)
+            })
+            .await;
             drop(permit);
             (source_id, result.map_err(|error| error.to_string()))
         }));
@@ -104,6 +115,13 @@ pub(crate) async fn scan_session_sources(
 }
 
 pub(crate) fn scan_session_source(source: &SessionSource) -> SourceSessionScanResult {
+    scan_session_source_with_archive_mode(source, true)
+}
+
+pub(crate) fn scan_session_source_with_archive_mode(
+    source: &SessionSource,
+    include_archived: bool,
+) -> SourceSessionScanResult {
     let mut result = SourceSessionScanResult {
         source_id: source.id.clone(),
         sessions: Vec::new(),
@@ -137,7 +155,12 @@ pub(crate) fn scan_session_source(source: &SessionSource) -> SourceSessionScanRe
 
     let session_index = load_session_index(&canonical_root, source, &mut result.diagnostics);
     let mut candidates_by_thread_id: HashMap<String, Vec<SessionCandidate>> = HashMap::new();
-    for (directory_name, is_archived) in [("sessions", false), ("archived_sessions", true)] {
+    let directories = if include_archived {
+        vec![("sessions", false), ("archived_sessions", true)]
+    } else {
+        vec![("sessions", false)]
+    };
+    for (directory_name, is_archived) in directories {
         let directory = canonical_root.join(directory_name);
         if !directory.exists() {
             continue;

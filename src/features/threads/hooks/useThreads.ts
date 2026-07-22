@@ -39,7 +39,7 @@ import { useThreadAutoContinue } from "./useThreadAutoContinue";
 import { useResidentThreadHistory } from "./useResidentThreadHistory";
 import {
   archiveThread as archiveThreadService,
-  listThreads as listThreadsService,
+  listSessionSources as listSessionSourcesService,
   listWorkspaces as listWorkspacesService,
   readThread as readThreadService,
   getTurnExecutionSummaries,
@@ -47,15 +47,11 @@ import {
   observeExecutionBinding,
   setThreadName as setThreadNameService,
 } from "@services/tauri";
-import { getThreadTimestamp } from "@utils/threadItems";
 import {
   makeCustomNameKey,
   saveCustomName,
 } from "@threads/utils/threadStorage";
-import {
-  getParentThreadIdFromThread,
-  shouldHideSubagentThreadFromSidebar,
-} from "@threads/utils/threadRpc";
+import { getParentThreadIdFromThread } from "@threads/utils/threadRpc";
 import {
   buildThreadSummaryFromThread,
   extractThreadFromResponse,
@@ -64,9 +60,13 @@ import {
 import { getSubagentDescendantThreadIds } from "@threads/utils/subagentTree";
 import {
   buildWorkspacePathLookup,
-  getThreadListNextCursor,
   resolveWorkspaceIdForThreadPath,
 } from "@threads/utils/threadActionHelpers";
+import {
+  clearActiveManagedSessionsCache,
+  isSidebarManagedSessionCandidate,
+  listActiveManagedSessionsCached,
+} from "@threads/utils/activeManagedSessions";
 import { LOCAL_CODEX_WORKSPACE_ID } from "@/features/workspaces/domain/localCodexWorkspace";
 import type { ThreadListRuntimeContext } from "@threads/types";
 
@@ -129,8 +129,6 @@ function getServerTurnIds(thread: Record<string, unknown>) {
 
 const CASCADE_ARCHIVE_SKIP_TTL_MS = 120_000;
 const AUTO_ARCHIVE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
-const AUTO_ARCHIVE_PAGE_SIZE = 100;
-const AUTO_ARCHIVE_MAX_PAGES_PER_WORKSPACE = 50;
 const DAY_MS = 24 * 60 * 60 * 1000;
 export function useThreads({
   activeWorkspace,
@@ -1084,6 +1082,7 @@ export function useThreads({
       const cutoff = Date.now() - normalizedDays * DAY_MS;
       let archivedCount = 0;
       let archivedLocalCodexCount = 0;
+      let currentSourceId: string | null = null;
       try {
         try {
           const knownWorkspaces = await listWorkspacesService();
@@ -1105,124 +1104,58 @@ export function useThreads({
           workspacePathLookup = buildWorkspacePathLookup(connectedWorkspaces);
           workspaceIds = new Set(connectedWorkspaces.map((workspace) => workspace.id));
         }
-        for (const workspace of connectedWorkspaces) {
+        const sources = await listSessionSourcesService();
+        const currentSource =
+          sources.find((source) => source.enabled && source.isCurrent) ??
+          sources.find((source) => source.enabled && source.isDefault) ??
+          sources.find((source) => source.enabled);
+        if (!currentSource) {
+          return;
+        }
+        currentSourceId = currentSource.id;
+        const sessions = await listActiveManagedSessionsCached(currentSource.id);
+        const connectedWorkspaceById = new Map(
+          connectedWorkspaces.map((workspace) => [workspace.id, workspace]),
+        );
+        const requestWorkspace = connectedWorkspaces[0];
+        for (const session of sessions) {
           if (cancelled) {
             break;
           }
-          let cursor: string | null = null;
-          let pagesFetched = 0;
-          do {
-            pagesFetched += 1;
-            const response = (await listThreadsService(
-              workspace.id,
-              cursor,
-              AUTO_ARCHIVE_PAGE_SIZE,
-              "updated_at",
-            )) as Record<string, unknown>;
-            const result = (response.result ?? response) as Record<string, unknown>;
-            const data = Array.isArray(result.data)
-              ? (result.data as Record<string, unknown>[])
-              : [];
-            cursor = getThreadListNextCursor(result);
-            for (const thread of data) {
-              if (cancelled) {
-                break;
-              }
-              const threadId = String(thread.id ?? "");
-              if (!threadId || shouldHideSubagentThreadFromSidebar(thread.source)) {
-                continue;
-              }
-              const updatedAt = getThreadTimestamp(thread);
-              if (!updatedAt || updatedAt > cutoff) {
-                continue;
-              }
-              const owningWorkspaceId = resolveWorkspaceIdForThreadPath(
-                String(thread.cwd ?? ""),
-                workspacePathLookup,
-                workspaceIds,
-              );
-              if (owningWorkspaceId !== workspace.id) {
-                continue;
-              }
-              if (activeThreadIdByWorkspaceRef.current[workspace.id] === threadId) {
-                continue;
-              }
-              if (
-                threadStatusByIdRef.current[threadId]?.isProcessing ||
-                activeTurnIdByThreadRef.current[threadId]
-              ) {
-                continue;
-              }
-              if (isThreadPinned(workspace.id, threadId)) {
-                continue;
-              }
-              await archiveThread(workspace.id, threadId);
-              archivedCount += 1;
-            }
-            if (pagesFetched >= AUTO_ARCHIVE_MAX_PAGES_PER_WORKSPACE) {
-              break;
-            }
-          } while (cursor && !cancelled);
-        }
-        if (localCodexWorkspace && !cancelled) {
-          const requestWorkspace = connectedWorkspaces[0];
-          let cursor: string | null = null;
-          let pagesFetched = 0;
-          do {
-            pagesFetched += 1;
-            const response = (await listThreadsService(
-              requestWorkspace.id,
-              cursor,
-              AUTO_ARCHIVE_PAGE_SIZE,
-              "updated_at",
-            )) as Record<string, unknown>;
-            const result = (response.result ?? response) as Record<string, unknown>;
-            const data = Array.isArray(result.data)
-              ? (result.data as Record<string, unknown>[])
-              : [];
-            cursor = getThreadListNextCursor(result);
-            for (const thread of data) {
-              if (cancelled) {
-                break;
-              }
-              const threadId = String(thread.id ?? "");
-              if (!threadId || shouldHideSubagentThreadFromSidebar(thread.source)) {
-                continue;
-              }
-              const updatedAt = getThreadTimestamp(thread);
-              if (!updatedAt || updatedAt > cutoff) {
-                continue;
-              }
-              const owningWorkspaceId = resolveWorkspaceIdForThreadPath(
-                String(thread.cwd ?? ""),
-                workspacePathLookup,
-                workspaceIds,
-              );
-              if (owningWorkspaceId) {
-                continue;
-              }
-              if (
-                activeThreadIdByWorkspaceRef.current[LOCAL_CODEX_WORKSPACE_ID] ===
-                threadId
-              ) {
-                continue;
-              }
-              if (
-                threadStatusByIdRef.current[threadId]?.isProcessing ||
-                activeTurnIdByThreadRef.current[threadId]
-              ) {
-                continue;
-              }
-              if (isThreadPinned(LOCAL_CODEX_WORKSPACE_ID, threadId)) {
-                continue;
-              }
-              await archiveThread(requestWorkspace.id, threadId);
-              archivedLocalCodexCount += 1;
-            }
-            if (pagesFetched >= AUTO_ARCHIVE_MAX_PAGES_PER_WORKSPACE) {
-              break;
-            }
-          } while (cursor && !cancelled);
+          if (!isSidebarManagedSessionCandidate(session)) {
+            continue;
+          }
+          const threadId = session.threadId;
+          const updatedAt = session.updatedAt ?? session.createdAt ?? 0;
+          if (!threadId || !updatedAt || updatedAt > cutoff) {
+            continue;
+          }
+          const owningWorkspaceId = resolveWorkspaceIdForThreadPath(
+            session.cwd ?? "",
+            workspacePathLookup,
+            workspaceIds,
+          );
+          const targetWorkspaceId = owningWorkspaceId ?? LOCAL_CODEX_WORKSPACE_ID;
+          if (!owningWorkspaceId && !localCodexWorkspace) {
+            continue;
+          }
+          if (owningWorkspaceId && !connectedWorkspaceById.has(owningWorkspaceId)) {
+            continue;
+          }
+          if (
+            activeThreadIdByWorkspaceRef.current[targetWorkspaceId] === threadId ||
+            threadStatusByIdRef.current[threadId]?.isProcessing ||
+            activeTurnIdByThreadRef.current[threadId] ||
+            isThreadPinned(targetWorkspaceId, threadId)
+          ) {
+            continue;
+          }
+          await archiveThread(owningWorkspaceId ?? requestWorkspace.id, threadId);
+          if (owningWorkspaceId) {
+            archivedCount += 1;
+          } else {
+            archivedLocalCodexCount += 1;
+          }
         }
         if (archivedCount > 0) {
           onDebug?.({
@@ -1251,6 +1184,9 @@ export function useThreads({
           payload: error instanceof Error ? error.message : String(error),
         });
       } finally {
+        if (currentSourceId && (archivedCount > 0 || archivedLocalCodexCount > 0)) {
+          clearActiveManagedSessionsCache(currentSourceId);
+        }
         autoArchiveInFlightRef.current = false;
       }
     };

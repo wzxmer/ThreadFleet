@@ -39,6 +39,11 @@ import {
 } from "@threads/utils/threadRpc";
 import { saveThreadActivity } from "@threads/utils/threadStorage";
 import {
+  isSidebarManagedSessionCandidate,
+  listActiveManagedSessionsCached,
+  managedSessionToThreadRecord,
+} from "@threads/utils/activeManagedSessions";
+import {
   buildResumeHydrationPlan,
   buildWorkspacePathLookup,
   buildWorkspaceThreadListState,
@@ -53,8 +58,8 @@ import type {
   ThreadListVerifiedCache,
 } from "@threads/types";
 
-const THREAD_LIST_TARGET_COUNT = 20;
 const THREAD_LIST_PAGE_SIZE = 100;
+const THREAD_LIST_TARGET_COUNT = THREAD_LIST_PAGE_SIZE;
 const THREAD_LIST_MAX_PAGES_OLDER = 6;
 const THREAD_LIST_MAX_PAGES_DEFAULT = 6;
 const THREAD_LIST_CURSOR_PAGE_START = "__codex_monitor_page_start__";
@@ -730,7 +735,7 @@ export function useThreadActions({
 
   const resolveThreadListSourceId = useCallback(
     async (runtimeContext: ThreadListRuntimeContext) => {
-      if (runtimeContext.sourceId || !preserveSessionLibraryOnProviderSwitch) {
+      if (runtimeContext.sourceId) {
         return runtimeContext.sourceId;
       }
       try {
@@ -750,7 +755,7 @@ export function useThreadActions({
         return null;
       }
     },
-    [onDebug, preserveSessionLibraryOnProviderSwitch],
+    [onDebug],
   );
 
   const beginThreadListRequest = useCallback((
@@ -1037,6 +1042,42 @@ export function useThreadActions({
             break;
           }
         } while (cursor);
+        if (sourceId) {
+          try {
+            const managedSessions = await listActiveManagedSessionsCached(sourceId);
+            if (
+              !targets.some((workspace) =>
+                isThreadListRequestCurrent(
+                  workspace.id,
+                  requestSequence,
+                  runtimeContext,
+                  sourceId,
+                ),
+              )
+            ) {
+              return;
+            }
+            const fallbackThreads = managedSessions
+              .filter(isSidebarManagedSessionCandidate)
+              .map(managedSessionToThreadRecord);
+            processThreadListPage(fallbackThreads, null);
+            onDebug?.({
+              id: `${Date.now()}-client-thread-list-managed-fallback`,
+              timestamp: Date.now(),
+              source: "client",
+              label: "thread/list managed fallback",
+              payload: { sourceId, candidateCount: fallbackThreads.length },
+            });
+          } catch (error) {
+            onDebug?.({
+              id: `${Date.now()}-client-thread-list-managed-fallback-error`,
+              timestamp: Date.now(),
+              source: "error",
+              label: "thread/list managed fallback error",
+              payload: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
         const livePaginationComplete = cursor === null;
         let archivedPaginationComplete = true;
         if (includeLocalCodexSessions) {
@@ -1606,6 +1647,36 @@ export function useThreadActions({
             }
           } while (archivedCursor && matchingThreads.length < THREAD_LIST_TARGET_COUNT);
           localArchivedCursorByWorkspaceRef.current[workspace.id] = archivedCursor;
+        }
+
+        if (sourceId && workspaceLookupComplete) {
+          try {
+            const managedSessions = await listActiveManagedSessionsCached(sourceId);
+            managedSessions
+              .filter(isSidebarManagedSessionCandidate)
+              .map(managedSessionToThreadRecord)
+              .forEach((thread) => {
+                const owningWorkspaceId = resolveWorkspaceIdForThreadPath(
+                  String(thread.cwd ?? ""),
+                  workspacePathLookup,
+                );
+                const belongsToWorkspace =
+                  workspace.id === LOCAL_CODEX_WORKSPACE_ID
+                    ? !owningWorkspaceId
+                    : owningWorkspaceId === workspace.id;
+                if (belongsToWorkspace) {
+                  matchingThreads.push(thread);
+                }
+              });
+          } catch (error) {
+            onDebug?.({
+              id: `${Date.now()}-client-thread-list-older-managed-fallback-error`,
+              timestamp: Date.now(),
+              source: "error",
+              label: "thread/list older managed fallback error",
+              payload: error instanceof Error ? error.message : String(error),
+            });
+          }
         }
 
         const existingIds = new Set(existing.map((thread) => thread.id));

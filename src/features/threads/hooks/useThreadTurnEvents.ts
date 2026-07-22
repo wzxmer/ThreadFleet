@@ -72,6 +72,8 @@ export function useThreadTurnEvents({
   const hasOptimisticActiveTurnByThreadRef = useRef<Record<string, boolean>>({});
   const continuationPendingByThreadRef = useRef<Record<string, boolean>>({});
   const lastExecutionTurnIdByThreadRef = useRef<Record<string, string>>({});
+  const lastFinalizedTurnIdByThreadRef = useRef<Record<string, string>>({});
+  const terminalActivityPendingByThreadRef = useRef<Record<string, boolean>>({});
 
   const getLatestKnownActiveTurnId = useCallback(
     (threadId: string) => {
@@ -125,6 +127,47 @@ export function useThreadTurnEvents({
       }
     },
     [dispatch, shouldClearCompletedPlan],
+  );
+
+  const finalizeTerminalTurn = useCallback(
+    (
+      workspaceId: string,
+      threadId: string,
+      turnId: string,
+      status: "completed" | "interrupted" | "failed",
+    ) => {
+      const alreadyFinalized = Boolean(
+        turnId && lastFinalizedTurnIdByThreadRef.current[threadId] === turnId,
+      );
+      const hasPendingActivity =
+        terminalActivityPendingByThreadRef.current[threadId] === true;
+      const shouldFinalizeTurn = Boolean(turnId && !alreadyFinalized);
+      const shouldFinalizeActivity = shouldFinalizeTurn || hasPendingActivity;
+      terminalActivityPendingByThreadRef.current[threadId] = false;
+      if (!shouldFinalizeActivity) {
+        return;
+      }
+
+      const timestamp = Date.now();
+      if (shouldFinalizeTurn) {
+        dispatch({
+          type: "completeTurnExecution",
+          threadId,
+          turnId,
+          status,
+          timestamp,
+        });
+        lastFinalizedTurnIdByThreadRef.current[threadId] = turnId;
+      }
+      dispatch({
+        type: "setThreadTimestamp",
+        workspaceId,
+        threadId,
+        timestamp,
+      });
+      recordThreadActivity(workspaceId, threadId, timestamp);
+    },
+    [dispatch, recordThreadActivity],
   );
 
   const onThreadStarted = useCallback(
@@ -253,6 +296,7 @@ export function useThreadTurnEvents({
     (workspaceId: string, threadId: string, turnId: string) => {
       const continuesExecution = continuationPendingByThreadRef.current[threadId] === true;
       const timestamp = Date.now();
+      terminalActivityPendingByThreadRef.current[threadId] = true;
       dispatch({
         type: "ensureThread",
         workspaceId,
@@ -315,24 +359,8 @@ export function useThreadTurnEvents({
       if (turnId && activeTurnId && turnId !== activeTurnId) {
         return;
       }
-      const timestamp = Date.now();
       const terminalTurnId = turnId || lastExecutionTurnIdByThreadRef.current[threadId];
-      if (terminalTurnId) {
-        dispatch({
-          type: "completeTurnExecution",
-          threadId,
-          turnId: terminalTurnId,
-          status,
-          timestamp,
-        });
-      }
-      dispatch({
-        type: "setThreadTimestamp",
-        workspaceId,
-        threadId,
-        timestamp,
-      });
-      recordThreadActivity(workspaceId, threadId, timestamp);
+      finalizeTerminalTurn(workspaceId, threadId, terminalTurnId, status);
       continuationPendingByThreadRef.current[threadId] = false;
       markProcessing(threadId, false);
       resetThreadTurnState(
@@ -347,38 +375,35 @@ export function useThreadTurnEvents({
       clearCompletedPlan(threadId, turnId);
     },
     [
-      dispatch,
+      finalizeTerminalTurn,
       getLatestKnownActiveTurnId,
       markProcessing,
       pendingInterruptsRef,
-      recordThreadActivity,
       clearCompletedPlan,
       setActiveTurnId,
     ],
   );
 
   const onThreadStatusChanged = useCallback(
-    (_workspaceId: string, threadId: string, status: Record<string, unknown>) => {
+    (workspaceId: string, threadId: string, status: Record<string, unknown>) => {
       const statusType = normalizeThreadStatusType(status);
       if (!statusType) {
         return;
       }
       if (statusType === "active") {
+        terminalActivityPendingByThreadRef.current[threadId] = true;
         markProcessing(threadId, true);
         return;
       }
       const terminalTurnId =
         getLatestKnownActiveTurnId(threadId) ?? lastExecutionTurnIdByThreadRef.current[threadId];
       if (statusType === "interrupted") {
-        if (terminalTurnId) {
-          dispatch({
-            type: "completeTurnExecution",
-            threadId,
-            turnId: terminalTurnId,
-            status: "interrupted",
-            timestamp: Date.now(),
-          });
-        }
+        finalizeTerminalTurn(
+          workspaceId,
+          threadId,
+          terminalTurnId ?? "",
+          "interrupted",
+        );
         continuationPendingByThreadRef.current[threadId] = false;
         markProcessing(threadId, false);
         setActiveTurnId(threadId, null);
@@ -391,15 +416,12 @@ export function useThreadTurnEvents({
         statusType === "systemerror"
       ) {
         if (!continuationPendingByThreadRef.current[threadId]) {
-          if (terminalTurnId) {
-            dispatch({
-              type: "completeTurnExecution",
-              threadId,
-              turnId: terminalTurnId,
-              status: statusType === "systemerror" ? "failed" : "completed",
-              timestamp: Date.now(),
-            });
-          }
+          finalizeTerminalTurn(
+            workspaceId,
+            threadId,
+            terminalTurnId ?? "",
+            statusType === "systemerror" ? "failed" : "completed",
+          );
           clearCompletedPlan(threadId, terminalTurnId ?? "");
         }
         markProcessing(threadId, false);
@@ -419,7 +441,7 @@ export function useThreadTurnEvents({
       }
     },
     [
-      dispatch,
+      finalizeTerminalTurn,
       getLatestKnownActiveTurnId,
       markProcessing,
       markReviewing,
@@ -431,17 +453,11 @@ export function useThreadTurnEvents({
   );
 
   const onThreadClosed = useCallback(
-    (_workspaceId: string, threadId: string) => {
+    (workspaceId: string, threadId: string) => {
       const activeTurnId = getLatestKnownActiveTurnId(threadId);
-      if (activeTurnId) {
-        dispatch({
-          type: "completeTurnExecution",
-          threadId,
-          turnId: activeTurnId,
-          status: "failed",
-          timestamp: Date.now(),
-        });
-      }
+      const terminalTurnId =
+        activeTurnId ?? lastExecutionTurnIdByThreadRef.current[threadId] ?? "";
+      finalizeTerminalTurn(workspaceId, threadId, terminalTurnId, "failed");
       continuationPendingByThreadRef.current[threadId] = false;
       setThreadLoaded(threadId, false);
       markProcessing(threadId, false);
@@ -465,7 +481,7 @@ export function useThreadTurnEvents({
       }
     },
     [
-      dispatch,
+      finalizeTerminalTurn,
       getLatestKnownActiveTurnId,
       markProcessing,
       markReviewing,
@@ -561,15 +577,7 @@ export function useThreadTurnEvents({
         return;
       }
       const terminalTurnId = turnId || lastExecutionTurnIdByThreadRef.current[threadId];
-      if (terminalTurnId) {
-        dispatch({
-          type: "completeTurnExecution",
-          threadId,
-          turnId: terminalTurnId,
-          status: "failed",
-          timestamp: Date.now(),
-        });
-      }
+      finalizeTerminalTurn(workspaceId, threadId, terminalTurnId, "failed");
       continuationPendingByThreadRef.current[threadId] = false;
       dispatch({ type: "ensureThread", workspaceId, threadId });
       markProcessing(threadId, false);
@@ -591,6 +599,7 @@ export function useThreadTurnEvents({
     },
     [
       dispatch,
+      finalizeTerminalTurn,
       getLatestKnownActiveTurnId,
       markProcessing,
       markReviewing,

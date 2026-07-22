@@ -5,7 +5,9 @@ use std::path::{Path, PathBuf};
 use serde_json::json;
 use uuid::Uuid;
 
-use super::scanner::{scan_session_source, scan_session_sources};
+use super::scanner::{
+    scan_session_source, scan_session_source_with_archive_mode, scan_session_sources,
+};
 use crate::types::{SessionFileConfidence, SessionFileStatus, SessionSource, SessionSourceStatus};
 
 #[test]
@@ -123,6 +125,34 @@ fn scans_archived_missing_project_and_subagent_metadata() {
         session.file_confidence,
         SessionFileConfidence::Exact
     ));
+}
+
+#[test]
+fn active_only_scan_excludes_archived_sessions() {
+    let fixture = SessionFixture::new();
+    let source_root = fixture.root.join("home");
+    create_session(
+        &source_root,
+        false,
+        "thread-active",
+        None,
+        json!("vscode"),
+        Some("user"),
+    );
+    create_session(
+        &source_root,
+        true,
+        "thread-archived",
+        None,
+        json!("vscode"),
+        Some("user"),
+    );
+
+    let result = scan_session_source_with_archive_mode(&source("source-a", &source_root), false);
+
+    assert_eq!(result.sessions.len(), 1);
+    assert_eq!(result.sessions[0].thread_id, "thread-active");
+    assert!(!result.sessions[0].is_archived);
 }
 
 #[test]

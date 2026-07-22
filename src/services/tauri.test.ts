@@ -548,7 +548,11 @@ describe("tauri invoke wrappers", () => {
       sourceId: "source-a",
       name: "Work",
     });
-    await scanManagedSessions({ requestId: "scan-a", sourceIds: ["source-a"] });
+    await scanManagedSessions({
+      requestId: "scan-a",
+      sourceIds: ["source-a"],
+      includeArchived: false,
+    });
     await fetchManagedSessionsPage({ requestId: "scan-a", offset: 0, limit: 50 });
     await fetchManagedSessionPreview({ sourceId: "source-a", threadId: "thread-a", full: true });
     await searchManagedSessions({ requestId: "search-a", query: "alpha", sourceIds: [], includeArchived: true, includeSubagents: false });
@@ -571,7 +575,11 @@ describe("tauri invoke wrappers", () => {
       request: { action: "rename", sourceId: "source-a", name: "Work" },
     });
     expect(invokeMock).toHaveBeenCalledWith("scan_managed_sessions", {
-      request: { requestId: "scan-a", sourceIds: ["source-a"] },
+      request: {
+        requestId: "scan-a",
+        sourceIds: ["source-a"],
+        includeArchived: false,
+      },
     });
     expect(invokeMock).toHaveBeenCalledWith("fetch_managed_sessions_page", {
       request: { requestId: "scan-a", offset: 0, limit: 50 },

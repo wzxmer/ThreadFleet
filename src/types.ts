@@ -353,6 +353,7 @@ export type SessionSourceUpdateRequest = {
 export type SessionScanRequest = {
   requestId: string;
   sourceIds?: string[];
+  includeArchived?: boolean;
 };
 
 export type SessionScanSummary = {
