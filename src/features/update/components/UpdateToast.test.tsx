@@ -93,6 +93,22 @@ describe("UpdateToast", () => {
     expect(fill.getAttribute("style")).toContain("width: 50%");
   });
 
+  it("renders an empty progress bar before the first downloaded byte", () => {
+    const state: UpdateState = {
+      stage: "downloading",
+      progress: { totalBytes: 24 * 1024 * 1024, downloadedBytes: 0 },
+    };
+
+    const { container } = renderUpdateToast(
+      <UpdateToast state={state} onUpdate={vi.fn()} onDismiss={vi.fn()} />,
+    );
+
+    expect(screen.getByText("0 B / 24 MB")).toBeTruthy();
+    expect(
+      container.querySelector(".update-toast-progress-fill")?.getAttribute("style"),
+    ).toContain("width: 0%");
+  });
+
   it("renders error state and lets you dismiss or retry", () => {
     const onUpdate = vi.fn();
     const onDismiss = vi.fn();

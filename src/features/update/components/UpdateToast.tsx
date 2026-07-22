@@ -169,7 +169,7 @@ export function UpdateToast({
               <div className="update-toast-progress-bar">
                 <span
                   className="update-toast-progress-fill"
-                  style={{ width: percent ? `${percent}%` : "24%" }}
+                  style={{ width: percent === null ? "24%" : `${percent}%` }}
                 />
               </div>
               <div className="update-toast-progress-meta">
