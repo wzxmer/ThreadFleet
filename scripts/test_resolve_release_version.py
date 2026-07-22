@@ -24,7 +24,7 @@ class ResolveReleaseVersionTests(unittest.TestCase):
             ("0.8.2", "0.8.2"),
         )
 
-    def test_project_config_reserves_0_8_13_for_the_next_release(self) -> None:
+    def test_keeps_project_config_when_newer_than_existing_tags(self) -> None:
         current = str(
             json.loads(Path("src-tauri/tauri.conf.json").read_text(encoding="utf-8"))[
                 "version"
@@ -32,7 +32,7 @@ class ResolveReleaseVersionTests(unittest.TestCase):
         )
         self.assertEqual(
             resolve_release_version(current, ["v0.8.01", "v0.8.02"]),
-            ("0.8.13", "0.8.13"),
+            (current, current),
         )
 
     def test_rejects_leading_zero_in_internal_version(self) -> None:
