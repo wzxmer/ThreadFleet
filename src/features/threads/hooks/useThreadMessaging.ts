@@ -779,6 +779,8 @@ export function useThreadMessaging({
             selectedAgents: [],
             includedSkills: [],
             blockedSkills: [],
+            omittedSources: [],
+            truncatedSources: [],
             contextSummary: "off",
           };
         const appliedWorkflowContext = workflowRuntimeMode === "active"

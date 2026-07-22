@@ -1,3 +1,4 @@
+use git2::Repository;
 use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -40,14 +41,61 @@ pub(crate) struct WorkflowRuleCandidate {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct WorkflowKnowledgeCandidate {
+    knowledge_id: String,
     path: String,
     title: String,
     score: u32,
     matched_terms: Vec<String>,
-    #[serde(skip)]
     content_fingerprint: String,
     #[serde(skip)]
     estimated_tokens: usize,
+    freshness: WorkflowKnowledgeFreshness,
+    #[serde(skip)]
+    content: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WorkflowKnowledgeFreshness {
+    state: String,
+    reason: String,
+    source_project: String,
+    source_revision: String,
+    source_branch: String,
+    verified_at: String,
+    implementation_status: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WorkflowRetrievalOmission {
+    knowledge_id: String,
+    path: String,
+    reason: String,
+    detail: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WorkflowRetrievalSelection {
+    knowledge_id: String,
+    path: String,
+    content_fingerprint: String,
+    estimated_tokens: usize,
+    freshness: WorkflowKnowledgeFreshness,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WorkflowRetrievalReceipt {
+    schema_version: u32,
+    query_fingerprint: String,
+    project_id: String,
+    index_revision: String,
+    selected: Vec<WorkflowRetrievalSelection>,
+    omitted: Vec<WorkflowRetrievalOmission>,
+    cache_hit: bool,
+    estimated_injected_tokens: usize,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -141,6 +189,7 @@ pub(crate) struct WorkflowHostPreflightPreview {
     validation_suggestions: Vec<String>,
     source_errors: Vec<String>,
     knowledge_cache_hit: bool,
+    retrieval_receipt: WorkflowRetrievalReceipt,
     context_fragments: Vec<WorkflowContextFragment>,
     context_plan: WorkflowContextPlan,
     completion_plan: WorkflowCompletionPlan,
@@ -149,6 +198,8 @@ pub(crate) struct WorkflowHostPreflightPreview {
 
 #[derive(Clone)]
 struct KnowledgeDocument {
+    knowledge_id: String,
+    project_id: String,
     path: String,
     title: String,
     normalized_path: String,
@@ -156,6 +207,21 @@ struct KnowledgeDocument {
     normalized_content: String,
     content_fingerprint: String,
     estimated_tokens: usize,
+    lifecycle_status: String,
+    implementation_status: String,
+    source_project: String,
+    source_revision: String,
+    source_branch: String,
+    verified_at: String,
+    content: String,
+}
+
+struct RankedKnowledge {
+    candidates: Vec<WorkflowKnowledgeCandidate>,
+    omissions: Vec<WorkflowRetrievalOmission>,
+    project_id: String,
+    index_revision: String,
+    cache_hit: bool,
 }
 
 fn content_fingerprint(content: &str) -> String {
@@ -173,6 +239,93 @@ fn estimate_tokens(content: &str) -> usize {
         }
     }
     ascii.div_ceil(4).saturating_add(non_ascii)
+}
+
+fn frontmatter_scalar(content: &str, key: &str) -> String {
+    let mut lines = content.lines();
+    if lines.next().map(str::trim) != Some("---") {
+        return String::new();
+    }
+    for line in lines {
+        if line.trim() == "---" {
+            break;
+        }
+        let Some((candidate, value)) = line.split_once(':') else {
+            continue;
+        };
+        if candidate.trim() == key {
+            return value.trim().trim_matches(['"', '\'']).to_string();
+        }
+    }
+    String::new()
+}
+
+fn active_knowledge_status(status: &str) -> bool {
+    status.is_empty()
+        || matches!(
+            status.to_ascii_lowercase().as_str(),
+            "active" | "fixed" | "completed" | "verified" | "stable"
+        )
+}
+
+fn unknown_freshness(document: &KnowledgeDocument, reason: &str) -> WorkflowKnowledgeFreshness {
+    WorkflowKnowledgeFreshness {
+        state: "unknown".to_string(),
+        reason: reason.to_string(),
+        source_project: document.source_project.clone(),
+        source_revision: document.source_revision.clone(),
+        source_branch: document.source_branch.clone(),
+        verified_at: document.verified_at.clone(),
+        implementation_status: document.implementation_status.clone(),
+    }
+}
+
+fn knowledge_freshness(
+    document: &KnowledgeDocument,
+    repository: Option<&Repository>,
+) -> WorkflowKnowledgeFreshness {
+    if document.source_revision.is_empty() {
+        return unknown_freshness(document, "source_revision_missing");
+    }
+    if !document.source_project.is_empty()
+        && !document.project_id.is_empty()
+        && document.source_project != document.project_id
+    {
+        return unknown_freshness(document, "source_project_mismatch");
+    }
+    let Some(repository) = repository else {
+        return unknown_freshness(document, "source_repository_unavailable");
+    };
+    let Ok(head) = repository.head() else {
+        return unknown_freshness(document, "source_head_unavailable");
+    };
+    let Some(head_oid) = head.target() else {
+        return unknown_freshness(document, "source_head_unavailable");
+    };
+    let Ok(source_object) = repository.revparse_single(&document.source_revision) else {
+        return unknown_freshness(document, "source_revision_unavailable");
+    };
+    let Ok(source_commit) = source_object.peel_to_commit() else {
+        return unknown_freshness(document, "source_revision_not_commit");
+    };
+    let is_current = head_oid == source_commit.id()
+        || repository
+            .graph_descendant_of(head_oid, source_commit.id())
+            .unwrap_or(false);
+    WorkflowKnowledgeFreshness {
+        state: if is_current { "current" } else { "stale" }.to_string(),
+        reason: if is_current {
+            "source_revision_is_ancestor"
+        } else {
+            "source_revision_not_ancestor"
+        }
+        .to_string(),
+        source_project: document.source_project.clone(),
+        source_revision: document.source_revision.clone(),
+        source_branch: document.source_branch.clone(),
+        verified_at: document.verified_at.clone(),
+        implementation_status: document.implementation_status.clone(),
+    }
 }
 
 #[derive(Clone)]
@@ -379,7 +532,7 @@ fn knowledge_fingerprint(files: &[PathBuf]) -> String {
     format!("{:x}", hasher.finalize())
 }
 
-fn load_knowledge_documents(project_dir: &Path) -> (Arc<Vec<KnowledgeDocument>>, bool) {
+fn load_knowledge_documents(project_dir: &Path) -> (Arc<Vec<KnowledgeDocument>>, bool, String) {
     let mut files = Vec::new();
     collect_markdown_files(project_dir, 0, &mut files);
     files.sort();
@@ -388,7 +541,11 @@ fn load_knowledge_documents(project_dir: &Path) -> (Arc<Vec<KnowledgeDocument>>,
     if let Ok(cache) = knowledge_cache().lock() {
         if let Some(cached) = cache.get(&cache_key) {
             if cached.fingerprint == fingerprint {
-                return (Arc::clone(&cached.documents), true);
+                return (
+                    Arc::clone(&cached.documents),
+                    true,
+                    cached.fingerprint.clone(),
+                );
             }
         }
     }
@@ -412,13 +569,28 @@ fn load_knowledge_documents(project_dir: &Path) -> (Arc<Vec<KnowledgeDocument>>,
         let normalized = normalized_path(&path);
         let content_fingerprint = content_fingerprint(&content);
         let estimated_tokens = estimate_tokens(&content);
+        let project_id = frontmatter_scalar(&content, "项目");
+        let source_project = frontmatter_scalar(&content, "source_project");
         documents.push(KnowledgeDocument {
+            knowledge_id: frontmatter_scalar(&content, "id"),
+            project_id: project_id.clone(),
             path: normalized.clone(),
             normalized_path: normalized.to_lowercase(),
             normalized_title: title.to_lowercase(),
             normalized_content: content.to_lowercase(),
             content_fingerprint,
             estimated_tokens,
+            lifecycle_status: frontmatter_scalar(&content, "状态"),
+            implementation_status: frontmatter_scalar(&content, "实现状态"),
+            source_project: if source_project.is_empty() {
+                project_id
+            } else {
+                source_project
+            },
+            source_revision: frontmatter_scalar(&content, "source_revision"),
+            source_branch: frontmatter_scalar(&content, "source_branch"),
+            verified_at: frontmatter_scalar(&content, "verified_at"),
+            content,
             title,
         });
     }
@@ -432,12 +604,12 @@ fn load_knowledge_documents(project_dir: &Path) -> (Arc<Vec<KnowledgeDocument>>,
         cache.insert(
             cache_key,
             CachedKnowledgeIndex {
-                fingerprint,
+                fingerprint: fingerprint.clone(),
                 documents: Arc::clone(&documents),
             },
         );
     }
-    (documents, false)
+    (documents, false, fingerprint)
 }
 
 fn task_terms(task: &str) -> Vec<String> {
@@ -505,22 +677,47 @@ fn rank_knowledge(
     workspace_path: &Path,
     task: &str,
     errors: &mut Vec<String>,
-) -> (Vec<WorkflowKnowledgeCandidate>, bool) {
+) -> RankedKnowledge {
+    let fallback_project_id = normalized_project_name(workspace_name);
     let Some(root) = root else {
         errors.push("development knowledge base unavailable".to_string());
-        return (Vec::new(), false);
+        return RankedKnowledge {
+            candidates: Vec::new(),
+            omissions: Vec::new(),
+            project_id: fallback_project_id,
+            index_revision: String::new(),
+            cache_hit: false,
+        };
     };
     let Some(project_dir) = resolve_project_knowledge_dir(root, workspace_name, workspace_path)
     else {
         errors.push(format!("project knowledge not found for {workspace_name}"));
-        return (Vec::new(), false);
+        return RankedKnowledge {
+            candidates: Vec::new(),
+            omissions: Vec::new(),
+            project_id: fallback_project_id,
+            index_revision: String::new(),
+            cache_hit: false,
+        };
     };
     let terms = task_terms(task);
     if terms.is_empty() {
-        return (Vec::new(), false);
+        return RankedKnowledge {
+            candidates: Vec::new(),
+            omissions: Vec::new(),
+            project_id: fallback_project_id,
+            index_revision: String::new(),
+            cache_hit: false,
+        };
     }
-    let (documents, cache_hit) = load_knowledge_documents(&project_dir);
+    let (documents, cache_hit, index_revision) = load_knowledge_documents(&project_dir);
+    let project_id = documents
+        .iter()
+        .find_map(|document| (!document.project_id.is_empty()).then(|| document.project_id.clone()))
+        .unwrap_or(fallback_project_id);
+    let repository = Repository::discover(workspace_path).ok();
     let mut candidates = Vec::new();
+    let mut omissions = Vec::new();
     for document in documents.iter() {
         let mut score = 0;
         let mut matched_terms = Vec::new();
@@ -542,13 +739,45 @@ fn rank_knowledge(
             }
         }
         if score >= MIN_KNOWLEDGE_MATCH_SCORE {
+            let knowledge_id = if document.knowledge_id.is_empty() {
+                document.path.clone()
+            } else {
+                document.knowledge_id.clone()
+            };
+            if !active_knowledge_status(&document.lifecycle_status) {
+                omissions.push(WorkflowRetrievalOmission {
+                    knowledge_id,
+                    path: document.path.clone(),
+                    reason: "lifecycle".to_string(),
+                    detail: document.lifecycle_status.clone(),
+                });
+                continue;
+            }
+            let freshness = knowledge_freshness(document, repository.as_ref());
+            if !document.source_revision.is_empty() && freshness.state != "current" {
+                omissions.push(WorkflowRetrievalOmission {
+                    knowledge_id,
+                    path: document.path.clone(),
+                    reason: if freshness.state == "stale" {
+                        "source_revision_stale"
+                    } else {
+                        "source_revision_unverifiable"
+                    }
+                    .to_string(),
+                    detail: freshness.reason,
+                });
+                continue;
+            }
             candidates.push(WorkflowKnowledgeCandidate {
+                knowledge_id,
                 path: document.path.clone(),
                 title: document.title.clone(),
                 score,
                 matched_terms,
                 content_fingerprint: document.content_fingerprint.clone(),
                 estimated_tokens: document.estimated_tokens,
+                freshness,
+                content: document.content.clone(),
             });
         }
     }
@@ -559,7 +788,13 @@ fn rank_knowledge(
             .then(left.path.cmp(&right.path))
     });
     candidates.truncate(MAX_KNOWLEDGE_CANDIDATES);
-    (candidates, cache_hit)
+    RankedKnowledge {
+        candidates,
+        omissions,
+        project_id,
+        index_revision,
+        cache_hit,
+    }
 }
 
 fn fingerprint_context_sources<'a>(
@@ -982,8 +1217,7 @@ fn rule_context_fragments(rules: &[WorkflowRuleCandidate]) -> Vec<WorkflowContex
 }
 
 fn knowledge_excerpt(candidate: &WorkflowKnowledgeCandidate) -> Option<String> {
-    let content = fs::read_to_string(Path::new(&candidate.path)).ok()?;
-    let lines = content.lines().collect::<Vec<_>>();
+    let lines = candidate.content.lines().collect::<Vec<_>>();
     let normalized_terms = candidate
         .matched_terms
         .iter()
@@ -1016,7 +1250,10 @@ fn knowledge_excerpt(candidate: &WorkflowKnowledgeCandidate) -> Option<String> {
 fn knowledge_context_fragments(
     candidates: &[WorkflowKnowledgeCandidate],
     context_plan: &WorkflowContextPlan,
-) -> Vec<WorkflowContextFragment> {
+) -> (
+    Vec<WorkflowContextFragment>,
+    Vec<WorkflowRetrievalSelection>,
+) {
     let selected_paths = context_plan
         .sources
         .iter()
@@ -1025,6 +1262,7 @@ fn knowledge_context_fragments(
         .collect::<HashSet<_>>();
     let mut total_chars = 0;
     let mut fragments = Vec::new();
+    let mut selections = Vec::new();
     for candidate in candidates
         .iter()
         .filter(|candidate| selected_paths.contains(candidate.path.as_str()))
@@ -1044,8 +1282,97 @@ fn knowledge_context_fragments(
             kind: "application".to_string(),
             value,
         });
+        selections.push(WorkflowRetrievalSelection {
+            knowledge_id: candidate.knowledge_id.clone(),
+            path: candidate.path.clone(),
+            content_fingerprint: candidate.content_fingerprint.clone(),
+            estimated_tokens: estimate_tokens(&fragments.last().expect("fragment").value),
+            freshness: candidate.freshness.clone(),
+        });
     }
-    fragments
+    (fragments, selections)
+}
+
+fn build_retrieval_receipt(
+    task: &str,
+    ranking: &RankedKnowledge,
+    context_plan: &WorkflowContextPlan,
+    selected: Vec<WorkflowRetrievalSelection>,
+) -> WorkflowRetrievalReceipt {
+    let selected_paths = selected
+        .iter()
+        .map(|item| item.path.as_str())
+        .collect::<HashSet<_>>();
+    let planned_paths = context_plan
+        .sources
+        .iter()
+        .filter(|source| source.phase == "dynamic" && source.selected)
+        .map(|source| source.path.as_str())
+        .collect::<HashSet<_>>();
+    let mut omitted = ranking.omissions.clone();
+    for candidate in &ranking.candidates {
+        if selected_paths.contains(candidate.path.as_str()) {
+            continue;
+        }
+        omitted.push(WorkflowRetrievalOmission {
+            knowledge_id: candidate.knowledge_id.clone(),
+            path: candidate.path.clone(),
+            reason: if planned_paths.contains(candidate.path.as_str()) {
+                "context_fragment_limit"
+            } else {
+                "context_budget"
+            }
+            .to_string(),
+            detail: String::new(),
+        });
+    }
+    WorkflowRetrievalReceipt {
+        schema_version: 1,
+        query_fingerprint: content_fingerprint(task),
+        project_id: ranking.project_id.clone(),
+        index_revision: ranking.index_revision.clone(),
+        estimated_injected_tokens: selected.iter().map(|item| item.estimated_tokens).sum(),
+        selected,
+        omitted,
+        cache_hit: ranking.cache_hit,
+    }
+}
+
+fn retrieval_receipt_fragment(receipt: &WorkflowRetrievalReceipt) -> WorkflowContextFragment {
+    let selected = receipt
+        .selected
+        .iter()
+        .map(|item| {
+            format!(
+                "{}@{}",
+                item.knowledge_id,
+                item.content_fingerprint
+                    .chars()
+                    .take(12)
+                    .collect::<String>()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let omitted = receipt
+        .omitted
+        .iter()
+        .take(8)
+        .map(|item| format!("{}:{}", item.knowledge_id, item.reason))
+        .collect::<Vec<_>>()
+        .join(",");
+    WorkflowContextFragment {
+        source_id: "cm.knowledge.receipt".to_string(),
+        kind: "application".to_string(),
+        value: format!(
+            "CM retrieval receipt (do not reread unchanged sources): query={} project={} index={} selected=[{}] omitted=[{}]",
+            receipt.query_fingerprint,
+            receipt.project_id,
+            receipt.index_revision,
+            selected,
+            omitted
+        ),
+    }
 }
 
 fn build_preview(
@@ -1059,7 +1386,7 @@ fn build_preview(
 ) -> WorkflowHostPreflightPreview {
     let rules = discover_rules(workspace_path);
     let mut source_errors = Vec::new();
-    let (knowledge_candidates, knowledge_cache_hit) = rank_knowledge(
+    let ranking = rank_knowledge(
         knowledge_root,
         workspace_name,
         workspace_path,
@@ -1070,15 +1397,19 @@ fn build_preview(
     let completion_plan = build_completion_plan(task, &impacts);
     let context_plan = build_context_plan(
         &rules,
-        &knowledge_candidates,
+        &ranking.candidates,
         &completion_plan,
         &mut source_errors,
     );
     let mut context_fragments = rule_context_fragments(&rules);
-    context_fragments.extend(knowledge_context_fragments(
-        &knowledge_candidates,
-        &context_plan,
-    ));
+    let (knowledge_fragments, selected_knowledge) =
+        knowledge_context_fragments(&ranking.candidates, &context_plan);
+    let retrieval_receipt =
+        build_retrieval_receipt(task, &ranking, &context_plan, selected_knowledge);
+    if !retrieval_receipt.selected.is_empty() || !retrieval_receipt.omitted.is_empty() {
+        context_fragments.push(retrieval_receipt_fragment(&retrieval_receipt));
+    }
+    context_fragments.extend(knowledge_fragments);
     if let Some(fragment) = completion_context_fragment(&completion_plan) {
         context_fragments.push(fragment);
     }
@@ -1101,12 +1432,13 @@ fn build_preview(
         model,
         task_length: task.chars().count(),
         rules,
-        knowledge_candidates,
+        knowledge_candidates: ranking.candidates,
         impacts,
         impact_summary,
         validation_suggestions,
         source_errors,
-        knowledge_cache_hit,
+        knowledge_cache_hit: ranking.cache_hit,
+        retrieval_receipt,
         context_fragments,
         context_plan,
         completion_plan,
@@ -1243,9 +1575,87 @@ mod tests {
             .sources
             .iter()
             .any(|source| source.kind == "knowledge"));
+        assert_eq!(preview.retrieval_receipt.selected.len(), 1);
+        assert!(preview.context_fragments.iter().any(|fragment| {
+            fragment.source_id == "cm.knowledge.receipt"
+                && fragment.value.contains("do not reread unchanged sources")
+        }));
         let serialized = serde_json::to_string(&preview).expect("preview json");
         assert!(!serialized.contains(task));
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn declared_unverifiable_source_revision_is_omitted() {
+        let root = temp_root("knowledge-freshness");
+        let workspace = root.join("ThreadFleet");
+        let knowledge = root
+            .join("knowledge")
+            .join("20-项目知识")
+            .join("ThreadFleet")
+            .join("BUG");
+        fs::create_dir_all(&workspace).expect("workspace");
+        fs::create_dir_all(&knowledge).expect("knowledge dir");
+        fs::write(
+            knowledge.join("stale.md"),
+            "---\nid: stale-knowledge\n项目: ThreadFleet\n状态: active\n实现状态: verified\nsource_project: ThreadFleet\nsource_revision: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nsource_branch: main\nverified_at: 2026-07-22\n---\n# 检索控制面完整实现\n检索控制面完整实现。",
+        )
+        .expect("knowledge note");
+
+        let preview = build_preview(
+            "ThreadFleet",
+            &workspace,
+            "检索控制面完整实现",
+            "active".to_string(),
+            "openai".to_string(),
+            None,
+            Some(&root.join("knowledge")),
+        );
+
+        assert!(preview.knowledge_candidates.is_empty());
+        assert!(preview.retrieval_receipt.omitted.iter().any(|item| {
+            item.knowledge_id == "stale-knowledge" && item.reason == "source_revision_unverifiable"
+        }));
+        assert!(!preview.context_fragments.iter().any(|fragment| {
+            fragment.source_id.starts_with("cm.knowledge.")
+                && fragment.source_id != "cm.knowledge.receipt"
+        }));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn source_revision_ancestor_remains_current_across_branches() {
+        let repository = Repository::discover(env!("CARGO_MANIFEST_DIR")).expect("repository");
+        let head = repository.head().expect("head");
+        let revision = head.target().expect("head oid").to_string();
+        let branch = head.shorthand().unwrap_or_default().to_string();
+        let mut document = KnowledgeDocument {
+            knowledge_id: "current-knowledge".to_string(),
+            project_id: "codex-monitor".to_string(),
+            path: "knowledge.md".to_string(),
+            title: "Knowledge".to_string(),
+            normalized_path: "knowledge.md".to_string(),
+            normalized_title: "knowledge".to_string(),
+            normalized_content: "knowledge".to_string(),
+            content_fingerprint: content_fingerprint("knowledge"),
+            estimated_tokens: 3,
+            lifecycle_status: "active".to_string(),
+            implementation_status: "verified".to_string(),
+            source_project: "codex-monitor".to_string(),
+            source_revision: revision,
+            source_branch: branch,
+            verified_at: "2026-07-22".to_string(),
+            content: "knowledge".to_string(),
+        };
+
+        let current = knowledge_freshness(&document, Some(&repository));
+        assert_eq!(current.state, "current");
+        assert_eq!(current.reason, "source_revision_is_ancestor");
+
+        document.source_branch = "different-branch".to_string();
+        let current_on_branch = knowledge_freshness(&document, Some(&repository));
+        assert_eq!(current_on_branch.state, "current");
+        assert_eq!(current_on_branch.reason, "source_revision_is_ancestor");
     }
 
     #[test]
@@ -1330,20 +1740,42 @@ mod tests {
         }];
         let knowledge = vec![
             WorkflowKnowledgeCandidate {
+                knowledge_id: "small-id".to_string(),
                 path: "D:/knowledge/small.md".to_string(),
                 title: "Small".to_string(),
                 score: 10,
                 matched_terms: vec!["small".to_string()],
                 content_fingerprint: content_fingerprint("small"),
                 estimated_tokens: 10,
+                freshness: WorkflowKnowledgeFreshness {
+                    state: "unknown".to_string(),
+                    reason: "source_revision_missing".to_string(),
+                    source_project: String::new(),
+                    source_revision: String::new(),
+                    source_branch: String::new(),
+                    verified_at: String::new(),
+                    implementation_status: String::new(),
+                },
+                content: "small".to_string(),
             },
             WorkflowKnowledgeCandidate {
+                knowledge_id: "large-id".to_string(),
                 path: "D:/knowledge/large.md".to_string(),
                 title: "Large".to_string(),
                 score: 5,
                 matched_terms: vec!["large".to_string()],
                 content_fingerprint: content_fingerprint("large"),
                 estimated_tokens: DEFAULT_CONTEXT_BUDGET_TOKENS,
+                freshness: WorkflowKnowledgeFreshness {
+                    state: "unknown".to_string(),
+                    reason: "source_revision_missing".to_string(),
+                    source_project: String::new(),
+                    source_revision: String::new(),
+                    source_branch: String::new(),
+                    verified_at: String::new(),
+                    implementation_status: String::new(),
+                },
+                content: "large".to_string(),
             },
         ];
         let mut errors = Vec::new();

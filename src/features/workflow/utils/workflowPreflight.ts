@@ -25,7 +25,7 @@ const BUILTIN_SKILL_RULES: Record<string, BuiltinSkillRule> = {
     keywords: ["code review", "review diff", "审查代码", "检查改动", "复盘检查", "代码审查"],
   },
   diagnose: {
-    keywords: ["diagnose", "debug", "bug", "报错", "错误", "失败", "无响应", "卡死", "异常", "排查"],
+    keywords: ["diagnose", "debug", "诊断", "调试", "排查"],
   },
   "frontend-design": {
     keywords: ["frontend ui", "web ui", "react ui", "vue ui", "网页", "前端", "css"],
@@ -164,13 +164,7 @@ function resolveTrigger(
   if (keyword) {
     return { reason: "keyword", matchedValue: keyword };
   }
-  const descriptionTokens = normalized(skill.description ?? "")
-    .split(/[^\p{L}\p{N}]+/u)
-    .filter((token) => token.length >= 5);
-  const descriptionToken = descriptionTokens.find((token) => task.includes(token));
-  return descriptionToken
-    ? { reason: "description", matchedValue: descriptionToken }
-    : null;
+  return null;
 }
 
 function buildSkillTrigger({

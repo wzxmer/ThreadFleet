@@ -134,4 +134,19 @@ describe("workflow preflight", () => {
       priority: 10,
     });
   });
+
+  it("does not trigger diagnose for generic BUG discussion or description overlap", () => {
+    const preview = buildWorkflowPreflightPreview({
+      task: "讨论当前 BUG 和知识机制是否需要优化",
+      skills: [{
+        name: "diagnose",
+        path: "/skills/diagnose",
+        description: "Diagnose hard bugs and performance regressions",
+      }],
+      providerKind: "openai",
+      model: "gpt-5",
+    });
+
+    expect(preview.triggeredSkills).toEqual([]);
+  });
 });

@@ -123,4 +123,54 @@ describe("workflow context compilation", () => {
     expect(result.additionalContext["cm.agent.0"]?.value).toContain("use DOM assertions");
     expect(result.additionalContext["cm.agent.0"]?.value).not.toContain("inspect pixels");
   });
+
+  it("deduplicates host content and reports the omitted source", () => {
+    const result = compileWorkflowAdditionalContext({
+      task: "inspect context",
+      preview: { ...preview, triggeredSkills: [] },
+      hostPreview: {
+        ...hostPreview,
+        contextFragments: [
+          { sourceId: "cm.rule.0", kind: "application", value: "same rules\r\n" },
+          { sourceId: "cm.rule.1", kind: "application", value: "same rules\n" },
+        ],
+      },
+      skills: [],
+      agents: [],
+    });
+
+    expect(Object.keys(result.additionalContext)).toEqual(["cm.rule.0"]);
+    expect(result.omittedSources).toEqual([
+      { sourceId: "cm.rule.1", reason: "duplicate_content" },
+    ]);
+    expect(result.contextSummary).toContain("omitted:1");
+  });
+
+  it("does not claim a skill was included when the context budget is exhausted", () => {
+    const result = compileWorkflowAdditionalContext({
+      task: "debug",
+      preview,
+      hostPreview: {
+        ...hostPreview,
+        contextFragments: Array.from({ length: 4 }, (_, index) => ({
+          sourceId: `cm.host.${index}`,
+          kind: "application" as const,
+          value: String(index).repeat(12_000),
+        })),
+      },
+      skills: [{
+        name: "diagnose",
+        path: "/skills/diagnose",
+        instructions: "diagnose systematically",
+      }],
+      agents: [],
+    });
+
+    expect(result.includedSkills).toEqual([]);
+    expect(result.additionalContext["cm.skill.0"]).toBeUndefined();
+    expect(result.omittedSources).toContainEqual({
+      sourceId: "cm.skill.0",
+      reason: "budget",
+    });
+  });
 });

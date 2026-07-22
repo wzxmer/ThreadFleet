@@ -1581,10 +1581,44 @@ export type WorkflowRuleCandidate = {
 };
 
 export type WorkflowKnowledgeCandidate = {
+  knowledgeId?: string;
   path: string;
   title: string;
   score: number;
   matchedTerms: string[];
+  contentFingerprint?: string;
+  estimatedTokens?: number;
+  freshness?: {
+    state: "current" | "stale" | "unknown";
+    reason: string;
+    sourceProject: string;
+    sourceRevision: string;
+    sourceBranch: string;
+    verifiedAt: string;
+    implementationStatus: string;
+  };
+};
+
+export type WorkflowRetrievalReceipt = {
+  schemaVersion: number;
+  queryFingerprint: string;
+  projectId: string;
+  indexRevision: string;
+  selected: Array<{
+    knowledgeId: string;
+    path: string;
+    contentFingerprint: string;
+    estimatedTokens: number;
+    freshness: WorkflowKnowledgeCandidate["freshness"];
+  }>;
+  omitted: Array<{
+    knowledgeId: string;
+    path: string;
+    reason: string;
+    detail: string;
+  }>;
+  cacheHit: boolean;
+  estimatedInjectedTokens: number;
 };
 
 export type WorkflowImpactItem = {
@@ -1650,6 +1684,7 @@ export type WorkflowHostPreflightPreview = {
   validationSuggestions: string[];
   sourceErrors: string[];
   knowledgeCacheHit: boolean;
+  retrievalReceipt?: WorkflowRetrievalReceipt;
   contextPlan?: WorkflowContextPlan;
   completionPlan?: WorkflowCompletionPlan;
   workflowGate?: WorkflowGateAdapterStatus | null;
@@ -1673,6 +1708,15 @@ export type KnowledgeQueryHit = {
   path: string;
   status: string;
   excerpt: string;
+  content_hash?: string;
+  freshness?: {
+    state: "current" | "stale" | "unknown";
+    reason: string;
+    source_project: string;
+    source_revision: string;
+    source_branch: string;
+    verified_at: string;
+  };
   citation: {
     knowledge_id: string;
     path: string;
@@ -1692,6 +1736,7 @@ export type KnowledgeQueryResponse = {
     results: KnowledgeQueryHit[];
     omitted: Array<Record<string, unknown>>;
     warnings: Array<Record<string, unknown>>;
+    retrieval_receipt?: Record<string, unknown>;
   };
   citations: KnowledgeQueryHit["citation"][];
   omitted: Array<Record<string, unknown>>;
@@ -1776,6 +1821,11 @@ export type WorkflowContextCompilation = {
   selectedAgents: string[];
   includedSkills: string[];
   blockedSkills: string[];
+  omittedSources: Array<{
+    sourceId: string;
+    reason: "empty" | "budget" | "duplicate_source" | "duplicate_content";
+  }>;
+  truncatedSources: string[];
   contextSummary: string;
 };
 

@@ -70,17 +70,38 @@ function addContextEntry(
   kind: "application" | "untrusted",
   value: string,
   usedChars: { value: number },
+  seenContent: Set<string>,
 ) {
-  if (usedChars.value >= MAX_CONTEXT_CHARS || !value.trim()) {
-    return;
+  const normalizedContent = value.replace(/\r\n/g, "\n").trim();
+  if (!normalizedContent) {
+    compilation.omittedSources.push({ sourceId, reason: "empty" });
+    return false;
+  }
+  if (sourceId in compilation.additionalContext) {
+    compilation.omittedSources.push({ sourceId, reason: "duplicate_source" });
+    return false;
+  }
+  if (seenContent.has(normalizedContent)) {
+    compilation.omittedSources.push({ sourceId, reason: "duplicate_content" });
+    return false;
+  }
+  if (usedChars.value >= MAX_CONTEXT_CHARS) {
+    compilation.omittedSources.push({ sourceId, reason: "budget" });
+    return false;
   }
   const remaining = MAX_CONTEXT_CHARS - usedChars.value;
   const limited = [...value].slice(0, Math.min(remaining, MAX_ENTRY_CHARS)).join("");
   if (!limited) {
-    return;
+    compilation.omittedSources.push({ sourceId, reason: "budget" });
+    return false;
   }
   compilation.additionalContext[sourceId] = { kind, value: limited };
   usedChars.value += [...limited].length;
+  seenContent.add(normalizedContent);
+  if ([...limited].length < [...value].length) {
+    compilation.truncatedSources.push(sourceId);
+  }
+  return true;
 }
 
 export function compileWorkflowAdditionalContext({
@@ -101,9 +122,12 @@ export function compileWorkflowAdditionalContext({
     selectedAgents: [],
     includedSkills: [],
     blockedSkills: [],
+    omittedSources: [],
+    truncatedSources: [],
     contextSummary: "",
   };
   const usedChars = { value: 0 };
+  const seenContent = new Set<string>();
   hostPreview?.contextFragments.forEach((fragment) => {
     addContextEntry(
       compilation,
@@ -111,6 +135,7 @@ export function compileWorkflowAdditionalContext({
       fragment.kind,
       fragment.value,
       usedChars,
+      seenContent,
     );
   });
 
@@ -129,14 +154,17 @@ export function compileWorkflowAdditionalContext({
       compilation.blockedSkills.push(trigger.skillName);
       return;
     }
-    addContextEntry(
+    const included = addContextEntry(
       compilation,
       `cm.skill.${index}`,
       skill.trustLevel === "untrusted" ? "untrusted" : "application",
       `CM skill: ${skill.name}\nSource: ${skill.path}\n${instructions}`,
       usedChars,
+      seenContent,
     );
-    compilation.includedSkills.push(trigger.skillName);
+    if (included) {
+      compilation.includedSkills.push(trigger.skillName);
+    }
   });
 
   const normalizedTask = normalized(task);
@@ -150,14 +178,17 @@ export function compileWorkflowAdditionalContext({
       if (!instructions) {
         return;
       }
-      addContextEntry(
+      const included = addContextEntry(
         compilation,
         `cm.agent.${index}`,
         agent.trustLevel === "untrusted" ? "untrusted" : "application",
         `CM agent: ${agent.name}\nSource: ${agent.path}\n${instructions}`,
         usedChars,
+        seenContent,
       );
-      compilation.selectedAgents.push(agent.name);
+      if (included) {
+        compilation.selectedAgents.push(agent.name);
+      }
     });
 
   compilation.contextSummary = [
@@ -165,6 +196,8 @@ export function compileWorkflowAdditionalContext({
     `skills:${compilation.includedSkills.join(",") || "none"}`,
     `agents:${compilation.selectedAgents.join(",") || "none"}`,
     `blocked:${compilation.blockedSkills.join(",") || "none"}`,
+    `omitted:${compilation.omittedSources.length}`,
+    `truncated:${compilation.truncatedSources.length}`,
   ].join("; ");
   return compilation;
 }
