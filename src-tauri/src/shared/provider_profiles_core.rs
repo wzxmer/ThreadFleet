@@ -524,7 +524,12 @@ mod tests {
             }),
             serde_json::json!({
                 "data": [
-                    { "id": "model-a", "name": "Model A refreshed" },
+                    {
+                        "id": "model-a",
+                        "name": "Model A refreshed",
+                        "supported_reasoning_efforts": ["high", "xhigh"],
+                        "default_reasoning_effort": "xhigh"
+                    },
                     { "id": "model-b", "name": "Model B" }
                 ]
             }),
@@ -537,7 +542,9 @@ mod tests {
                     {
                         "id": "model-a",
                         "name": "Model A refreshed",
-                        "context_window": 128000
+                        "context_window": 128000,
+                        "supported_reasoning_efforts": ["high", "xhigh"],
+                        "default_reasoning_effort": "xhigh"
                     },
                     { "id": "model-b", "name": "Model B" }
                 ]

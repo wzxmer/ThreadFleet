@@ -32,6 +32,10 @@ import { normalizeOpenAppTargets } from "@app/utils/openApp";
 import { getDefaultInterruptShortcut, isMacPlatform } from "@utils/shortcuts";
 import { isMobilePlatform } from "@utils/platformPaths";
 import { DEFAULT_COMMIT_MESSAGE_PROMPT } from "@utils/commitMessagePrompt";
+import {
+  normalizeReasoningEffortValue,
+  parseReasoningEffortOptions,
+} from "@utils/reasoningEfforts";
 
 const allowedThemes = new Set(["system", "light", "dark", "dim"]);
 const allowedAppLanguages = new Set(["system", "zh", "en"]);
@@ -217,6 +221,20 @@ function normalizeCodexKeyProfiles(
               id: model.id?.trim() ?? "",
               name: model.name?.trim() || null,
               contextWindow: normalizePositiveInteger(model.contextWindow),
+              ...(Array.isArray(model.supportedReasoningEfforts)
+                ? {
+                    supportedReasoningEfforts: parseReasoningEffortOptions(
+                      model.supportedReasoningEfforts,
+                    ),
+                  }
+                : {}),
+              ...(typeof model.defaultReasoningEffort === "string"
+                ? {
+                    defaultReasoningEffort: normalizeReasoningEffortValue(
+                      model.defaultReasoningEffort,
+                    ),
+                  }
+                : {}),
             }))
             .filter((model) => model.id.length > 0)
         : [];

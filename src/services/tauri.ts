@@ -77,6 +77,7 @@ import {
   normalizeThirdPartyUsagePayload,
 } from "@app/utils/thirdPartyKeyUsage";
 import type { ThirdPartyKeyUsageSnapshot } from "@app/utils/thirdPartyKeyUsage";
+import { readReasoningEffortMetadata } from "@utils/reasoningEfforts";
 import { consumeDevSendUserMessageThreadNotFound } from "./devRuntimeFaults";
 import type {
   GitFileDiff,
@@ -472,7 +473,12 @@ function normalizeProviderModelPayload(payload: unknown): CodexProviderModel[] {
         typeof rawContext === "number" && Number.isFinite(rawContext) && rawContext > 0
           ? Math.floor(rawContext)
           : null;
-      return { id, name, contextWindow };
+      return {
+        id,
+        name,
+        contextWindow,
+        ...readReasoningEffortMetadata(record),
+      };
     })
     .filter((model): model is CodexProviderModel => model !== null);
 }

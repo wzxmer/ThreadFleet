@@ -1,12 +1,10 @@
 import type { ModelOption } from "../../../types";
+import {
+  normalizeReasoningEffortValue,
+  readReasoningEffortMetadata,
+} from "@utils/reasoningEfforts";
 
-export function normalizeEffortValue(value: unknown): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
-}
+export const normalizeEffortValue = normalizeReasoningEffortValue;
 
 function extractModelItems(response: unknown): unknown[] {
   if (!response || typeof response !== "object") {
@@ -32,46 +30,6 @@ function extractModelItems(response: unknown): unknown[] {
   return [];
 }
 
-function parseReasoningEfforts(item: Record<string, unknown>): ModelOption["supportedReasoningEfforts"] {
-  const camel = item.supportedReasoningEfforts;
-  if (Array.isArray(camel)) {
-    return camel
-      .map((effort) => {
-        if (!effort || typeof effort !== "object") {
-          return null;
-        }
-        const entry = effort as Record<string, unknown>;
-        return {
-          reasoningEffort: String(entry.reasoningEffort ?? entry.reasoning_effort ?? ""),
-          description: String(entry.description ?? ""),
-        };
-      })
-      .filter((effort): effort is { reasoningEffort: string; description: string } =>
-        effort !== null,
-      );
-  }
-
-  const snake = item.supported_reasoning_efforts;
-  if (Array.isArray(snake)) {
-    return snake
-      .map((effort) => {
-        if (!effort || typeof effort !== "object") {
-          return null;
-        }
-        const entry = effort as Record<string, unknown>;
-        return {
-          reasoningEffort: String(entry.reasoningEffort ?? entry.reasoning_effort ?? ""),
-          description: String(entry.description ?? ""),
-        };
-      })
-      .filter((effort): effort is { reasoningEffort: string; description: string } =>
-        effort !== null,
-      );
-  }
-
-  return [];
-}
-
 export function parseModelListResponse(response: unknown): ModelOption[] {
   const items = extractModelItems(response);
 
@@ -84,15 +42,14 @@ export function parseModelListResponse(response: unknown): ModelOption[] {
       const modelSlug = String(record.model ?? record.id ?? "");
       const rawDisplayName = String(record.displayName || record.display_name || "");
       const displayName = rawDisplayName.trim().length > 0 ? rawDisplayName : modelSlug;
+      const reasoning = readReasoningEffortMetadata(record);
       return {
         id: String(record.id ?? record.model ?? ""),
         model: modelSlug,
         displayName,
         description: String(record.description ?? ""),
-        supportedReasoningEfforts: parseReasoningEfforts(record),
-        defaultReasoningEffort: normalizeEffortValue(
-          record.defaultReasoningEffort ?? record.default_reasoning_effort,
-        ),
+        supportedReasoningEfforts: reasoning.supportedReasoningEfforts ?? [],
+        defaultReasoningEffort: reasoning.defaultReasoningEffort ?? null,
         isDefault: Boolean(record.isDefault ?? record.is_default ?? false),
       } satisfies ModelOption;
     })

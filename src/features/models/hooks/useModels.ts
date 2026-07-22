@@ -144,17 +144,27 @@ export function useModels({
         (effort) => effort.reasoningEffort,
       );
       const currentEffort = normalizeEffortValue(selectedEffort);
-      if (preferCurrent && currentEffort) {
+      const supports = (effort: string | null) =>
+        effort !== null &&
+        supportedEfforts.some(
+          (supported) => supported.toLocaleLowerCase() === effort.toLocaleLowerCase(),
+        );
+      if (preferCurrent && currentEffort &&
+        (supportedEfforts.length === 0 || supports(currentEffort))) {
         return currentEffort;
       }
       if (supportedEfforts.length === 0) {
         return normalizeEffortValue(preferredEffort);
       }
       const preferred = normalizeEffortValue(preferredEffort);
-      if (preferred && supportedEfforts.includes(preferred)) {
+      if (supports(preferred)) {
         return preferred;
       }
-      return normalizeEffortValue(model.defaultReasoningEffort);
+      const defaultEffort = normalizeEffortValue(model.defaultReasoningEffort);
+      if (supports(defaultEffort)) {
+        return defaultEffort;
+      }
+      return supportedEfforts[0] ?? null;
     },
     [preferredEffort, selectedEffort],
   );
@@ -328,16 +338,21 @@ export function useModels({
       return;
     }
     const currentEffort = normalizeEffortValue(selectedEffort);
-    if (currentEffort) {
+    const supportedEfforts = selectedModel.supportedReasoningEfforts.map(
+      (effort) => effort.reasoningEffort.toLocaleLowerCase(),
+    );
+    if (
+      currentEffort &&
+      (supportedEfforts.length === 0 || supportedEfforts.includes(currentEffort.toLocaleLowerCase()))
+    ) {
       return;
     }
-    const nextEffort = normalizeEffortValue(selectedModel.defaultReasoningEffort);
-    if (nextEffort === null) {
-      return;
-    }
+    const nextEffort = resolveEffort(selectedModel, false);
     hasUserSelectedEffort.current = false;
-    setSelectedEffortState(nextEffort);
-  }, [selectedEffort, selectedModel]);
+    if (nextEffort !== selectedEffort) {
+      setSelectedEffortState(nextEffort);
+    }
+  }, [resolveEffort, selectedEffort, selectedModel]);
 
   useEffect(() => {
     if (!models.length) {
@@ -352,6 +367,10 @@ export function useModels({
     const shouldKeepUserSelection =
       hasUserSelectedModel.current && existingSelection !== null;
     if (shouldKeepUserSelection) {
+      const nextEffort = resolveEffort(existingSelection, hasUserSelectedEffort.current);
+      if (nextEffort !== selectedEffort) {
+        setSelectedEffortState(nextEffort);
+      }
       return;
     }
     const nextSelection =

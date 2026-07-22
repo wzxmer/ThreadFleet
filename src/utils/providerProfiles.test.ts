@@ -32,14 +32,32 @@ describe("resolveCodexProviderBaseUrl", () => {
   it("merges partial provider model results without losing metadata", () => {
     expect(
       mergeCodexProviderModels(
-        [{ id: "model-a", name: "Model A", contextWindow: 128000 }],
+        [{
+          id: "model-a",
+          name: "Model A",
+          contextWindow: 128000,
+          supportedReasoningEfforts: [
+            { reasoningEffort: "high", description: "High" },
+            { reasoningEffort: "xhigh", description: "Extra high" },
+          ],
+          defaultReasoningEffort: "high",
+        }],
         [
           { id: "model-a", name: null, contextWindow: null },
           { id: "model-b", name: "Model B", contextWindow: null },
         ],
       ),
     ).toEqual([
-      { id: "model-a", name: "Model A", contextWindow: 128000 },
+      {
+        id: "model-a",
+        name: "Model A",
+        contextWindow: 128000,
+        supportedReasoningEfforts: [
+          { reasoningEffort: "high", description: "High" },
+          { reasoningEffort: "xhigh", description: "Extra high" },
+        ],
+        defaultReasoningEffort: "high",
+      },
       { id: "model-b", name: "Model B", contextWindow: null },
     ]);
   });
@@ -123,7 +141,68 @@ describe("resolveCodexProviderBaseUrl", () => {
       { reasoningEffort: "low", description: "" },
       { reasoningEffort: "medium", description: "" },
       { reasoningEffort: "high", description: "" },
+      { reasoningEffort: "xhigh", description: "" },
     ]);
     expect(models[0]?.defaultReasoningEffort).toBe("medium");
+  });
+
+  it("prefers per-model reasoning levels over the provider fallback", () => {
+    const [model] = resolveCodexProviderModelOptions({
+      id: "custom",
+      name: "Custom",
+      providerKind: "custom",
+      keyEnvVar: "OPENAI_API_KEY",
+      key: "secret",
+      baseUrlEnvVar: "OPENAI_BASE_URL",
+      baseUrl: "https://api.example.com/v1",
+      model: "reasoning-model",
+      supportsThinking: true,
+      supportsReasoningEffort: true,
+      cachedModels: [{
+        id: "reasoning-model",
+        name: "Reasoning Model",
+        contextWindow: null,
+        supportedReasoningEfforts: [
+          { reasoningEffort: "high", description: "" },
+          { reasoningEffort: "xhigh", description: "" },
+        ],
+        defaultReasoningEffort: "xhigh",
+      }],
+    });
+
+    expect(model.supportedReasoningEfforts.map((option) => option.reasoningEffort)).toEqual([
+      "high",
+      "xhigh",
+    ]);
+    expect(model.defaultReasoningEffort).toBe("xhigh");
+  });
+
+  it("keeps the provider fallback when legacy metadata is null", () => {
+    const [model] = resolveCodexProviderModelOptions({
+      id: "legacy",
+      name: "Legacy",
+      providerKind: "custom",
+      keyEnvVar: "OPENAI_API_KEY",
+      key: "secret",
+      baseUrlEnvVar: "OPENAI_BASE_URL",
+      baseUrl: "https://api.example.com/v1",
+      model: "legacy-model",
+      supportsThinking: true,
+      supportsReasoningEffort: true,
+      cachedModels: [{
+        id: "legacy-model",
+        name: null,
+        contextWindow: null,
+        defaultReasoningEffort: null,
+      }],
+    });
+
+    expect(model.supportedReasoningEfforts.map((option) => option.reasoningEffort)).toEqual([
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+    ]);
+    expect(model.defaultReasoningEffort).toBe("medium");
   });
 });

@@ -610,10 +610,17 @@ export type CodexProviderKind =
   | "opencode"
   | "custom";
 
+export type ReasoningEffortOption = {
+  reasoningEffort: string;
+  description: string;
+};
+
 export type CodexProviderModel = {
   id: string;
   name: string | null;
   contextWindow: number | null;
+  supportedReasoningEfforts?: ReasoningEffortOption[];
+  defaultReasoningEffort?: string | null;
 };
 
 export type CodexKeyProfile = {
@@ -1186,7 +1193,7 @@ export type ModelOption = {
   model: string;
   displayName: string;
   description: string;
-  supportedReasoningEfforts: { reasoningEffort: string; description: string }[];
+  supportedReasoningEfforts: ReasoningEffortOption[];
   defaultReasoningEffort: string | null;
   isDefault: boolean;
 };

@@ -840,12 +840,24 @@ pub(crate) struct CodexKeyProfile {
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct CodexProviderReasoningEffort {
+    pub(crate) reasoning_effort: String,
+    #[serde(default)]
+    pub(crate) description: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct CodexProviderModel {
     pub(crate) id: String,
     #[serde(default)]
     pub(crate) name: Option<String>,
     #[serde(default)]
     pub(crate) context_window: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) supported_reasoning_efforts: Option<Vec<CodexProviderReasoningEffort>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) default_reasoning_effort: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -1994,9 +2006,20 @@ impl Default for AppSettings {
 #[cfg(test)]
 mod tests {
     use super::{
-        AppSettings, BackendMode, RemoteBackendProvider, WorkspaceEntry, WorkspaceGroup,
-        WorkspaceKind, WorkspaceSettings,
+        AppSettings, BackendMode, CodexProviderModel, RemoteBackendProvider, WorkspaceEntry,
+        WorkspaceGroup, WorkspaceKind, WorkspaceSettings,
     };
+
+    #[test]
+    fn provider_model_omits_absent_reasoning_metadata() {
+        let model: CodexProviderModel =
+            serde_json::from_str(r#"{"id":"legacy-model","name":null,"contextWindow":null}"#)
+                .expect("provider model deserialize");
+
+        let json = serde_json::to_value(model).expect("provider model serialize");
+        assert!(json.get("supportedReasoningEfforts").is_none());
+        assert!(json.get("defaultReasoningEffort").is_none());
+    }
 
     #[test]
     fn app_settings_defaults_from_empty_json() {

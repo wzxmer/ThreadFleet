@@ -150,6 +150,48 @@ describe("useModels", () => {
     });
   });
 
+  it("falls back when the selected effort is unsupported by the next model", async () => {
+    vi.mocked(getModelList).mockResolvedValueOnce({
+      result: {
+        data: [
+          {
+            id: "model-a",
+            model: "model-a",
+            supportedReasoningEfforts: [
+              { reasoningEffort: "high", description: "High" },
+              { reasoningEffort: "xhigh", description: "Extra high" },
+            ],
+            defaultReasoningEffort: "high",
+            isDefault: true,
+          },
+          {
+            id: "model-b",
+            model: "model-b",
+            supportedReasoningEfforts: [
+              { reasoningEffort: "low", description: "Low" },
+              { reasoningEffort: "medium", description: "Medium" },
+            ],
+            defaultReasoningEffort: "medium",
+            isDefault: false,
+          },
+        ],
+      },
+    });
+    vi.mocked(getConfigModel).mockResolvedValueOnce("model-a");
+    const { result } = renderHook(() => useModels({ activeWorkspace: workspace }));
+    await waitFor(() => expect(result.current.selectedModelId).toBe("model-a"));
+
+    act(() => {
+      result.current.setSelectedEffort("xhigh");
+      result.current.setSelectedModelId("model-b");
+    });
+
+    await waitFor(() => {
+      expect(result.current.selectedModelId).toBe("model-b");
+      expect(result.current.selectedEffort).toBe("medium");
+    });
+  });
+
   it("refreshes again after the workspace reconnects", async () => {
     vi.mocked(getModelList).mockResolvedValue({ result: { data: [] } });
     vi.mocked(getConfigModel).mockResolvedValue("custom-model");

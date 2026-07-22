@@ -4,6 +4,10 @@ import type {
   CodexProviderModel,
   ModelOption,
 } from "@/types";
+import {
+  normalizeReasoningEffortValue,
+  parseReasoningEffortOptions,
+} from "@utils/reasoningEfforts";
 
 const PROVIDER_BASE_URLS: Partial<
   Record<NonNullable<CodexKeyProfile["providerKind"]>, string>
@@ -14,7 +18,7 @@ const PROVIDER_BASE_URLS: Partial<
   opencode: "https://opencode.ai/zen/go/v1",
 };
 
-const PROVIDER_REASONING_EFFORTS = ["low", "medium", "high"].map(
+const PROVIDER_REASONING_EFFORTS = ["low", "medium", "high", "xhigh"].map(
   (reasoningEffort) => ({ reasoningEffort, description: "" }),
 );
 
@@ -47,10 +51,18 @@ export function mergeCodexProviderModels(
         continue;
       }
       const previous = merged.get(id);
+      const supportedReasoningEfforts = model.supportedReasoningEfforts === undefined
+        ? previous?.supportedReasoningEfforts
+        : parseReasoningEffortOptions(model.supportedReasoningEfforts);
+      const defaultReasoningEffort = model.defaultReasoningEffort === undefined
+        ? previous?.defaultReasoningEffort
+        : normalizeReasoningEffortValue(model.defaultReasoningEffort);
       merged.set(id, {
         id,
         name: model.name?.trim() || previous?.name || null,
         contextWindow: model.contextWindow ?? previous?.contextWindow ?? null,
+        ...(supportedReasoningEfforts !== undefined ? { supportedReasoningEfforts } : {}),
+        ...(defaultReasoningEffort !== undefined ? { defaultReasoningEffort } : {}),
       });
     }
   }
@@ -89,15 +101,42 @@ export function resolveCodexProviderModelOptions(
   if (selectedModel && !cachedModels.some((model) => model.id === selectedModel)) {
     cachedModels.unshift({ id: selectedModel, name: null, contextWindow: null });
   }
-  return cachedModels.map((model) => ({
-    id: model.id,
-    model: model.id,
-    displayName: model.name ?? model.id,
-    description: profile.name,
-    supportedReasoningEfforts: profile.supportsReasoningEffort
-      ? PROVIDER_REASONING_EFFORTS
-      : [],
-    defaultReasoningEffort: profile.supportsReasoningEffort ? "medium" : null,
-    isDefault: model.id === selectedModel,
-  }));
+  return cachedModels.map((model) => {
+    const modelDefault = normalizeReasoningEffortValue(model.defaultReasoningEffort);
+    const hasModelReasoningMetadata =
+      model.supportedReasoningEfforts !== undefined || modelDefault !== null;
+    const modelEfforts = parseReasoningEffortOptions(model.supportedReasoningEfforts ?? []);
+    if (
+      modelDefault &&
+      !modelEfforts.some(
+        (option) => option.reasoningEffort.toLocaleLowerCase() === modelDefault.toLocaleLowerCase(),
+      )
+    ) {
+      modelEfforts.push({ reasoningEffort: modelDefault, description: "" });
+    }
+    const supportedReasoningEfforts = hasModelReasoningMetadata
+      ? modelEfforts
+      : profile.supportsReasoningEffort
+        ? PROVIDER_REASONING_EFFORTS
+        : [];
+    const defaultReasoningEffort = hasModelReasoningMetadata
+      ? modelDefault ??
+        supportedReasoningEfforts.find(
+          (option) => option.reasoningEffort.toLocaleLowerCase() === "medium",
+        )?.reasoningEffort ??
+        supportedReasoningEfforts[0]?.reasoningEffort ??
+        null
+      : profile.supportsReasoningEffort
+        ? "medium"
+        : null;
+    return {
+      id: model.id,
+      model: model.id,
+      displayName: model.name ?? model.id,
+      description: profile.name,
+      supportedReasoningEfforts,
+      defaultReasoningEffort,
+      isDefault: model.id === selectedModel,
+    };
+  });
 }

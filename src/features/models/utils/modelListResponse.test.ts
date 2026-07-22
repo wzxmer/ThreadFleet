@@ -57,4 +57,23 @@ describe("parseModelListResponse", () => {
     expect(models[0].displayName).toBe("GPT-5.3-Codex-Spark");
     expect(models[1].displayName).toBe("gpt-5.2-codex");
   });
+
+  it("accepts string reasoning levels and preserves xhigh", () => {
+    const [model] = parseModelListResponse({
+      result: {
+        data: [{
+          id: "m1",
+          model: "reasoning-model",
+          supported_reasoning_efforts: ["high", "xhigh"],
+          default_reasoning_effort: "xhigh",
+        }],
+      },
+    });
+
+    expect(model.supportedReasoningEfforts).toEqual([
+      { reasoningEffort: "high", description: "" },
+      { reasoningEffort: "xhigh", description: "" },
+    ]);
+    expect(model.defaultReasoningEffort).toBe("xhigh");
+  });
 });

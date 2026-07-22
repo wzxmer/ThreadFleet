@@ -27,6 +27,7 @@ import {
   getOpenAppIcon,
   getThreadTokenUsage,
   getWorkspaceThirdPartyKeyUsage,
+  getProviderModels,
   listThreads,
   listSessionSources,
   listMcpServerStatus,
@@ -910,6 +911,35 @@ describe("tauri invoke wrappers", () => {
     expect(invokeMock).toHaveBeenCalledWith("set_tray_labels", {
       labels,
     });
+  });
+
+  it("preserves provider model reasoning levels including xhigh", async () => {
+    const invokeMock = vi.mocked(invoke);
+    invokeMock.mockResolvedValueOnce({
+      data: [{
+        id: "reasoning-model",
+        name: "Reasoning Model",
+        context_window: 128000,
+        supported_reasoning_efforts: [
+          "high",
+          { reasoning_effort: "xhigh", description: "Extra high" },
+        ],
+        default_reasoning_effort: "xhigh",
+      }],
+    });
+
+    await expect(getProviderModels("https://api.example.com/v1", "secret")).resolves.toEqual([
+      {
+        id: "reasoning-model",
+        name: "Reasoning Model",
+        contextWindow: 128000,
+        supportedReasoningEfforts: [
+          { reasoningEffort: "high", description: "" },
+          { reasoningEffort: "xhigh", description: "Extra high" },
+        ],
+        defaultReasoningEffort: "xhigh",
+      },
+    ]);
   });
 
   it("maps localized labels for the native menu", async () => {
