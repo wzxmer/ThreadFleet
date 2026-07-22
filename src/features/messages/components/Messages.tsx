@@ -313,6 +313,11 @@ export const Messages = memo(function Messages({
   const [searchQuery, setSearchQuery] = useState("");
   const [activeSearchIndex, setActiveSearchIndex] = useState(0);
   const [searchNavigationVersion, setSearchNavigationVersion] = useState(0);
+  const [resendViewSnapshot, setResendViewSnapshot] = useState<{
+    threadId: string | null;
+    messageId: string;
+    items: ConversationItem[];
+  } | null>(null);
   const styleMenuRef = useRef<HTMLDivElement | null>(null);
   const stylePanelHostRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -338,10 +343,36 @@ export const Messages = memo(function Messages({
     [onOpenThreadLink, workspaceId],
   );
 
+  const resendViewItems =
+    resendViewSnapshot?.threadId === threadId ? resendViewSnapshot.items : items;
+  const handleResendUserMessage = useCallback(
+    async (
+      message: Extract<ConversationItem, { kind: "message" }>,
+      text: string,
+    ): Promise<SendMessageResult> => {
+      if (!onResendUserMessage) {
+        return { status: "blocked" };
+      }
+      setResendViewSnapshot({ threadId, messageId: message.id, items });
+      try {
+        return await onResendUserMessage(text, message.images ?? [], {
+          replaceMessageId: message.id,
+        });
+      } finally {
+        setResendViewSnapshot((current) =>
+          current?.threadId === threadId && current.messageId === message.id
+            ? null
+            : current,
+        );
+      }
+    },
+    [items, onResendUserMessage, threadId],
+  );
+
   const hasActiveUserInputRequest = activeUserInputRequestId !== null;
   const retryableUserMessageId = useMemo(
-    () => getRetryableUserMessageId(items, interruptedStatus),
-    [interruptedStatus, items],
+    () => getRetryableUserMessageId(resendViewItems, interruptedStatus),
+    [interruptedStatus, resendViewItems],
   );
   const hasVisibleUserInputRequest = hasActiveUserInputRequest && Boolean(onUserInputSubmit);
   const userInputNode =
@@ -380,7 +411,7 @@ export const Messages = memo(function Messages({
     planFollowup,
     dismissPlanFollowup,
   } = useMessagesViewState({
-    items,
+    items: resendViewItems,
     threadId,
     isThinking,
     activeUserInputRequestId,
@@ -756,10 +787,7 @@ export const Messages = memo(function Messages({
           }
           onResendUserMessage={
             onResendUserMessage && item.id === retryableUserMessageId
-              ? (message, text) =>
-                  onResendUserMessage(text, message.images ?? [], {
-                    replaceMessageId: message.id,
-                  })
+              ? handleResendUserMessage
               : undefined
           }
           codeBlockCopyUseModifier={codeBlockCopyUseModifier}

@@ -674,6 +674,81 @@ describe("Messages", () => {
     });
   });
 
+  it("keeps the edited turn mounted while rollback refresh is pending", async () => {
+    let resolveResend: (result: SendMessageResult) => void = () => {};
+    const onResendUserMessage = vi.fn(
+      () =>
+        new Promise<SendMessageResult>((resolve) => {
+          resolveResend = resolve;
+        }),
+    );
+    const history: ConversationItem[] = [
+      { id: "msg-history-user", kind: "message", role: "user", text: "Earlier prompt" },
+      { id: "msg-history-agent", kind: "message", role: "assistant", text: "Earlier reply" },
+    ];
+    const failedTurn: ConversationItem[] = [
+      {
+        id: "msg-retry-user",
+        kind: "message",
+        role: "user",
+        text: "Original failed prompt",
+        turnId: "turn-retry",
+      },
+      {
+        id: "msg-retry-agent",
+        kind: "message",
+        role: "assistant",
+        text: "Turn failed: Service unavailable",
+        turnId: "turn-retry",
+      },
+    ];
+    const renderMessages = (items: ConversationItem[]) => (
+      <Messages
+        items={items}
+        threadId="thread-1"
+        workspaceId="ws-1"
+        isThinking={false}
+        openTargets={[]}
+        selectedOpenAppId=""
+        onResendUserMessage={onResendUserMessage}
+      />
+    );
+    const { rerender } = render(renderMessages([...history, ...failedTurn]));
+
+    fireEvent.click(screen.getByRole("button", { name: "编辑并重新发送" }));
+    fireEvent.change(screen.getByLabelText("编辑消息"), {
+      target: { value: "Edited retry prompt" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "重新发送" }));
+
+    rerender(renderMessages(history));
+
+    expect((screen.getByLabelText("编辑消息") as HTMLTextAreaElement).value).toBe(
+      "Edited retry prompt",
+    );
+    expect(screen.getByText("Turn failed: Service unavailable")).toBeTruthy();
+
+    rerender(
+      renderMessages([
+        ...history,
+        {
+          id: "msg-retry-user",
+          kind: "message",
+          role: "user",
+          text: "Edited retry prompt",
+          turnId: "turn-retry-next",
+        },
+      ]),
+    );
+    await act(async () => {
+      resolveResend({ status: "sent" });
+    });
+
+    await waitFor(() => expect(screen.queryByLabelText("编辑消息")).toBeNull());
+    expect(screen.getByText("Edited retry prompt")).toBeTruthy();
+    expect(screen.queryByText("Turn failed: Service unavailable")).toBeNull();
+  });
+
   it("does not offer retry when a pre-turn failure follows completed history", () => {
     const items: ConversationItem[] = [
       {
