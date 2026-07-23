@@ -146,7 +146,7 @@ Release 工作流统一使用 `src-tauri/tauri.conf.json` 中的合法 SemVer �
 
 ### 国内更新镜像（可选）
 
-镜像未配置时保持 GitHub-only，不影响构建。启用镜像时，在 GitHub `release` Environment 配置：
+镜像全部未配置时保持 GitHub-only，不影响构建。启用镜像时，在 GitHub `release` Environment 配置：
 
 - Variables：`TENCENT_UPDATE_BASE_URL`、`TENCENT_UPDATE_MANIFEST_URL`、`TENCENT_COS_BUCKET`、`TENCENT_COS_REGION`
 - Secrets：`TENCENT_COS_SECRET_ID`、`TENCENT_COS_SECRET_KEY`
@@ -155,7 +155,7 @@ Release 工作流统一使用 `src-tauri/tauri.conf.json` 中的合法 SemVer �
 - Variables：`TENCENT_CODEX_CLI_BASE_URL`、`TENCENT_CODEX_CLI_MANIFEST_URL`
 - Variables：`ALIYUN_CODEX_CLI_BASE_URL`、`ALIYUN_CODEX_CLI_MANIFEST_URL`
 
-`*_UPDATE_BASE_URL` 是公开下载根地址，`*_UPDATE_MANIFEST_URL` 通常为该根地址下的 `latest.json`。发布流程会生成版本目录、校验值和清单，并仅在对应配置完整时上传。
+`*_UPDATE_BASE_URL` 是公开下载根地址，`*_UPDATE_MANIFEST_URL` 通常为该根地址下的 `latest.json`。发布流程会生成版本目录、校验值和清单，并仅在对应配置完整时上传。Release 在构建前审计两家镜像配置并写入 Actions Summary；半配置、非 HTTPS 公共地址、只有下载线路但缺少上传凭据，都会直接阻止发布，避免生成无法回退的安装包。
 
 发布流程还会从 OpenAI 官方 Codex Release 获取各平台完整 CLI package（包含相关辅助组件），重新打包为统一 ZIP，生成 `codex-cli-latest.json` 并同步到 GitHub、COS 和 OSS。客户端未检测到可运行的 `codex app-server` 时，会提示用户确认后自动下载到应用数据目录，不修改系统 PATH。
 
