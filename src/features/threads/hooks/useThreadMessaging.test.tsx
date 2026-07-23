@@ -1076,15 +1076,20 @@ describe("useThreadMessaging telemetry", () => {
     expect(sendUserMessageService).not.toHaveBeenCalled();
   });
 
-  it("does not roll back history when the server rejects a turn before creation", async () => {
-    vi.mocked(sendUserMessageService).mockResolvedValue({
-      error: {
-        code: -32600,
-        message: "thread not found: eb8cbfc2-1a24-4f91-a29d-058915de4192",
-      },
-    } as Awaited<ReturnType<typeof sendUserMessageService>>);
+  it("resumes the thread runtime and retries turn/start once when the thread is missing", async () => {
+    vi.mocked(sendUserMessageService)
+      .mockResolvedValueOnce({
+        error: {
+          code: -32600,
+          message: "thread not found: eb8cbfc2-1a24-4f91-a29d-058915de4192",
+        },
+      } as Awaited<ReturnType<typeof sendUserMessageService>>)
+      .mockResolvedValueOnce({
+        result: { turn: { id: "turn-recovered" } },
+      } as Awaited<ReturnType<typeof sendUserMessageService>>);
     const dispatch = vi.fn();
     const pushThreadErrorMessage = vi.fn();
+    const ensureThreadRuntimeForWorkspace = vi.fn(async () => "thread-1");
     const { result } = renderHook(() =>
       useThreadMessaging({
         activeWorkspace: workspace,
@@ -1111,6 +1116,7 @@ describe("useThreadMessaging telemetry", () => {
         pushThreadErrorMessage,
         ensureThreadForActiveWorkspace: vi.fn(async () => "thread-1"),
         ensureThreadForWorkspace: vi.fn(async () => "thread-1"),
+        ensureThreadRuntimeForWorkspace,
         refreshThread: vi.fn(async () => null),
         forkThreadForWorkspace: vi.fn(async () => null),
         updateThreadParent: vi.fn(),
@@ -1125,17 +1131,34 @@ describe("useThreadMessaging telemetry", () => {
     const optimisticAction = dispatch.mock.calls
       .map(([action]) => action)
       .find((action) => action.type === "upsertItem");
-    expect(sendResult).toEqual({ status: "blocked" });
+    expect(sendResult).toEqual({ status: "sent" });
     expect(rollbackThreadService).not.toHaveBeenCalled();
-    expect(pushThreadErrorMessage).toHaveBeenCalledWith(
+    expect(sendUserMessageService).toHaveBeenCalledTimes(2);
+    expect(ensureThreadRuntimeForWorkspace).toHaveBeenNthCalledWith(
+      1,
+      "ws-1",
       "thread-1",
-      "Turn failed to start: thread not found: eb8cbfc2-1a24-4f91-a29d-058915de4192",
     );
+    expect(ensureThreadRuntimeForWorkspace).toHaveBeenNthCalledWith(
+      2,
+      "ws-1",
+      "thread-1",
+      true,
+    );
+    expect(pushThreadErrorMessage).not.toHaveBeenCalled();
     expect(dispatch).toHaveBeenCalledWith({
-      type: "removeItem",
+      type: "setItemTurnId",
       threadId: "thread-1",
       itemId: optimisticAction?.item.id,
+      turnId: "turn-recovered",
     });
+    expect(dispatch).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "removeItem",
+        threadId: "thread-1",
+        itemId: optimisticAction?.item.id,
+      }),
+    );
   });
 
   it("reuses the original message id when resending an edited message", async () => {

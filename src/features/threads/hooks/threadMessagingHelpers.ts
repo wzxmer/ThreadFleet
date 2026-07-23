@@ -93,6 +93,26 @@ export function isStaleSteerTurnError(message: string): boolean {
   return normalized.includes("active turn") && normalized.includes("not found");
 }
 
+export function isThreadNotFoundError(error: unknown): boolean {
+  let message = "";
+  if (typeof error === "string") {
+    message = error;
+  } else if (error instanceof Error) {
+    message = error.message;
+  } else if (error && typeof error === "object") {
+    const record = error as Record<string, unknown>;
+    if (typeof record.message === "string") {
+      message = record.message;
+    } else if (record.error && typeof record.error === "object") {
+      const nestedError = record.error as Record<string, unknown>;
+      if (typeof nestedError.message === "string") {
+        message = nestedError.message;
+      }
+    }
+  }
+  return message.trim().toLowerCase().includes("thread not found");
+}
+
 export function parseFastCommand(text: string): FastCommandAction {
   const arg = text.replace(/^\/fast\b/i, "").trim().toLowerCase();
   if (!arg) {

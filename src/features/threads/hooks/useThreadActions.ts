@@ -594,9 +594,14 @@ export function useThreadActions({
   );
 
   const ensureThreadRuntimeForWorkspace = useCallback(
-    async (workspaceId: string, threadId: string) =>
-      resumeThreadForWorkspace(workspaceId, threadId),
-    [resumeThreadForWorkspace],
+    async (workspaceId: string, threadId: string, force = false) => {
+      if (force) {
+        delete loadedThreadsRef.current[threadId];
+        delete loadedThreadRuntimeKeyRef.current[threadId];
+      }
+      return resumeThreadForWorkspace(workspaceId, threadId, force);
+    },
+    [loadedThreadRuntimeKeyRef, loadedThreadsRef, resumeThreadForWorkspace],
   );
 
   const forkThreadForWorkspace = useCallback(

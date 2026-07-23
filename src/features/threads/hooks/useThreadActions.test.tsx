@@ -301,6 +301,28 @@ describe("useThreadActions", () => {
     expect(resumeThread).not.toHaveBeenCalled();
   });
 
+  it("invalidates the loaded runtime cache before a forced ensure", async () => {
+    vi.mocked(resumeThread).mockRejectedValue(new Error("resume failed"));
+    const { result, loadedThreadsRef, loadedThreadRuntimeKeyRef } = renderActions({
+      loadedThreadsRef: { current: { "thread-1": true } },
+      loadedThreadRuntimeKeyRef: { current: { "thread-1": ":0" } },
+    });
+
+    let threadId: string | null = "unexpected";
+    await act(async () => {
+      threadId = await result.current.ensureThreadRuntimeForWorkspace(
+        "ws-1",
+        "thread-1",
+        true,
+      );
+    });
+
+    expect(threadId).toBeNull();
+    expect(resumeThread).toHaveBeenCalledTimes(1);
+    expect(loadedThreadsRef.current["thread-1"]).toBeUndefined();
+    expect(loadedThreadRuntimeKeyRef.current["thread-1"]).toBeUndefined();
+  });
+
   it("does not mark a stale resume response as loaded in a newer runtime", async () => {
     let runtimeContext = {
       sourceId: "source-a",

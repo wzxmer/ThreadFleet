@@ -61,6 +61,7 @@ import {
   buildStatusLines,
   buildTurnStartPayload,
   isStaleSteerTurnError,
+  isThreadNotFoundError,
   parseFastCommand,
   resolveSendMessageOptions,
   type SendMessageOptions,
@@ -341,6 +342,7 @@ type UseThreadMessagingOptions = {
   ensureThreadRuntimeForWorkspace?: (
     workspaceId: string,
     threadId: string,
+    force?: boolean,
   ) => Promise<string | null>;
   refreshThread: (workspaceId: string, threadId: string) => Promise<string | null>;
   forkThreadForWorkspace: (
@@ -872,7 +874,72 @@ export function useThreadMessaging({
             },
           });
         }
-        const response: Record<string, unknown> = shouldSteer
+        const turnStartPayload = {
+          ...buildTurnStartPayload({
+            model: resolvedModel,
+            effort: resolvedEffort,
+            serviceTier: resolvedServiceTier,
+            collaborationMode: sanitizedCollaborationMode,
+            accessMode: resolvedAccessMode,
+            images: preparedAttachments.images,
+            appMentions,
+          }),
+          ...(Object.keys(appliedWorkflowContext).length > 0
+            ? { additionalContext: appliedWorkflowContext }
+            : {}),
+        };
+        const sendTurnStartRequest = async () =>
+          (await sendUserMessageService(
+            workspace.id,
+            threadId,
+            preparedAttachments.text,
+            turnStartPayload,
+          )) as Record<string, unknown>;
+        let turnStartRecoveryAttempted = false;
+        const recoverMissingThreadRuntime = async (error: unknown) => {
+          if (
+            turnStartRecoveryAttempted ||
+            !ensureThreadRuntimeForWorkspace ||
+            !isThreadNotFoundError(error)
+          ) {
+            return false;
+          }
+          turnStartRecoveryAttempted = true;
+          onDebug?.({
+            id: `${Date.now()}-client-turn-start-runtime-recovery`,
+            timestamp: Date.now(),
+            source: "client",
+            label: "turn/start runtime recovery",
+            payload: {
+              workspaceId: workspace.id,
+              threadId,
+              error: error instanceof Error ? error.message : String(error),
+            },
+          });
+          const resumedThreadId = await ensureThreadRuntimeForWorkspace(
+            workspace.id,
+            threadId,
+            true,
+          );
+          if (!resumedThreadId) {
+            return false;
+          }
+          upsertOptimisticUserMessage(
+            workspace,
+            threadId,
+            finalText,
+            {
+              ...optimisticMessage,
+              images: preparedAttachments.images,
+              attachments: preparedAttachments.displayAttachments,
+            },
+            Boolean(options?.replaceMessageId),
+          );
+          markProcessing(threadId, true, optimisticMessage.timestamp);
+          return true;
+        };
+
+        let response: Record<string, unknown> = shouldSteer
           ? (await (appMentions.length > 0 ||
             Object.keys(appliedWorkflowContext).length > 0
             ? steerTurnService(
@@ -891,27 +958,26 @@ export function useThreadMessaging({
               preparedAttachments.text,
               preparedAttachments.images,
             ))) as Record<string, unknown>
-          : (await sendUserMessageService(
-            workspace.id,
-            threadId,
-            preparedAttachments.text,
-            {
-              ...buildTurnStartPayload({
-                model: resolvedModel,
-                effort: resolvedEffort,
-                serviceTier: resolvedServiceTier,
-                collaborationMode: sanitizedCollaborationMode,
-                accessMode: resolvedAccessMode,
-                images: preparedAttachments.images,
-                appMentions,
-              }),
-              ...(Object.keys(appliedWorkflowContext).length > 0
-                ? { additionalContext: appliedWorkflowContext }
-                : {}),
-            },
-          )) as Record<string, unknown>;
+          : await (async () => {
+            try {
+              return await sendTurnStartRequest();
+            } catch (error) {
+              if (!(await recoverMissingThreadRuntime(error))) {
+                throw error;
+              }
+              return sendTurnStartRequest();
+            }
+          })();
 
-        const rpcError = extractRpcErrorMessage(response);
+        let rpcError = extractRpcErrorMessage(response);
+        if (
+          requestMode === "start" &&
+          rpcError &&
+          await recoverMissingThreadRuntime(rpcError)
+        ) {
+          response = await sendTurnStartRequest();
+          rpcError = extractRpcErrorMessage(response);
+        }
 
         onDebug?.({
           id: `${Date.now()}-${requestMode === "steer" ? "server-turn-steer" : "server-turn-start"}`,
