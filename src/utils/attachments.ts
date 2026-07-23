@@ -97,10 +97,18 @@ export function extractAttachedFilesFromText(text: string): {
 } {
   const attachments: ParsedAttachedFile[] = [];
   const nextText = text.replace(
-    /<attached_file\b([^>]*)>[\s\S]*?<\/attached_file>/g,
-    (_match, attrs: string) => {
-      const nameMatch = String(attrs).match(/\bname="([^"]*)"/);
-      const name = nameMatch?.[1] ? decodeAttachedFileName(nameMatch[1]) : "pasted-file";
+    /<(attached_file|content_reference)\b([^>]*)>[\s\S]*?<\/\1>/g,
+    (_match, tagName: string, attrs: string) => {
+      const nameAttribute =
+        tagName === "content_reference" ? "source_name" : "name";
+      const nameMatch = String(attrs).match(
+        new RegExp(`\\b${nameAttribute}="([^"]*)"`),
+      );
+      const fallbackName =
+        tagName === "content_reference" ? "referenced-content" : "pasted-file";
+      const name = nameMatch?.[1]
+        ? decodeAttachedFileName(nameMatch[1])
+        : fallbackName;
       attachments.push({ name });
       return "";
     },

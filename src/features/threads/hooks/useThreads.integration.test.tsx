@@ -7,6 +7,7 @@ import { useThreadRows } from "@app/hooks/useThreadRows";
 import {
   archiveThread,
   cancelSessionTask,
+  createContentReference,
   fetchManagedSessionsPage,
   generateRunMetadata,
   getThreadTokenUsage,
@@ -48,6 +49,7 @@ vi.mock("@services/tauri", () => ({
   respondToServerRequest: vi.fn(),
   respondToUserInputRequest: vi.fn(),
   rememberApprovalRule: vi.fn(),
+  createContentReference: vi.fn(),
   sendUserMessage: vi.fn(),
   workflowPreflightPreview: vi.fn().mockResolvedValue({
     mode: "shadow",
@@ -616,6 +618,79 @@ describe("useThreads UX integration", () => {
         (item) => item.kind === "message" && item.role === "user",
       ),
     ).toEqual([expect.objectContaining({ id: "server-user-race" })]);
+  });
+
+  it("reconciles content-reference echoes with optimistic attachment messages", async () => {
+    let resolveSend!: (
+      value: Awaited<ReturnType<typeof sendUserMessageService>>,
+    ) => void;
+    vi.mocked(readThread).mockResolvedValue({
+      result: { thread: { id: "thread-content-reference", turns: [] } },
+    });
+    vi.mocked(createContentReference).mockResolvedValueOnce({
+      referenceId: "content-ref-1",
+      path: "C:/Codex/references/content-ref-1/content.md",
+      characterCount: 9_000,
+      estimatedTokens: 2_250,
+    });
+    vi.mocked(sendUserMessageService).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveSend = resolve;
+      }),
+    );
+
+    const { result } = renderHook(() =>
+      useThreads({ activeWorkspace: workspace, onWorkspaceConnected: vi.fn() }),
+    );
+    act(() => {
+      result.current.setActiveThreadId("thread-content-reference");
+    });
+    await waitFor(() => {
+      expect(result.current.activeThreadId).toBe("thread-content-reference");
+      expect(readThread).toHaveBeenCalledWith("ws-1", "thread-content-reference");
+    });
+
+    const attachmentName = "pasted-text-20260723-205500-786.txt";
+    const attachment = `data:text/plain;name="${attachmentName}";base64,${btoa(
+      "large content\n".repeat(1_000),
+    )}`;
+    let sendPromise!: Promise<unknown>;
+    act(() => {
+      sendPromise = result.current.sendUserMessage("请分析", [attachment]);
+    });
+    await waitFor(() => {
+      expect(sendUserMessageService).toHaveBeenCalledTimes(1);
+    });
+
+    const sentText = vi.mocked(sendUserMessageService).mock.calls[0]?.[2] ?? "";
+    expect(sentText).toContain("<content_reference");
+    act(() => {
+      handlers?.onItemStarted?.("ws-1", "thread-content-reference", {
+        type: "userMessage",
+        id: "server-user-content-reference",
+        content: [{ type: "text", text: sentText }],
+      });
+    });
+    await waitFor(() => {
+      expect(
+        result.current.activeItems.filter(
+          (item) => item.kind === "message" && item.role === "user",
+        ),
+      ).toEqual([
+        expect.objectContaining({
+          id: "server-user-content-reference",
+          text: "请分析",
+          attachments: [attachmentName],
+        }),
+      ]);
+    });
+
+    resolveSend({
+      result: { turn: { id: "turn-content-reference" } },
+    } as Awaited<ReturnType<typeof sendUserMessageService>>);
+    await act(async () => {
+      await sendPromise;
+    });
   });
 
   it("reads selected thread without invoking a failing runtime preflight", async () => {

@@ -1198,6 +1198,35 @@ describe("threadItems", () => {
     }
   });
 
+  it("extracts content references from user text", () => {
+    const item = buildConversationItemFromThreadItem({
+      type: "userMessage",
+      id: "msg-content-reference",
+      content: [
+        {
+          type: "text",
+          text:
+            "请分析\n<content_reference\n" +
+            '  id="content-ref-1"\n' +
+            '  source_kind="attachment"\n' +
+            '  source_name="notes.log"\n' +
+            '  path="C:\\Codex\\references\\content-ref-1\\content.md"\n' +
+            ">\n" +
+            "Read the referenced Markdown file only when its exact content is needed.\n" +
+            "</content_reference>",
+        },
+      ],
+    });
+
+    expect(item).not.toBeNull();
+    if (item && item.kind === "message") {
+      expect(item.role).toBe("user");
+      expect(item.text).toBe("请分析");
+      expect(item.text).not.toContain("content_reference");
+      expect(item.attachments).toEqual(["notes.log"]);
+    }
+  });
+
   it("treats non-image data URL inputs as file attachments", () => {
     const item = buildConversationItemFromThreadItem({
       type: "userMessage",
