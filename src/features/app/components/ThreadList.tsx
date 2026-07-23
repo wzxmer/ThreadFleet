@@ -25,6 +25,7 @@ type ThreadListProps = {
   isPaging: boolean;
   nested?: boolean;
   showLoadOlder?: boolean;
+  resetExpansionKey?: string | number | boolean;
   activeWorkspaceId: string | null;
   activeThreadId: string | null;
   threadStatusById: ThreadStatusById;
@@ -55,6 +56,7 @@ export function ThreadList({
   isPaging,
   nested,
   showLoadOlder = true,
+  resetExpansionKey,
   activeWorkspaceId,
   activeThreadId,
   threadStatusById,
@@ -73,7 +75,7 @@ export function ThreadList({
   );
   useEffect(() => {
     setVisibleRootLimit(COLLAPSED_THREAD_ROOT_LIMIT);
-  }, [workspaceId]);
+  }, [resetExpansionKey, workspaceId]);
   const indentUnit = nested ? 10 : 14;
   const pinnedRowsWithWorkspace = useMemo(
     () => pinnedRows.map((row) => ({ ...row, workspaceId })),

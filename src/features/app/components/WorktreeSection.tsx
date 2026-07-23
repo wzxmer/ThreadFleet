@@ -28,6 +28,7 @@ type WorktreeSectionProps = {
   threadListPagingByWorkspace: Record<string, boolean>;
   threadListCursorByWorkspace: Record<string, string | null>;
   expandedWorkspaces: Set<string>;
+  parentCollapsed?: boolean;
   activeWorkspaceId: string | null;
   activeThreadId: string | null;
   pendingUserInputKeys?: Set<string>;
@@ -72,6 +73,7 @@ export function WorktreeSection({
   threadListPagingByWorkspace,
   threadListCursorByWorkspace,
   expandedWorkspaces,
+  parentCollapsed = false,
   activeWorkspaceId,
   activeThreadId,
   pendingUserInputKeys,
@@ -183,6 +185,7 @@ export function WorktreeSection({
                   showExpandToggle={!isSearchActive}
                   nextCursor={worktreeNextCursor}
                   isPaging={isWorktreePaging}
+                  resetExpansionKey={`${parentCollapsed}:${worktree.settings.sidebarCollapsed}`}
                   nested
                   showLoadOlder={false}
                   activeWorkspaceId={activeWorkspaceId}

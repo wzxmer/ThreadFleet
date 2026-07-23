@@ -843,6 +843,7 @@ function SidebarWorkspaceEntry({
           threadListPagingByWorkspace={threadListPagingByWorkspace}
           threadListCursorByWorkspace={threadListCursorByWorkspace}
           expandedWorkspaces={expandedWorkspaces}
+          parentCollapsed={isCollapsed}
           activeWorkspaceId={activeWorkspaceId}
           activeThreadId={activeThreadId}
           pendingUserInputKeys={pendingUserInputKeys}
@@ -877,6 +878,7 @@ function SidebarWorkspaceEntry({
           threadListPagingByWorkspace={threadListPagingByWorkspace}
           threadListCursorByWorkspace={threadListCursorByWorkspace}
           expandedWorkspaces={expandedWorkspaces}
+          parentCollapsed={isCollapsed}
           activeWorkspaceId={activeWorkspaceId}
           activeThreadId={activeThreadId}
           pendingUserInputKeys={pendingUserInputKeys}
@@ -908,6 +910,7 @@ function SidebarWorkspaceEntry({
           showExpandToggle={!isSearchActive}
           nextCursor={nextCursor}
           isPaging={isPaging}
+          resetExpansionKey={isCollapsed}
           activeWorkspaceId={activeWorkspaceId}
           activeThreadId={activeThreadId}
           threadStatusById={threadStatusById}

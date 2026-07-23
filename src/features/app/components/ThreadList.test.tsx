@@ -145,6 +145,39 @@ describe("ThreadList", () => {
     expect(container.querySelectorAll(".thread-row")).toHaveLength(10);
   });
 
+  it("resets expanded roots when an owning workspace collapses", () => {
+    const rows = Array.from({ length: 15 }, (_, index) => ({
+      thread: {
+        id: `thread-${index}`,
+        name: `Thread ${index}`,
+        updatedAt: 1000 - index,
+      },
+      depth: 0,
+    }));
+    const { container, rerender } = render(
+      <ThreadList
+        {...baseProps}
+        unpinnedRows={rows}
+        totalThreadRoots={rows.length}
+        resetExpansionKey={false}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "更多..." }));
+    expect(container.querySelectorAll(".thread-row")).toHaveLength(10);
+
+    rerender(
+      <ThreadList
+        {...baseProps}
+        unpinnedRows={rows}
+        totalThreadRoots={rows.length}
+        resetExpansionKey
+      />,
+    );
+
+    expect(container.querySelectorAll(".thread-row")).toHaveLength(6);
+  });
+
   it("loads older threads when a cursor is available", () => {
     const onLoadOlderThreads = vi.fn();
     render(
