@@ -51,6 +51,10 @@ type UseMainAppLayoutSurfacesArgs = {
   threadsByWorkspace: SidebarProps["threadsByWorkspace"];
   threadParentById: SidebarProps["threadParentById"];
   threadStatusById: ThreadState["threadStatusById"];
+  pendingTurnStartByThread: Record<
+    string,
+    { requestId: string; startedAt: number }
+  >;
   turnDiffByThread: ThreadState["turnDiffByThread"];
   turnExecutionSummaryByThread: ThreadState["turnExecutionSummaryByThread"];
   turnExecutionSummariesByThread: ThreadState["turnExecutionSummariesByThread"];
@@ -294,6 +298,7 @@ function buildPrimarySurface({
   threadsByWorkspace,
   threadParentById,
   threadStatusById,
+  pendingTurnStartByThread,
   turnDiffByThread,
   turnExecutionSummaryByThread,
   turnExecutionSummariesByThread,
@@ -604,12 +609,18 @@ function buildPrimarySurface({
       onResendUserMessage: (text, images, options) => {
         return retryEditedUserMessage(text, images, options);
       },
-      isThinking: composerWorkspaceState.isProcessing,
+      isThinking:
+        composerWorkspaceState.isProcessing ||
+        Boolean(
+          activeThreadId && pendingTurnStartByThread[activeThreadId],
+        ),
       isLoadingMessages: activeThreadId
         ? threadResumeLoadingById[activeThreadId] ?? false
         : false,
       processingStartedAt: activeThreadId
-        ? threadStatusById[activeThreadId]?.processingStartedAt ?? null
+        ? threadStatusById[activeThreadId]?.processingStartedAt ??
+          pendingTurnStartByThread[activeThreadId]?.startedAt ??
+          null
         : null,
       lastDurationMs: activeThreadId
         ? turnExecutionSummaryByThread[activeThreadId]?.workingDurationMs ??
@@ -1174,6 +1185,7 @@ export function useMainAppLayoutSurfaces({
   threadsByWorkspace,
   threadParentById,
   threadStatusById,
+  pendingTurnStartByThread,
   turnDiffByThread,
   turnExecutionSummaryByThread,
   turnExecutionSummariesByThread,
@@ -1395,6 +1407,7 @@ export function useMainAppLayoutSurfaces({
     threadsByWorkspace,
     threadParentById,
     threadStatusById,
+    pendingTurnStartByThread,
     turnDiffByThread,
     turnExecutionSummaryByThread,
     turnExecutionSummariesByThread,

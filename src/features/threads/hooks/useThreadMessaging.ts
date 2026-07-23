@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useState } from "react";
 import type { Dispatch, MutableRefObject } from "react";
 import * as Sentry from "@sentry/react";
 import type {
@@ -75,6 +75,15 @@ type OptimisticUserMessage = {
   images: string[];
   attachments: string[];
   turnId?: string;
+};
+
+type PendingTurnStart = {
+  requestId: string;
+  startedAt: number;
+};
+
+type PendingTurnStartHandle = PendingTurnStart & {
+  threadId: string;
 };
 
 function createOptimisticUserMessage(
@@ -399,6 +408,41 @@ export function useThreadMessaging({
 }: UseThreadMessagingOptions) {
   const { t } = useI18n();
   const interruptInFlightRef = useRef(new Set<string>());
+  const pendingTurnStartSequenceRef = useRef(0);
+  const [pendingTurnStartByThread, setPendingTurnStartByThread] = useState<
+    Record<string, PendingTurnStart>
+  >({});
+  const beginPendingTurnStart = useCallback(
+    (threadId: string): PendingTurnStartHandle => {
+      pendingTurnStartSequenceRef.current += 1;
+      const pending = {
+        threadId,
+        requestId: `${threadId}-${Date.now()}-${pendingTurnStartSequenceRef.current}`,
+        startedAt: Date.now(),
+      };
+      setPendingTurnStartByThread((current) => ({
+        ...current,
+        [threadId]: {
+          requestId: pending.requestId,
+          startedAt: pending.startedAt,
+        },
+      }));
+      return pending;
+    },
+    [],
+  );
+  const clearPendingTurnStart = useCallback((pending: PendingTurnStartHandle | null) => {
+    if (!pending) {
+      return;
+    }
+    setPendingTurnStartByThread((current) => {
+      if (current[pending.threadId]?.requestId !== pending.requestId) {
+        return current;
+      }
+      const { [pending.threadId]: _, ...rest } = current;
+      return rest;
+    });
+  }, []);
   const upsertOptimisticUserMessage = useCallback(
     (
       workspace: WorkspaceInfo,
@@ -473,6 +517,7 @@ export function useThreadMessaging({
       images: string[] = [],
       options?: SendMessageOptions,
       existingOptimisticMessage?: OptimisticUserMessage,
+      existingPendingTurnStart?: PendingTurnStartHandle | null,
     ): Promise<SendMessageResult> => {
       const messageText = text.trim();
       if (!messageText && images.length === 0) {
@@ -513,6 +558,17 @@ export function useThreadMessaging({
           activeTurnId,
         },
       });
+      let pendingTurnStart: PendingTurnStartHandle | null = null;
+      if (!shouldSteer && requestMode === "start") {
+        if (existingPendingTurnStart?.threadId === threadId) {
+          pendingTurnStart = existingPendingTurnStart;
+        } else {
+          clearPendingTurnStart(existingPendingTurnStart ?? null);
+          pendingTurnStart = beginPendingTurnStart(threadId);
+        }
+      } else {
+        clearPendingTurnStart(existingPendingTurnStart ?? null);
+      }
       if (!shouldSteer && requestMode === "start") {
         onUserTurnRequested?.(workspace.id, threadId);
       }
@@ -534,17 +590,25 @@ export function useThreadMessaging({
           });
           pushThreadErrorMessage(threadId, errorMessage);
           safeMessageActivity();
+          clearPendingTurnStart(pendingTurnStart);
           return { status: "blocked" };
         }
       }
       if (!shouldSteer && ensureThreadRuntimeForWorkspace) {
-        const resumedThreadId = await ensureThreadRuntimeForWorkspace(
-          workspace.id,
-          threadId,
-        );
+        let resumedThreadId: string | null;
+        try {
+          resumedThreadId = await ensureThreadRuntimeForWorkspace(
+            workspace.id,
+            threadId,
+          );
+        } catch (error) {
+          clearPendingTurnStart(pendingTurnStart);
+          throw error;
+        }
         if (!resumedThreadId) {
           pushThreadErrorMessage(threadId, t("threads.runtimeResumeFailed"));
           safeMessageActivity();
+          clearPendingTurnStart(pendingTurnStart);
           return { status: "blocked" };
         }
       }
@@ -583,6 +647,7 @@ export function useThreadMessaging({
             error instanceof Error ? error.message : String(error),
           );
           safeMessageActivity();
+          clearPendingTurnStart(pendingTurnStart);
           return { status: "blocked" };
         }
       } else {
@@ -610,6 +675,7 @@ export function useThreadMessaging({
             `${t("composer.attachmentPersistFailed")} ${detail}`,
           );
           safeMessageActivity();
+          clearPendingTurnStart(pendingTurnStart);
           return { status: "blocked" };
         }
       }
@@ -687,7 +753,12 @@ export function useThreadMessaging({
         },
       });
       const customThreadName = getCustomName(workspace.id, threadId) ?? null;
-      markProcessing(threadId, true, optimisticMessage.timestamp);
+      markProcessing(
+        threadId,
+        true,
+        pendingTurnStart?.startedAt ?? optimisticMessage.timestamp,
+      );
+      clearPendingTurnStart(pendingTurnStart);
       if (!options?.replaceMessageId && requestMode === "start") {
         void onUserMessageCreated?.(workspace.id, threadId, finalText);
       }
@@ -936,6 +1007,8 @@ export function useThreadMessaging({
     },
     [
       accessMode,
+      beginPendingTurnStart,
+      clearPendingTurnStart,
       collaborationMode,
       customPrompts,
       dispatch,
@@ -998,6 +1071,10 @@ export function useThreadMessaging({
         return { status: "blocked" };
       }
       const finalText = promptExpansion?.expanded ?? messageText;
+      const pendingTurnStart =
+        activeThreadId && !threadStatusById[activeThreadId]?.isProcessing
+        ? beginPendingTurnStart(activeThreadId)
+        : null;
       let runtimePreflightComplete = false;
       if (
         activeThreadId &&
@@ -1018,6 +1095,7 @@ export function useThreadMessaging({
           });
           pushThreadErrorMessage(activeThreadId, errorMessage);
           safeMessageActivity();
+          clearPendingTurnStart(pendingTurnStart);
           return { status: "blocked" };
         }
       }
@@ -1050,20 +1128,27 @@ export function useThreadMessaging({
         threadId = await ensureThreadForActiveWorkspace();
       } catch (error) {
         discardOptimisticMessage();
+        clearPendingTurnStart(pendingTurnStart);
         throw error;
       }
       if (!threadId) {
         discardOptimisticMessage();
+        clearPendingTurnStart(pendingTurnStart);
         return { status: "blocked" };
       }
       optimisticThreadId = threadId;
-      const result = await sendMessageToThread(activeWorkspace, threadId, finalText, images, {
-        skipPromptExpansion: true,
-        skipRuntimePreflight: runtimePreflightComplete,
-        appMentions,
-        sendIntent: options?.sendIntent,
-        replaceMessageId: options?.replaceMessageId,
-      }, optimisticMessage);
+      let result: SendMessageResult;
+      try {
+        result = await sendMessageToThread(activeWorkspace, threadId, finalText, images, {
+          skipPromptExpansion: true,
+          skipRuntimePreflight: runtimePreflightComplete,
+          appMentions,
+          sendIntent: options?.sendIntent,
+          replaceMessageId: options?.replaceMessageId,
+        }, optimisticMessage, pendingTurnStart);
+      } finally {
+        clearPendingTurnStart(pendingTurnStart);
+      }
       if (result.status === "blocked") {
         discardOptimisticMessage();
       }
@@ -1072,6 +1157,8 @@ export function useThreadMessaging({
     [
       activeThreadId,
       activeWorkspace,
+      beginPendingTurnStart,
+      clearPendingTurnStart,
       customPrompts,
       dispatch,
       ensureThreadForActiveWorkspace,
@@ -1673,6 +1760,7 @@ export function useThreadMessaging({
   );
 
   return {
+    pendingTurnStartByThread,
     interruptTurn,
     retryEditedUserMessage,
     sendUserMessage,

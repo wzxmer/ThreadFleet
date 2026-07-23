@@ -1323,6 +1323,7 @@ export function useThreads({
   );
 
   const {
+    pendingTurnStartByThread,
     interruptTurn: interruptTurnRaw,
     retryEditedUserMessage,
     sendUserMessage,
@@ -1511,6 +1512,7 @@ export function useThreads({
     threadParentById: state.threadParentById,
     isSubagentThread,
     threadStatusById: state.threadStatusById,
+    pendingTurnStartByThread,
     threadResumeLoadingById: state.threadResumeLoadingById,
     threadListLoadingByWorkspace: state.threadListLoadingByWorkspace,
     threadListPagingByWorkspace: state.threadListPagingByWorkspace,

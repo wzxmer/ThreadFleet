@@ -16,7 +16,7 @@ import {
   rollbackThread as rollbackThreadService,
   workflowPreflightPreview as workflowPreflightPreviewService,
 } from "@services/tauri";
-import type { WorkspaceInfo } from "@/types";
+import type { SendMessageResult, WorkspaceInfo } from "@/types";
 import { useThreadMessaging } from "./useThreadMessaging";
 
 vi.mock("@sentry/react", () => ({
@@ -514,12 +514,15 @@ describe("useThreadMessaging telemetry", () => {
       }),
     );
 
-    const sendPromise = result.current.sendUserMessageToThread(
-      workspace,
-      "thread-1",
-      "image",
-      ["/home/.codex/codex-monitor/attachments/pending/draft/image.png"],
-    );
+    let sendPromise!: Promise<SendMessageResult>;
+    act(() => {
+      sendPromise = result.current.sendUserMessageToThread(
+        workspace,
+        "thread-1",
+        "image",
+        ["/home/.codex/codex-monitor/attachments/pending/draft/image.png"],
+      );
+    });
 
     expect(dispatch).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -718,12 +721,15 @@ describe("useThreadMessaging telemetry", () => {
       }),
     );
 
-    const sendPromise = result.current.sendUserMessageToThread(
-      workspace,
-      "thread-1",
-      "show immediately",
-      [],
-    );
+    let sendPromise!: Promise<SendMessageResult>;
+    act(() => {
+      sendPromise = result.current.sendUserMessageToThread(
+        workspace,
+        "thread-1",
+        "show immediately",
+        [],
+      );
+    });
 
     expect(dispatch).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -746,6 +752,74 @@ describe("useThreadMessaging telemetry", () => {
     await act(async () => {
       await sendPromise;
     });
+  });
+
+  it("exposes a pending turn start immediately while runtime preparation is unresolved", async () => {
+    let resolveRuntimePreflight: () => void = () => {};
+    const ensureWorkspaceRuntimeCodexArgs = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveRuntimePreflight = resolve;
+        }),
+    );
+    const markProcessing = vi.fn();
+    const { result } = renderHook(() =>
+      useThreadMessaging({
+        activeWorkspace: workspace,
+        activeThreadId: "thread-1",
+        accessMode: "current",
+        model: null,
+        effort: null,
+        collaborationMode: null,
+        reviewDeliveryMode: "inline",
+        steerEnabled: false,
+        customPrompts: [],
+        ensureWorkspaceRuntimeCodexArgs,
+        threadStatusById: {},
+        activeTurnIdByThread: {},
+        rateLimitsByWorkspace: {},
+        pendingInterruptsRef: { current: new Set<string>() },
+        dispatch: vi.fn(),
+        getCustomName: vi.fn(() => undefined),
+        markProcessing,
+        markReviewing: vi.fn(),
+        setActiveTurnId: vi.fn(),
+        recordThreadActivity: vi.fn(),
+        safeMessageActivity: vi.fn(),
+        onDebug: vi.fn(),
+        pushThreadErrorMessage: vi.fn(),
+        ensureThreadForActiveWorkspace: vi.fn(async () => "thread-1"),
+        ensureThreadForWorkspace: vi.fn(async () => "thread-1"),
+        refreshThread: vi.fn(async () => null),
+        forkThreadForWorkspace: vi.fn(async () => null),
+        updateThreadParent: vi.fn(),
+      }),
+    );
+
+    let sendPromise!: Promise<SendMessageResult>;
+    act(() => {
+      sendPromise = result.current.sendUserMessage("show working immediately");
+    });
+
+    const pendingStartedAt =
+      result.current.pendingTurnStartByThread["thread-1"]?.startedAt;
+    expect(result.current.pendingTurnStartByThread["thread-1"]).toEqual(
+      expect.objectContaining({ startedAt: expect.any(Number) }),
+    );
+    expect(markProcessing).not.toHaveBeenCalled();
+    expect(sendUserMessageService).not.toHaveBeenCalled();
+
+    resolveRuntimePreflight();
+    await act(async () => {
+      await sendPromise;
+    });
+
+    expect(markProcessing).toHaveBeenCalledWith(
+      "thread-1",
+      true,
+      pendingStartedAt,
+    );
+    expect(result.current.pendingTurnStartByThread["thread-1"]).toBeUndefined();
   });
 
   it("optimistically inserts the active-thread message before resume resolves", async () => {
@@ -788,7 +862,10 @@ describe("useThreadMessaging telemetry", () => {
       }),
     );
 
-    const sendPromise = result.current.sendUserMessage("show before resume");
+    let sendPromise!: Promise<SendMessageResult>;
+    act(() => {
+      sendPromise = result.current.sendUserMessage("show before resume");
+    });
 
     expect(dispatch).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -995,6 +1072,7 @@ describe("useThreadMessaging telemetry", () => {
       "thread-1",
       "Cannot restart the Codex runtime while another thread is processing.",
     );
+    expect(result.current.pendingTurnStartByThread["thread-1"]).toBeUndefined();
     expect(sendUserMessageService).not.toHaveBeenCalled();
   });
 
