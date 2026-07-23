@@ -239,6 +239,7 @@ export type LineChangeStats = {
 export type ThreadSummary = {
   id: string;
   name: string;
+  nameIsFallback?: boolean;
   updatedAt: number;
   createdAt?: number;
   cwd?: string | null;

@@ -20,10 +20,20 @@ function mergeThreadSummary(base: ThreadSummary, next: ThreadSummary): ThreadSum
   const nextUpdatedAt = next.updatedAt ?? 0;
   const preferred = nextUpdatedAt >= baseUpdatedAt ? next : base;
   const fallback = preferred === next ? base : next;
-  return {
+  const nameSource =
+    preferred.nameIsFallback && !fallback.nameIsFallback
+      ? fallback
+      : preferred.name
+        ? preferred
+        : fallback;
+  const { nameIsFallback: _ignored, ...merged } = {
     ...fallback,
     ...preferred,
-    name: preferred.name || fallback.name,
+  };
+  return {
+    ...merged,
+    name: nameSource.name,
+    ...(nameSource.nameIsFallback ? { nameIsFallback: true } : {}),
     updatedAt: Math.max(baseUpdatedAt, nextUpdatedAt),
   };
 }
@@ -345,11 +355,15 @@ export function reduceThreadLifecycle(
       }
       let didChange = false;
       const next = list.map((thread) => {
-        if (thread.id !== action.threadId || thread.name === action.name) {
+        if (
+          thread.id !== action.threadId ||
+          (thread.name === action.name && !thread.nameIsFallback)
+        ) {
           return thread;
         }
         didChange = true;
-        return { ...thread, name: action.name };
+        const { nameIsFallback: _ignored, ...resolvedThread } = thread;
+        return { ...resolvedThread, name: action.name };
       });
       if (!didChange) {
         return state;
@@ -470,9 +484,23 @@ export function reduceThreadLifecycle(
                 },
               }
             : state.threadListContinuityByWorkspace;
+      const existingThreads = state.threadsByWorkspace[action.workspaceId] ?? [];
+      const existingById = new Map(
+        existingThreads.map((thread) => [thread.id, thread] as const),
+      );
       const visibleThreads = dedupeThreadSummaries(
         action.threads.filter((thread) => !hidden[thread.id]),
-      );
+      ).map((thread) => {
+        const existing = existingById.get(thread.id);
+        if (!thread.nameIsFallback || !existing || existing.nameIsFallback) {
+          return thread;
+        }
+        const { nameIsFallback: _ignored, ...resolvedThread } = thread;
+        return {
+          ...resolvedThread,
+          name: existing.name,
+        };
+      });
       const freshenAnchorSummary = (summary: ThreadSummary) => {
         const lastMessageTimestamp =
           state.lastAgentMessageByThread[summary.id]?.timestamp ?? 0;
@@ -537,10 +565,6 @@ export function reduceThreadLifecycle(
           threadListContinuityByWorkspace: nextContinuityByWorkspace,
         };
       }
-      const existingThreads = state.threadsByWorkspace[action.workspaceId] ?? [];
-      const existingById = new Map(
-        existingThreads.map((thread) => [thread.id, thread] as const),
-      );
       const reconciled = [...visibleThreads];
       const includedIds = new Set(reconciled.map((thread) => thread.id));
       const appendExistingAnchor = (threadId: string | null | undefined) => {

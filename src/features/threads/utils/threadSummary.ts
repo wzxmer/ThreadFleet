@@ -70,9 +70,11 @@ export function buildThreadSummaryFromThread({
   }
   const customName = getCustomName?.(workspaceId, id);
   const fallbackName = `Agent ${fallbackIndex + 1}`;
+  const displayTitle = getThreadDisplayTitle(thread);
+  const nameIsFallback = !customName && !displayTitle;
   const name = customName
     ? customName
-    : getThreadDisplayTitle(thread) ?? fallbackName;
+    : displayTitle ?? fallbackName;
   const metadata = extractThreadCodexMetadata(thread);
   const cwd = asString(thread.cwd ?? "").trim();
   if (shouldHideSubagentThreadFromSidebar(thread.source)) {
@@ -86,6 +88,7 @@ export function buildThreadSummaryFromThread({
   return {
     id,
     name,
+    ...(nameIsFallback ? { nameIsFallback: true } : {}),
     updatedAt: getThreadTimestamp(thread),
     createdAt: getThreadCreatedTimestamp(thread),
     ...(workspaceId === LOCAL_CODEX_WORKSPACE_ID && cwd ? { cwd } : {}),

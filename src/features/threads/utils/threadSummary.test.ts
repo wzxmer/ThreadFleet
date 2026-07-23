@@ -38,6 +38,20 @@ describe("threadSummary", () => {
     expect(summary?.name).toBe("Local custom name");
   });
 
+  it("marks generated Agent labels as fallback names", () => {
+    const summary = buildThreadSummaryFromThread({
+      workspaceId: "ws-1",
+      thread: { id: "thread-fallback" },
+      fallbackIndex: 1,
+    });
+
+    expect(summary).toMatchObject({
+      id: "thread-fallback",
+      name: "Agent 2",
+      nameIsFallback: true,
+    });
+  });
+
   it("falls back to preview when no formal title exists", () => {
     expect(
       getThreadDisplayTitle({

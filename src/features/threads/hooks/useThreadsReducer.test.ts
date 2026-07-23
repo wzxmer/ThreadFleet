@@ -1192,6 +1192,44 @@ describe("threadReducer", () => {
     ]);
   });
 
+  it("preserves a resolved title when a newer list snapshot only has an Agent fallback", () => {
+    const next = threadReducer(
+      {
+        ...initialState,
+        threadsByWorkspace: {
+          "ws-1": [
+            {
+              id: "thread-1",
+              name: "已解析的会话标题",
+              updatedAt: 100,
+            },
+          ],
+        },
+      },
+      {
+        type: "setThreads",
+        workspaceId: "ws-1",
+        sortKey: "updated_at",
+        threads: [
+          {
+            id: "thread-1",
+            name: "Agent 1",
+            nameIsFallback: true,
+            updatedAt: 200,
+          },
+        ],
+      },
+    );
+
+    expect(next.threadsByWorkspace["ws-1"]).toEqual([
+      {
+        id: "thread-1",
+        name: "已解析的会话标题",
+        updatedAt: 200,
+      },
+    ]);
+  });
+
   it("dedupes incoming threads before preserving local anchors", () => {
     const base: ThreadState = {
       ...initialState,
