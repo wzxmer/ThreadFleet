@@ -128,6 +128,27 @@ fn scans_archived_missing_project_and_subagent_metadata() {
 }
 
 #[test]
+fn source_scan_marks_project_name_title_as_fallback_when_index_title_is_missing() {
+    let fixture = SessionFixture::new();
+    let source_root = fixture.root.join("home");
+    let project_root = fixture.root.join("CodexMonitor");
+    create_session(
+        &source_root,
+        false,
+        "thread-without-index-title",
+        Some(&project_root),
+        json!("vscode"),
+        Some("user"),
+    );
+
+    let result = scan_session_source(&source("source-a", &source_root));
+
+    assert_eq!(result.sessions[0].title, "CodexMonitor");
+    assert!(result.sessions[0].title_is_fallback);
+    assert_eq!(result.sessions[0].preview, None);
+}
+
+#[test]
 fn active_only_scan_excludes_archived_sessions() {
     let fixture = SessionFixture::new();
     let source_root = fixture.root.join("home");

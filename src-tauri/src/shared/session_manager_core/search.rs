@@ -338,6 +338,7 @@ mod tests {
             source_kind: None,
             cwd: Some(root.to_string_lossy().to_string()),
             title: "Alpha".into(),
+            title_is_fallback: false,
             preview: None,
             created_at: None,
             updated_at: None,

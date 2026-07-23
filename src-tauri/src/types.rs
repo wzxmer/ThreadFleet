@@ -71,6 +71,8 @@ pub(crate) struct ManagedSession {
     pub(crate) source_kind: Option<String>,
     pub(crate) cwd: Option<String>,
     pub(crate) title: String,
+    #[serde(default)]
+    pub(crate) title_is_fallback: bool,
     pub(crate) preview: Option<String>,
     pub(crate) created_at: Option<i64>,
     pub(crate) updated_at: Option<i64>,

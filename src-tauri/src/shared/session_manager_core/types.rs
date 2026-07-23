@@ -180,6 +180,7 @@ mod tests {
             source_kind: Some("vscode".to_string()),
             cwd: Some(r"D:\Project\ThreadFleet".to_string()),
             title: "Session".to_string(),
+            title_is_fallback: false,
             preview: None,
             created_at: Some(1),
             updated_at: Some(2),
@@ -236,6 +237,7 @@ mod tests {
         );
         let result_value = serde_json::to_value(result).unwrap();
         assert_eq!(result_value["session"]["sourceId"], "source-a");
+        assert_eq!(result_value["session"]["titleIsFallback"], false);
         assert_eq!(result_value["session"]["fileConfidence"], "exact");
         assert_eq!(result_value["matches"][0]["field"], "threadId");
         assert_eq!(serde_json::to_value(progress).unwrap()["totalFiles"], 4);

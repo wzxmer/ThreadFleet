@@ -286,6 +286,7 @@ export type ManagedSession = {
   sourceKind: string | null;
   cwd: string | null;
   title: string;
+  titleIsFallback?: boolean;
   preview: string | null;
   createdAt: number | null;
   updatedAt: number | null;

@@ -99,6 +99,18 @@ export function isSidebarManagedSessionCandidate(
   );
 }
 
+function isFallbackManagedSessionTitle(session: ManagedSession): boolean {
+  if (session.titleIsFallback !== undefined) {
+    return session.titleIsFallback;
+  }
+  const cwdName = session.cwd
+    ?.replace(/[\\/]+$/, "")
+    .split(/[\\/]/)
+    .filter(Boolean)
+    .pop();
+  return Boolean(cwdName && session.title === cwdName);
+}
+
 export function managedSessionToThreadRecord(
   session: ManagedSession,
 ): Record<string, unknown> {
@@ -117,7 +129,7 @@ export function managedSessionToThreadRecord(
     : session.sourceKind;
   return {
     id: session.threadId,
-    title: session.title,
+    ...(isFallbackManagedSessionTitle(session) ? {} : { title: session.title }),
     preview: session.preview ?? "",
     cwd: session.cwd ?? "",
     createdAt: session.createdAt ?? 0,

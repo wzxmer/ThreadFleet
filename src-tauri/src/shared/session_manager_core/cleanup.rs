@@ -153,6 +153,7 @@ mod tests {
             source_kind: None,
             cwd: None,
             title: thread_id.to_string(),
+            title_is_fallback: false,
             preview: None,
             created_at: None,
             updated_at: None,

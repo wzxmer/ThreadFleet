@@ -225,10 +225,10 @@ pub(crate) fn scan_session_source_with_archive_mode(
         let index_entry = session_index.get(&thread_id).cloned().unwrap_or_default();
         let cwd = candidate.metadata.cwd.clone();
         let project_exists = cwd.as_deref().is_some_and(|cwd| Path::new(cwd).is_dir());
-        let title = index_entry
-            .title
-            .filter(|title| !title.trim().is_empty())
-            .unwrap_or_else(|| fallback_title(&candidate.metadata, &thread_id));
+        let indexed_title = index_entry.title.filter(|title| !title.trim().is_empty());
+        let title_is_fallback = indexed_title.is_none();
+        let title =
+            indexed_title.unwrap_or_else(|| fallback_title(&candidate.metadata, &thread_id));
 
         let key = format!("{}:{}", source.id, thread_id);
         if mapping.confidence == SessionFileConfidence::Exact {
@@ -249,6 +249,7 @@ pub(crate) fn scan_session_source_with_archive_mode(
             source_kind: candidate.metadata.source_kind,
             cwd,
             title,
+            title_is_fallback,
             preview: None,
             created_at: candidate.metadata.created_at,
             // File mtime and index writes are implementation details, not session usage time.

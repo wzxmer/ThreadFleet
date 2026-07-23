@@ -25,6 +25,7 @@ const session = (overrides: Partial<ManagedSession> = {}): ManagedSession => ({
   sourceKind: "vscode",
   cwd: "/tmp/project",
   title: "Recovered thread",
+  titleIsFallback: false,
   preview: null,
   createdAt: 100,
   updatedAt: 200,
@@ -136,5 +137,30 @@ describe("activeManagedSessions", () => {
         },
       }),
     );
+  });
+
+  it("does not expose a scanner fallback as a formal thread title", () => {
+    const record = managedSessionToThreadRecord(
+      session({ title: "project", titleIsFallback: true }),
+    );
+
+    expect(record).not.toHaveProperty("title");
+    expect(record).toMatchObject({
+      id: "thread-a",
+      cwd: "/tmp/project",
+      preview: "",
+    });
+  });
+
+  it("recognizes a legacy daemon project-name fallback without hiding explicit titles", () => {
+    const legacyRecord = managedSessionToThreadRecord(
+      session({ title: "project", titleIsFallback: undefined }),
+    );
+    const explicitRecord = managedSessionToThreadRecord(
+      session({ title: "project", titleIsFallback: false }),
+    );
+
+    expect(legacyRecord).not.toHaveProperty("title");
+    expect(explicitRecord).toHaveProperty("title", "project");
   });
 });

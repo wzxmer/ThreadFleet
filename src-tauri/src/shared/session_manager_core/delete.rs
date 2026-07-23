@@ -95,6 +95,7 @@ mod tests {
             source_kind: None,
             cwd: None,
             title: "A".into(),
+            title_is_fallback: false,
             preview: None,
             created_at: None,
             updated_at: None,
