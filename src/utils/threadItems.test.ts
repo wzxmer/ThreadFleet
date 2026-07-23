@@ -655,6 +655,64 @@ describe("threadItems", () => {
     expect(mergeThreadItems([incoming], [local])).toEqual([incoming]);
   });
 
+  it("replaces a live local image message when the server echo uses a different image identity", () => {
+    const local: ConversationItem = {
+      id: "local-user-image-pending",
+      kind: "message",
+      role: "user",
+      text: "检查截图",
+      images: ["C:/tmp/pending/image.png"],
+    };
+    const incoming: ConversationItem = {
+      id: "server-user-image-echo",
+      kind: "message",
+      role: "user",
+      text: "检查截图",
+      images: ["data:image/png;base64,SERVER"],
+    };
+
+    expect(upsertItem([local], incoming)).toEqual([incoming]);
+    expect(mergeThreadItems([incoming], [local])).toEqual([incoming, local]);
+  });
+
+  it("reconciles repeated live messages in order without collapsing intentional repeats", () => {
+    const localOne: ConversationItem = {
+      id: "local-user-continue-1",
+      kind: "message",
+      role: "user",
+      text: "继续",
+    };
+    const localTwo: ConversationItem = {
+      id: "local-user-continue-2",
+      kind: "message",
+      role: "user",
+      text: "继续",
+    };
+    const serverOne: ConversationItem = {
+      id: "server-user-continue-1",
+      kind: "message",
+      role: "user",
+      text: "继续",
+    };
+    const serverTwo: ConversationItem = {
+      id: "server-user-continue-2",
+      kind: "message",
+      role: "user",
+      text: "继续",
+    };
+
+    const afterFirstEcho = upsertItem([localOne, localTwo], serverOne);
+    expect(afterFirstEcho.map((item) => item.id)).toEqual([
+      "server-user-continue-1",
+      "local-user-continue-2",
+    ]);
+
+    expect(upsertItem(afterFirstEcho, serverTwo).map((item) => item.id)).toEqual([
+      "server-user-continue-1",
+      "server-user-continue-2",
+    ]);
+  });
+
   it("keeps same-text user messages when their image identities differ", () => {
     const local: ConversationItem = {
       id: "local-user-image-a",

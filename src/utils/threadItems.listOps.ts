@@ -45,12 +45,26 @@ function isMatchingLocalUserEcho(
   );
 }
 
+function isMatchingLiveLocalUserEcho(
+  remote: ConversationItem,
+  local: ConversationItem,
+) {
+  return (
+    remote.kind === "message" &&
+    remote.role === "user" &&
+    local.kind === "message" &&
+    local.role === "user" &&
+    local.id.startsWith("local-user-") &&
+    remote.text.trim() === local.text.trim()
+  );
+}
+
 export function upsertItem(list: ConversationItem[], item: ConversationItem) {
   const index = list.findIndex((entry) => entry.id === item.id);
   if (index === -1) {
     if (item.kind === "message" && item.role === "user") {
       const localIndex = list.findIndex(
-        (entry) => isMatchingLocalUserEcho(item, entry),
+        (entry) => isMatchingLiveLocalUserEcho(item, entry),
       );
       if (localIndex >= 0) {
         const next = [...list];
