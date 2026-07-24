@@ -72,6 +72,85 @@ function isOptimisticLocalItem(item: ConversationItem) {
   return item.id.startsWith("local-user-");
 }
 
+function getResumeToolReconciliationKey(item: ConversationItem) {
+  if (item.kind !== "tool" || !item.turnId) {
+    return null;
+  }
+  return JSON.stringify([
+    item.turnId,
+    item.toolType,
+    item.title.trim(),
+    item.detail.trim(),
+  ]);
+}
+
+function selectResumeMergeCandidates({
+  localActiveTurnId,
+  localItems,
+  localStatus,
+  remoteItems,
+  resumedActiveTurnId,
+  remoteTurnIds,
+}: {
+  localActiveTurnId: string | null;
+  localItems: ConversationItem[];
+  localStatus: { isProcessing?: boolean } | undefined;
+  remoteItems: ConversationItem[];
+  resumedActiveTurnId: string | null;
+  remoteTurnIds: ReadonlySet<string>;
+}) {
+  const remoteItemIds = new Set(remoteItems.map((item) => item.id));
+  const hasExactOverlap = localItems.some((item) => remoteItemIds.has(item.id));
+  const preserveActiveTurn = Boolean(
+    localActiveTurnId &&
+      (localStatus?.isProcessing || resumedActiveTurnId === localActiveTurnId),
+  );
+  const remoteToolsByKey = new Map<string, ConversationItem[]>();
+  remoteItems.forEach((item) => {
+    const key = getResumeToolReconciliationKey(item);
+    if (!key) {
+      return;
+    }
+    const matches = remoteToolsByKey.get(key) ?? [];
+    matches.push(item);
+    remoteToolsByKey.set(key, matches);
+  });
+  const claimedRemoteToolIds = new Set<string>();
+
+  return localItems.flatMap((item) => {
+    if (remoteItemIds.has(item.id)) {
+      claimedRemoteToolIds.add(item.id);
+      return [item];
+    }
+    const toolKey = getResumeToolReconciliationKey(item);
+    const matchingRemoteTool = toolKey
+      ? remoteToolsByKey
+          .get(toolKey)
+          ?.find((remote) => !claimedRemoteToolIds.has(remote.id))
+      : undefined;
+    if (matchingRemoteTool) {
+      claimedRemoteToolIds.add(matchingRemoteTool.id);
+      return [
+        {
+          ...item,
+          id: matchingRemoteTool.id,
+          turnId: matchingRemoteTool.turnId ?? item.turnId,
+        },
+      ];
+    }
+    if (hasExactOverlap || isOptimisticLocalItem(item)) {
+      return [item];
+    }
+    if (item.turnId && !remoteTurnIds.has(item.turnId)) {
+      return [item];
+    }
+    return preserveActiveTurn &&
+      (!item.turnId || item.turnId === localActiveTurnId)
+      ? [item]
+      : [];
+  });
+}
+
 export function buildWorkspacePathLookup(
   workspaces: WorkspaceInfo[],
 ): WorkspacePathLookup {
@@ -158,14 +237,19 @@ export function buildResumeHydrationPlan({
     : resumedTurnState.activeTurnId;
   const shouldMarkProcessing = keepLocalProcessing || Boolean(resumedActiveTurnId);
   const processingTimestamp = resumedTurnState.activeTurnStartedAtMs ?? Date.now();
-  const hasOverlap =
-    items.length > 0 &&
-    localItems.length > 0 &&
-    items.some((item) => localItems.some((local) => local.id === item.id));
-  const mergeCandidates =
-    items.length > 0 && localItems.length > 0 && !hasOverlap
-      ? localItems.filter(isOptimisticLocalItem)
-      : localItems;
+  const remoteTurnIds = new Set(
+    (Array.isArray(thread.turns) ? thread.turns : [])
+      .map((turn) => asString((turn as ThreadRecord).id).trim())
+      .filter(Boolean),
+  );
+  const mergeCandidates = selectResumeMergeCandidates({
+    localActiveTurnId,
+    localItems,
+    localStatus,
+    remoteItems: items,
+    resumedActiveTurnId,
+    remoteTurnIds,
+  });
   const mergedItems =
     replaceLocal
       ? items
