@@ -815,6 +815,8 @@ pub(crate) struct CodexKeyProfile {
     pub(crate) name: String,
     #[serde(default = "default_codex_provider_kind")]
     pub(crate) provider_kind: String,
+    #[serde(default = "default_provider_usage_protocol")]
+    pub(crate) usage_protocol: String,
     #[serde(default = "default_codex_key_env_var")]
     pub(crate) key_env_var: String,
     #[serde(default)]
@@ -1870,6 +1872,10 @@ fn default_codex_base_url_env_var() -> String {
 
 fn default_codex_provider_kind() -> String {
     "custom".to_string()
+}
+
+fn default_provider_usage_protocol() -> String {
+    "auto".to_string()
 }
 
 fn default_token_efficiency_mode() -> String {

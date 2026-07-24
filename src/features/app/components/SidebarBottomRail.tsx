@@ -131,11 +131,27 @@ function ThirdPartyUsageSummary({
         <>
           <div className="sidebar-usage-stat">
             <span>{t("sidebar.usageBalance")}</span>
-            <strong>{formatUsdValue(providerUsage.balanceUsd)}</strong>
+            <strong>
+              {providerUsage.isUnlimited
+                ? t("sidebar.usageUnlimited")
+                : formatUsdValue(providerUsage.balanceUsd)}
+            </strong>
           </div>
           <div className="sidebar-usage-stat">
-            <span>{t("sidebar.usageTodayCost")}</span>
-            <strong>{formatUsdValue(providerUsage.todayCostUsd)}</strong>
+            <span>
+              {t(
+                providerUsage.spendPeriod === "total"
+                  ? "sidebar.usageTotalCost"
+                  : "sidebar.usageTodayCost",
+              )}
+            </span>
+            <strong>
+              {formatUsdValue(
+                providerUsage.spendPeriod === "total"
+                  ? providerUsage.totalCostUsd
+                  : providerUsage.todayCostUsd,
+              )}
+            </strong>
           </div>
           {providerUsage.averageLatencyMs !== null && (
             <div className="sidebar-usage-stat">

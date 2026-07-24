@@ -34,7 +34,12 @@ describe("thirdPartyKeyUsage", () => {
     ).toEqual({
       balanceUsd: 12.5,
       todayCostUsd: 0.0342,
+      totalCostUsd: null,
+      spendPeriod: "today",
       averageLatencyMs: 842,
+      isUnlimited: false,
+      isPartial: false,
+      source: null,
     });
   });
 
@@ -49,7 +54,36 @@ describe("thirdPartyKeyUsage", () => {
     ).toEqual({
       balanceUsd: 8,
       todayCostUsd: 0.12,
+      totalCostUsd: null,
+      spendPeriod: "today",
       averageLatencyMs: null,
+      isUnlimited: false,
+      isPartial: false,
+      source: null,
+    });
+  });
+
+  it("normalizes a New API total-cost fallback snapshot", () => {
+    expect(
+      normalizeThirdPartyUsagePayload({
+        source: "new-api",
+        balanceUsd: 2.5,
+        todayCostUsd: null,
+        totalCostUsd: 0.5,
+        spendPeriod: "total",
+        averageLatencyMs: null,
+        isUnlimited: false,
+        isPartial: true,
+      }),
+    ).toEqual({
+      source: "new-api",
+      balanceUsd: 2.5,
+      todayCostUsd: null,
+      totalCostUsd: 0.5,
+      spendPeriod: "total",
+      averageLatencyMs: null,
+      isUnlimited: false,
+      isPartial: true,
     });
   });
 });

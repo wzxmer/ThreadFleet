@@ -353,7 +353,12 @@ describe("Sidebar", () => {
         thirdPartyProviderUsage={{
           balanceUsd: 12.5,
           todayCostUsd: 0.0342,
+          totalCostUsd: null,
+          spendPeriod: "today",
           averageLatencyMs: 842,
+          isUnlimited: false,
+          isPartial: false,
+          source: "sub2",
         }}
         activeTokenUsage={{
           total: {
@@ -385,6 +390,29 @@ describe("Sidebar", () => {
     expect(screen.getByText("842 ms")).toBeTruthy();
     expect(screen.queryByText("倍率")).toBeNull();
     expect(screen.queryByText("x1")).toBeNull();
+  });
+
+  it("labels New API fallback consumption as cumulative", () => {
+    render(
+      <Sidebar
+        {...baseProps}
+        useTokenUsageStats
+        thirdPartyProviderUsage={{
+          balanceUsd: 12.5,
+          todayCostUsd: null,
+          totalCostUsd: 3.25,
+          spendPeriod: "total",
+          averageLatencyMs: null,
+          isUnlimited: false,
+          isPartial: true,
+          source: "new-api",
+        }}
+      />,
+    );
+
+    expect(screen.getByText("累计消费")).toBeTruthy();
+    expect(screen.getByText("$3.25")).toBeTruthy();
+    expect(screen.queryByText("今日消费")).toBeNull();
   });
 
   it("switches third-party key profiles from the usage panel", () => {

@@ -892,6 +892,7 @@ describe("tauri invoke wrappers", () => {
     expect(invokeMock).toHaveBeenCalledWith("workspace_third_party_key_usage", {
       workspaceId: "ws-usage",
       timezone: expect.any(String),
+      dayStartUnix: expect.any(Number),
     });
   });
 

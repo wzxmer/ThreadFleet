@@ -1841,6 +1841,8 @@ pub(crate) async fn third_party_key_usage(
     base_url: String,
     api_key: String,
     timezone: Option<String>,
+    day_start_unix: Option<i64>,
+    usage_protocol: Option<String>,
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<Value, String> {
@@ -1853,18 +1855,28 @@ pub(crate) async fn third_party_key_usage(
                 "baseUrl": base_url,
                 "apiKey": api_key,
                 "timezone": timezone,
+                "dayStartUnix": day_start_unix,
+                "usageProtocol": usage_protocol,
             }),
         )
         .await;
     }
 
-    provider_profiles_core::third_party_key_usage_core(base_url, api_key, timezone).await
+    provider_profiles_core::third_party_key_usage_core(
+        base_url,
+        api_key,
+        timezone,
+        day_start_unix,
+        usage_protocol,
+    )
+    .await
 }
 
 #[tauri::command]
 pub(crate) async fn workspace_third_party_key_usage(
     workspace_id: String,
     timezone: Option<String>,
+    day_start_unix: Option<i64>,
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<Value, String> {
@@ -1876,6 +1888,7 @@ pub(crate) async fn workspace_third_party_key_usage(
             json!({
                 "workspaceId": workspace_id,
                 "timezone": timezone,
+                "dayStartUnix": day_start_unix,
             }),
         )
         .await;
@@ -1887,6 +1900,7 @@ pub(crate) async fn workspace_third_party_key_usage(
         &settings,
         workspace_id,
         timezone,
+        day_start_unix,
     )
     .await
 }

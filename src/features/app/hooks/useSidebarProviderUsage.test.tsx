@@ -43,7 +43,12 @@ describe("useSidebarProviderUsage", () => {
     getWorkspaceThirdPartyKeyUsageMock.mockResolvedValue({
       balanceUsd: 20,
       todayCostUsd: 2,
+      totalCostUsd: null,
+      spendPeriod: "today",
       averageLatencyMs: 200,
+      isUnlimited: false,
+      isPartial: false,
+      source: "sub2",
     });
   });
 

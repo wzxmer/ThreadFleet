@@ -1968,6 +1968,29 @@ describe("SettingsView Codex defaults", () => {
     );
   });
 
+  it("persists the selected provider usage protocol", () => {
+    const onUpdateAppSettings = vi.fn().mockResolvedValue(undefined);
+    renderCodexSection({ initialSection: "providers", onUpdateAppSettings });
+
+    fireEvent.change(screen.getByLabelText("模型服务商配置名称"), {
+      target: { value: "New API" },
+    });
+    fireEvent.change(screen.getByLabelText("API 密钥"), {
+      target: { value: "secret" },
+    });
+    fireEvent.change(screen.getByLabelText("用量接口类型"), {
+      target: { value: "new-api" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "添加并启用" }));
+
+    const calls = onUpdateAppSettings.mock.calls;
+    const nextSettings = calls[calls.length - 1]?.[0] as AppSettings;
+    expect(nextSettings.codexKeyProfiles[nextSettings.codexKeyProfiles.length - 1]).toMatchObject({
+      name: "New API",
+      usageProtocol: "new-api",
+    });
+  });
+
   it("enables the compatibility gateway for opencode", () => {
     renderCodexSection({ initialSection: "providers" });
 

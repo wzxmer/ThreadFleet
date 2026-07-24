@@ -1,7 +1,12 @@
 export type ThirdPartyKeyUsageSnapshot = {
   balanceUsd: number | null;
   todayCostUsd: number | null;
+  totalCostUsd: number | null;
+  spendPeriod: "today" | "total" | null;
   averageLatencyMs: number | null;
+  isUnlimited: boolean;
+  isPartial: boolean;
+  source: "sub2" | "new-api" | null;
 };
 
 type ThirdPartyUsageTodayPayload = {
@@ -9,6 +14,14 @@ type ThirdPartyUsageTodayPayload = {
 };
 
 type ThirdPartyUsagePayload = {
+  balanceUsd?: unknown;
+  todayCostUsd?: unknown;
+  totalCostUsd?: unknown;
+  spendPeriod?: unknown;
+  averageLatencyMs?: unknown;
+  isUnlimited?: unknown;
+  isPartial?: unknown;
+  source?: unknown;
   balance?: unknown;
   remaining?: unknown;
   usage?: {
@@ -59,6 +72,47 @@ export function normalizeThirdPartyUsagePayload(
     return null;
   }
   const data = payload as ThirdPartyUsagePayload;
+  const canonicalBalanceUsd = parseNumericValue(data.balanceUsd);
+  const canonicalTodayCostUsd = parseNumericValue(data.todayCostUsd);
+  const canonicalTotalCostUsd = parseNumericValue(data.totalCostUsd);
+  const canonicalAverageLatencyMs = parseNumericValue(data.averageLatencyMs);
+  const canonicalSpendPeriod =
+    data.spendPeriod === "today" || data.spendPeriod === "total" ? data.spendPeriod : null;
+  const canonicalSource =
+    data.source === "sub2" || data.source === "new-api" ? data.source : null;
+  const hasCanonicalShape =
+    "balanceUsd" in data ||
+    "todayCostUsd" in data ||
+    "totalCostUsd" in data ||
+    "isUnlimited" in data;
+  if (hasCanonicalShape) {
+    const isUnlimited = data.isUnlimited === true;
+    if (
+      canonicalBalanceUsd === null &&
+      canonicalTodayCostUsd === null &&
+      canonicalTotalCostUsd === null &&
+      canonicalAverageLatencyMs === null &&
+      !isUnlimited
+    ) {
+      return null;
+    }
+    return {
+      balanceUsd: canonicalBalanceUsd,
+      todayCostUsd: canonicalTodayCostUsd,
+      totalCostUsd: canonicalTotalCostUsd,
+      spendPeriod:
+        canonicalSpendPeriod ??
+        (canonicalTodayCostUsd !== null
+          ? "today"
+          : canonicalTotalCostUsd !== null
+            ? "total"
+            : null),
+      averageLatencyMs: canonicalAverageLatencyMs,
+      isUnlimited,
+      isPartial: data.isPartial === true,
+      source: canonicalSource,
+    };
+  }
   const balanceUsd =
     parseNumericValue(data.balance) ?? parseNumericValue(data.remaining);
   const todayCostUsd =
@@ -72,6 +126,11 @@ export function normalizeThirdPartyUsagePayload(
   return {
     balanceUsd,
     todayCostUsd,
+    totalCostUsd: null,
+    spendPeriod: todayCostUsd === null ? null : "today",
     averageLatencyMs,
+    isUnlimited: false,
+    isPartial: false,
+    source: null,
   };
 }

@@ -1662,7 +1662,7 @@ fn resolve_third_party_usage_credentials(
     settings: &AppSettings,
     document: &toml_edit::Document,
     default_api_key: Option<String>,
-) -> Option<(String, String)> {
+) -> Option<(String, String, String)> {
     let active_profile = settings
         .active_codex_key_profile_id
         .as_deref()
@@ -1676,8 +1676,13 @@ fn resolve_third_party_usage_credentials(
         if profile.provider_kind.eq_ignore_ascii_case("openai") {
             return None;
         }
-        return provider_profiles_core::resolve_profile_base_url(profile)
-            .map(|base_url| (base_url, profile.key.clone()));
+        return provider_profiles_core::resolve_profile_base_url(profile).map(|base_url| {
+            (
+                base_url,
+                profile.key.clone(),
+                profile.usage_protocol.clone(),
+            )
+        });
     }
 
     let provider_name = config_toml_core::read_top_level_string(document, "model_provider");
@@ -1687,7 +1692,7 @@ fn resolve_third_party_usage_credentials(
     if codex_config::is_official_openai_url(&base_url) {
         return None;
     }
-    default_api_key.map(|api_key| (base_url, api_key))
+    default_api_key.map(|api_key| (base_url, api_key, "auto".to_string()))
 }
 
 pub(crate) async fn workspace_third_party_key_usage_core(
@@ -1695,6 +1700,7 @@ pub(crate) async fn workspace_third_party_key_usage_core(
     settings: &AppSettings,
     workspace_id: String,
     timezone: Option<String>,
+    day_start_unix: Option<i64>,
 ) -> Result<Value, String> {
     let codex_home = resolve_codex_home_for_workspace_core(workspaces, &workspace_id).await?;
     let active_profile_selected =
@@ -1715,11 +1721,17 @@ pub(crate) async fn workspace_third_party_key_usage_core(
     };
     let credentials = resolve_third_party_usage_credentials(settings, &document, default_api_key);
 
-    let Some((base_url, api_key)) = credentials else {
+    let Some((base_url, api_key, usage_protocol)) = credentials else {
         return Ok(Value::Null);
     };
-    let usage_url = provider_profiles_core::build_provider_usage_url(&base_url)?.to_string();
-    provider_profiles_core::third_party_key_usage_core(usage_url, api_key, timezone).await
+    provider_profiles_core::third_party_key_usage_core(
+        base_url,
+        api_key,
+        timezone,
+        day_start_unix,
+        Some(usage_protocol),
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -1810,7 +1822,8 @@ base_url = "{base_url}"
             credentials,
             Some((
                 "https://fcodex.top/v1".to_string(),
-                "sk-default".to_string()
+                "sk-default".to_string(),
+                "auto".to_string()
             ))
         );
     }
@@ -1822,6 +1835,7 @@ base_url = "{base_url}"
             id: "profile".to_string(),
             name: "Profile".to_string(),
             provider_kind: "deepseek".to_string(),
+            usage_protocol: "auto".to_string(),
             key_env_var: "OPENAI_API_KEY".to_string(),
             key: "sk-profile".to_string(),
             base_url_env_var: "OPENAI_BASE_URL".to_string(),
@@ -1848,7 +1862,8 @@ base_url = "{base_url}"
             credentials,
             Some((
                 "https://api.deepseek.com/v1".to_string(),
-                "sk-profile".to_string()
+                "sk-profile".to_string(),
+                "auto".to_string()
             ))
         );
     }

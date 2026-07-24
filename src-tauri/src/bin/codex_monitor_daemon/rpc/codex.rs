@@ -137,9 +137,17 @@ pub(super) async fn try_handle(
                 Err(err) => return Some(Err(err)),
             };
             let timezone = parse_optional_string(params, "timezone");
+            let day_start_unix = params.get("dayStartUnix").and_then(Value::as_i64);
+            let usage_protocol = parse_optional_string(params, "usageProtocol");
             Some(
-                provider_profiles_core::third_party_key_usage_core(base_url, api_key, timezone)
-                    .await,
+                provider_profiles_core::third_party_key_usage_core(
+                    base_url,
+                    api_key,
+                    timezone,
+                    day_start_unix,
+                    usage_protocol,
+                )
+                .await,
             )
         }
         "workspace_third_party_key_usage" => {
@@ -148,9 +156,10 @@ pub(super) async fn try_handle(
                 Err(err) => return Some(Err(err)),
             };
             let timezone = parse_optional_string(params, "timezone");
+            let day_start_unix = params.get("dayStartUnix").and_then(Value::as_i64);
             Some(
                 state
-                    .workspace_third_party_key_usage(workspace_id, timezone)
+                    .workspace_third_party_key_usage(workspace_id, timezone, day_start_unix)
                     .await,
             )
         }

@@ -4,6 +4,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useThirdPartyKeyUsage } from "./useThirdPartyKeyUsage";
 
 const getWorkspaceThirdPartyKeyUsageMock = vi.fn();
+const usageSnapshot = {
+  balanceUsd: 12.5,
+  todayCostUsd: 1.25,
+  totalCostUsd: null,
+  spendPeriod: "today" as const,
+  averageLatencyMs: 842,
+  isUnlimited: false,
+  isPartial: false,
+  source: "sub2" as const,
+};
 
 vi.mock("@/services/tauri", () => ({
   getWorkspaceThirdPartyKeyUsage: (...args: unknown[]) =>
@@ -27,11 +37,7 @@ describe("useThirdPartyKeyUsage", () => {
   });
 
   it("loads usage for a configured third-party workspace", async () => {
-    getWorkspaceThirdPartyKeyUsageMock.mockResolvedValue({
-      balanceUsd: 12.5,
-      todayCostUsd: 1.25,
-      averageLatencyMs: 842,
-    });
+    getWorkspaceThirdPartyKeyUsageMock.mockResolvedValue(usageSnapshot);
 
     const { result } = renderHook(() =>
       useThirdPartyKeyUsage({ enabled: true, workspaceId: "ws-usage" }),
@@ -39,7 +45,7 @@ describe("useThirdPartyKeyUsage", () => {
 
     await flushPromises();
 
-    expect(result.current).toEqual({ balanceUsd: 12.5, todayCostUsd: 1.25, averageLatencyMs: 842 });
+    expect(result.current).toEqual(usageSnapshot);
     expect(getWorkspaceThirdPartyKeyUsageMock).toHaveBeenCalledWith("ws-usage");
   });
 
@@ -85,6 +91,7 @@ describe("useThirdPartyKeyUsage", () => {
           }),
       )
       .mockResolvedValueOnce({
+        ...usageSnapshot,
         balanceUsd: 20,
         todayCostUsd: 2,
         averageLatencyMs: 200,
@@ -103,12 +110,14 @@ describe("useThirdPartyKeyUsage", () => {
     rerender({ profileId: "0.02" });
     await flushPromises();
     expect(result.current).toEqual({
+      ...usageSnapshot,
       balanceUsd: 20,
       todayCostUsd: 2,
       averageLatencyMs: 200,
     });
 
     resolveOldRequest?.({
+      ...usageSnapshot,
       balanceUsd: 13,
       todayCostUsd: 3,
       averageLatencyMs: 900,
@@ -116,6 +125,7 @@ describe("useThirdPartyKeyUsage", () => {
     await flushPromises();
 
     expect(result.current).toEqual({
+      ...usageSnapshot,
       balanceUsd: 20,
       todayCostUsd: 2,
       averageLatencyMs: 200,

@@ -263,6 +263,8 @@ export function SettingsCodexSection({
   const [keyProfileBaseUrlDraft, setKeyProfileBaseUrlDraft] = useState("");
   const [keyProfileProviderKindDraft, setKeyProfileProviderKindDraft] =
     useState<CodexKeyProfile["providerKind"]>("custom");
+  const [keyProfileUsageProtocolDraft, setKeyProfileUsageProtocolDraft] =
+    useState<NonNullable<CodexKeyProfile["usageProtocol"]>>("auto");
   const [keyProfileModelDraft, setKeyProfileModelDraft] = useState("");
   const [keyProfileContextWindowDraft, setKeyProfileContextWindowDraft] = useState("");
   const [keyProfileMaxOutputTokensDraft, setKeyProfileMaxOutputTokensDraft] = useState("");
@@ -324,6 +326,7 @@ export function SettingsCodexSection({
     setKeyProfileKeyVisible(false);
     setKeyProfileBaseUrlDraft("");
     setKeyProfileProviderKindDraft("custom");
+    setKeyProfileUsageProtocolDraft("auto");
     setKeyProfileModelDraft("");
     setKeyProfileContextWindowDraft("");
     setKeyProfileMaxOutputTokensDraft("");
@@ -451,6 +454,7 @@ export function SettingsCodexSection({
       id: createCodexKeyProfileId(),
       name: keyProfileNameDraft.trim(),
       providerKind: keyProfileProviderKindDraft ?? "custom",
+      usageProtocol: keyProfileUsageProtocolDraft,
       keyEnvVar: DEFAULT_CODEX_KEY_ENV_VAR,
       key: keyProfileKeyDraft.trim(),
       baseUrlEnvVar: DEFAULT_CODEX_BASE_URL_ENV_VAR,
@@ -502,6 +506,7 @@ export function SettingsCodexSection({
     setKeyProfileKeyVisible(false);
     setKeyProfileBaseUrlDraft(profile.baseUrl ?? "");
     setKeyProfileProviderKindDraft(profile.providerKind ?? "custom");
+    setKeyProfileUsageProtocolDraft(profile.usageProtocol ?? "auto");
     setKeyProfileModelDraft(profile.model ?? "");
     setKeyProfileContextWindowDraft(
       profile.contextWindow == null ? "" : String(profile.contextWindow),
@@ -1203,6 +1208,21 @@ export function SettingsCodexSection({
             <option value="deepseek">{t("settings.codex.providerKindDeepseek")}</option>
             <option value="openrouter">{t("settings.codex.providerKindOpenrouter")}</option>
             <option value="opencode">{t("settings.codex.providerKindOpencode")}</option>
+          </select>
+          <select
+            className="settings-select"
+            value={keyProfileUsageProtocolDraft}
+            aria-label={t("settings.codex.usageProtocolAria")}
+            onChange={(event) =>
+              setKeyProfileUsageProtocolDraft(
+                event.target.value as NonNullable<CodexKeyProfile["usageProtocol"]>,
+              )
+            }
+          >
+            <option value="auto">{t("settings.codex.usageProtocolAuto")}</option>
+            <option value="sub2">{t("settings.codex.usageProtocolSub2")}</option>
+            <option value="new-api">{t("settings.codex.usageProtocolNewApi")}</option>
+            <option value="disabled">{t("settings.codex.usageProtocolDisabled")}</option>
           </select>
           <input
             className="settings-input"

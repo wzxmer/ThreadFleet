@@ -1972,6 +1972,7 @@ impl DaemonState {
         &self,
         workspace_id: String,
         timezone: Option<String>,
+        day_start_unix: Option<i64>,
     ) -> Result<Value, String> {
         let settings = self.app_settings.lock().await.clone();
         codex_core::workspace_third_party_key_usage_core(
@@ -1979,6 +1980,7 @@ impl DaemonState {
             &settings,
             workspace_id,
             timezone,
+            day_start_unix,
         )
         .await
     }

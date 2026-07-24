@@ -69,6 +69,12 @@ const allowedCodexProviderKinds = new Set([
   "opencode",
   "custom",
 ]);
+const allowedProviderUsageProtocols = new Set<NonNullable<CodexKeyProfile["usageProtocol"]>>([
+  "auto",
+  "sub2",
+  "new-api",
+  "disabled",
+]);
 const DEFAULT_MESSAGE_USER_BUBBLE_COLOR = "#d9ebff";
 const DEFAULT_MESSAGE_USER_TEXT_COLOR = "#102033";
 const DEFAULT_MESSAGE_CANVAS_COLOR = "#eef1f6";
@@ -211,6 +217,9 @@ function normalizeCodexKeyProfiles(
       const providerKind = allowedCodexProviderKinds.has(profile.providerKind ?? "")
         ? profile.providerKind
         : "custom";
+      const usageProtocol = allowedProviderUsageProtocols.has(profile.usageProtocol ?? "auto")
+        ? (profile.usageProtocol ?? "auto")
+        : "auto";
       const normalizePositiveInteger = (value: unknown) =>
         typeof value === "number" && Number.isFinite(value) && value > 0
           ? Math.floor(value)
@@ -242,6 +251,7 @@ function normalizeCodexKeyProfiles(
         id,
         name: profile.name?.trim() || `Key ${index + 1}`,
         providerKind,
+        usageProtocol,
         keyEnvVar: profile.keyEnvVar?.trim() || DEFAULT_CODEX_KEY_ENV_VAR,
         key: profile.key?.trim() || "",
         baseUrlEnvVar: profile.baseUrlEnvVar?.trim() || DEFAULT_CODEX_BASE_URL_ENV_VAR,

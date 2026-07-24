@@ -423,16 +423,23 @@ export async function getProviderStatus(workspaceId: string): Promise<CodexProvi
 export async function getThirdPartyKeyUsage(
   baseUrl: string,
   apiKey: string,
+  usageProtocol: "auto" | "sub2" | "new-api" | "disabled" = "auto",
 ): Promise<ThirdPartyKeyUsageSnapshot | null> {
   const usageUrl = buildThirdPartyUsageUrl(baseUrl);
   if (!usageUrl || !apiKey.trim()) {
     return null;
   }
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  const now = new Date();
+  const dayStartUnix = Math.floor(
+    new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() / 1_000,
+  );
   const response = await invoke<unknown>("third_party_key_usage", {
     baseUrl: usageUrl,
     apiKey,
     timezone,
+    dayStartUnix,
+    usageProtocol,
   });
   return normalizeThirdPartyUsagePayload(response);
 }
@@ -441,9 +448,14 @@ export async function getWorkspaceThirdPartyKeyUsage(
   workspaceId: string,
 ): Promise<ThirdPartyKeyUsageSnapshot | null> {
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  const now = new Date();
+  const dayStartUnix = Math.floor(
+    new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() / 1_000,
+  );
   const response = await invoke<unknown>("workspace_third_party_key_usage", {
     workspaceId,
     timezone,
+    dayStartUnix,
   });
   return normalizeThirdPartyUsagePayload(response);
 }
