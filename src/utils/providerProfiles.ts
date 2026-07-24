@@ -18,7 +18,14 @@ const PROVIDER_BASE_URLS: Partial<
   opencode: "https://opencode.ai/zen/go/v1",
 };
 
-const PROVIDER_REASONING_EFFORTS = ["low", "medium", "high", "xhigh"].map(
+const PROVIDER_REASONING_EFFORTS = [
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+  "ultra",
+].map(
   (reasoningEffort) => ({ reasoningEffort, description: "" }),
 );
 

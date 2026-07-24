@@ -142,6 +142,8 @@ describe("resolveCodexProviderBaseUrl", () => {
       { reasoningEffort: "medium", description: "" },
       { reasoningEffort: "high", description: "" },
       { reasoningEffort: "xhigh", description: "" },
+      { reasoningEffort: "max", description: "" },
+      { reasoningEffort: "ultra", description: "" },
     ]);
     expect(models[0]?.defaultReasoningEffort).toBe("medium");
   });
@@ -202,6 +204,8 @@ describe("resolveCodexProviderBaseUrl", () => {
       "medium",
       "high",
       "xhigh",
+      "max",
+      "ultra",
     ]);
     expect(model.defaultReasoningEffort).toBe("medium");
   });

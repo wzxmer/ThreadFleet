@@ -5,6 +5,8 @@ const REASONING_EFFORT_LABEL_KEYS: Record<string, I18nKey> = {
   medium: "settings.codex.reasoningEffort.medium",
   high: "settings.codex.reasoningEffort.high",
   xhigh: "settings.codex.reasoningEffort.xhigh",
+  max: "settings.codex.reasoningEffort.max",
+  ultra: "settings.codex.reasoningEffort.ultra",
 };
 
 export function formatReasoningEffortLabel(
