@@ -146,6 +146,155 @@ describe("buildResumeHydrationPlan", () => {
     ]);
   });
 
+  it("keeps rollout-enriched tools inside their original turns when resume is lossy", () => {
+    const localItems: ConversationItem[] = [
+      {
+        id: "user-1",
+        kind: "message",
+        role: "user",
+        text: "第一轮",
+        turnId: "turn-1",
+      },
+      {
+        id: "rollout-tool-1",
+        kind: "tool",
+        toolType: "dynamicToolCall",
+        title: "Tool: functions / exec",
+        detail: '{"cmd":"npm test"}',
+        status: "completed",
+        turnId: "turn-1",
+      },
+      {
+        id: "assistant-1",
+        kind: "message",
+        role: "assistant",
+        text: "第一轮完成",
+        turnId: "turn-1",
+      },
+      {
+        id: "user-2",
+        kind: "message",
+        role: "user",
+        text: "第二轮",
+        turnId: "turn-2",
+      },
+      {
+        id: "rollout-tool-2",
+        kind: "tool",
+        toolType: "dynamicToolCall",
+        title: "Tool: functions / exec",
+        detail: '{"cmd":"npm run typecheck"}',
+        status: "completed",
+        turnId: "turn-2",
+      },
+      {
+        id: "assistant-2",
+        kind: "message",
+        role: "assistant",
+        text: "第二轮完成",
+        turnId: "turn-2",
+      },
+    ];
+
+    const plan = buildResumeHydrationPlan({
+      getCustomName: () => undefined,
+      localActiveTurnId: null,
+      localItems,
+      localStatus: { isProcessing: false },
+      replaceLocal: false,
+      thread: {
+        id: "thread-1",
+        turns: [
+          {
+            id: "turn-1",
+            status: "completed",
+            items: [
+              {
+                id: "user-1",
+                type: "userMessage",
+                content: [{ type: "text", text: "第一轮" }],
+              },
+              { id: "assistant-1", type: "agentMessage", text: "第一轮完成" },
+            ],
+          },
+          {
+            id: "turn-2",
+            status: "completed",
+            items: [
+              {
+                id: "user-2",
+                type: "userMessage",
+                content: [{ type: "text", text: "第二轮" }],
+              },
+              { id: "assistant-2", type: "agentMessage", text: "第二轮完成" },
+            ],
+          },
+        ],
+      },
+      threadId: "thread-1",
+      workspaceId: "ws-1",
+    });
+
+    expect(plan.mergedItems.map((item) => item.id)).toEqual([
+      "user-1",
+      "rollout-tool-1",
+      "assistant-1",
+      "user-2",
+      "rollout-tool-2",
+      "assistant-2",
+    ]);
+  });
+
+  it("keeps the remote user echo authoritative when the local turn is not a stable superset", () => {
+    const plan = buildResumeHydrationPlan({
+      getCustomName: () => undefined,
+      localActiveTurnId: "turn-1",
+      localItems: [
+        {
+          id: "local-user-1",
+          kind: "message",
+          role: "user",
+          text: "继续",
+          turnId: "turn-1",
+        },
+        {
+          id: "local-tool-1",
+          kind: "tool",
+          toolType: "dynamicToolCall",
+          title: "Tool: functions / exec",
+          detail: '{"cmd":"git status"}',
+          status: "completed",
+          turnId: "turn-1",
+        },
+      ],
+      localStatus: { isProcessing: true },
+      replaceLocal: false,
+      thread: {
+        id: "thread-1",
+        turns: [
+          {
+            id: "turn-1",
+            status: "inProgress",
+            items: [
+              {
+                id: "server-user-1",
+                type: "userMessage",
+                content: [{ type: "text", text: "继续" }],
+              },
+            ],
+          },
+        ],
+      },
+      threadId: "thread-1",
+      workspaceId: "ws-1",
+    });
+
+    expect(plan.mergedItems.map((item) => item.id)).toEqual([
+      "server-user-1",
+      "local-tool-1",
+    ]);
+  });
+
   it("preserves unmatched local items from the active turn during resume", () => {
     const activeTool: ConversationItem = {
       id: "live-tool",

@@ -986,7 +986,6 @@ describe("useThreadActions", () => {
       },
     });
     vi.mocked(buildItemsFromThread).mockReturnValue([serverItem]);
-    vi.mocked(mergeThreadItems).mockReturnValue(mergedItems);
     vi.mocked(isReviewingFromThread).mockReturnValue(false);
 
     const { result, dispatch } = renderActions({
@@ -997,7 +996,6 @@ describe("useThreadActions", () => {
       await result.current.resumeThreadForWorkspace("ws-1", "thread-2", true);
     });
 
-    expect(mergeThreadItems).toHaveBeenCalledWith([serverItem], [staleLocalItem]);
     expect(dispatch).toHaveBeenCalledWith({
       type: "setThreadItems",
       threadId: "thread-2",

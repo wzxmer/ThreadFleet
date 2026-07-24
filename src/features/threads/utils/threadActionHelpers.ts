@@ -151,6 +151,73 @@ function selectResumeMergeCandidates({
   });
 }
 
+function mergeResumeItemsByTurn(
+  remoteItems: ConversationItem[],
+  localItems: ConversationItem[],
+) {
+  if (remoteItems.length === 0 || localItems.length === 0) {
+    return remoteItems.length > 0 ? remoteItems : localItems;
+  }
+  const localItemsByTurn = new Map<string, ConversationItem[]>();
+  localItems.forEach((item) => {
+    if (!item.turnId) {
+      return;
+    }
+    const turnItems = localItemsByTurn.get(item.turnId) ?? [];
+    turnItems.push(item);
+    localItemsByTurn.set(item.turnId, turnItems);
+  });
+  const consumedLocalIds = new Set<string>();
+  const consumedTurnIds = new Set<string>();
+  const merged: ConversationItem[] = [];
+
+  for (let index = 0; index < remoteItems.length; ) {
+    const turnId = remoteItems[index].turnId;
+    if (!turnId) {
+      const remoteItem = remoteItems[index];
+      const matchingLocal = localItems.find((item) => item.id === remoteItem.id);
+      merged.push(
+        ...(matchingLocal
+          ? mergeThreadItems([remoteItem], [matchingLocal])
+          : [remoteItem]),
+      );
+      if (matchingLocal) {
+        consumedLocalIds.add(matchingLocal.id);
+      }
+      index += 1;
+      continue;
+    }
+
+    const remoteTurnItems: ConversationItem[] = [];
+    while (index < remoteItems.length && remoteItems[index].turnId === turnId) {
+      remoteTurnItems.push(remoteItems[index]);
+      index += 1;
+    }
+    const localTurnItems = localItemsByTurn.get(turnId) ?? [];
+    localTurnItems.forEach((item) => consumedLocalIds.add(item.id));
+    consumedTurnIds.add(turnId);
+    const localTurnItemIds = new Set(localTurnItems.map((item) => item.id));
+    const localIsEnrichedSuperset =
+      localTurnItems.length > remoteTurnItems.length &&
+      remoteTurnItems.every((item) => localTurnItemIds.has(item.id));
+    merged.push(
+      ...(localIsEnrichedSuperset
+        ? mergeThreadItems(localTurnItems, remoteTurnItems)
+        : mergeThreadItems(remoteTurnItems, localTurnItems)),
+    );
+  }
+
+  localItems.forEach((item) => {
+    if (
+      !consumedLocalIds.has(item.id) &&
+      (!item.turnId || !consumedTurnIds.has(item.turnId))
+    ) {
+      merged.push(item);
+    }
+  });
+  return merged;
+}
+
 export function buildWorkspacePathLookup(
   workspaces: WorkspaceInfo[],
 ): WorkspacePathLookup {
@@ -255,7 +322,7 @@ export function buildResumeHydrationPlan({
       ? items
       : items.length > 0
         ? mergeCandidates.length > 0
-          ? mergeThreadItems(items, mergeCandidates)
+          ? mergeResumeItemsByTurn(items, mergeCandidates)
           : items
         : localItems;
   const preview = asString(thread.preview ?? "");

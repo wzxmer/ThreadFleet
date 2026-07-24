@@ -723,7 +723,7 @@ fn apply_rollout_enrichment(response: &mut Value, enrichment: &RolloutThreadEnri
     }
 }
 
-async fn enrich_thread_read_from_rollout(response: &mut Value) {
+async fn enrich_thread_history_from_rollout(response: &mut Value) {
     let Some(path) = response
         .pointer("/result/thread/path")
         .and_then(Value::as_str)
@@ -838,9 +838,13 @@ pub(crate) async fn resume_thread_with_session_core(
     {
         params.insert("modelProvider".to_string(), json!(model_provider));
     }
-    session
-        .send_request_for_workspace(&workspace_id, "thread/resume", Value::Object(params))
-        .await
+    send_enriched_thread_history_request(
+        session,
+        &workspace_id,
+        "thread/resume",
+        Value::Object(params),
+    )
+    .await
 }
 
 pub(crate) async fn read_thread_with_session_core(
@@ -849,10 +853,19 @@ pub(crate) async fn read_thread_with_session_core(
     thread_id: String,
 ) -> Result<Value, String> {
     let params = build_read_thread_params(thread_id);
+    send_enriched_thread_history_request(session, &workspace_id, "thread/read", params).await
+}
+
+async fn send_enriched_thread_history_request(
+    session: &WorkspaceSession,
+    workspace_id: &str,
+    method: &str,
+    params: Value,
+) -> Result<Value, String> {
     let mut response = session
-        .send_request_for_workspace(&workspace_id, "thread/read", params)
+        .send_request_for_workspace(workspace_id, method, params)
         .await?;
-    enrich_thread_read_from_rollout(&mut response).await;
+    enrich_thread_history_from_rollout(&mut response).await;
     Ok(response)
 }
 
@@ -2170,6 +2183,57 @@ base_url = "{base_url}"
         );
         assert_eq!(items[3]["id"], json!("wait-1"));
         assert_eq!(items[4]["id"], json!("item-2"));
+    }
+
+    #[test]
+    fn thread_history_enrichment_reads_dynamic_tools_from_the_rollout_path() {
+        let root = std::env::temp_dir().join(format!(
+            "codex-monitor-thread-history-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("rollout-thread-1.jsonl");
+        std::fs::write(
+            &path,
+            concat!(
+                r#"{"type":"turn_context","payload":{"turn_id":"turn-1"}}"#,
+                "\n",
+                r#"{"type":"response_item","payload":{"type":"custom_tool_call","id":"tool-1","status":"completed","call_id":"call-1","name":"exec","input":"{\"cmd\":\"git status\"}"}}"#,
+                "\n",
+                r#"{"type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"call-1","output":[{"type":"input_text","text":"clean"}]}}"#,
+                "\n"
+            ),
+        )
+        .unwrap();
+        let mut response = json!({
+            "result": {
+                "thread": {
+                    "path": path,
+                    "turns": [{
+                        "id": "turn-1",
+                        "items": [
+                            { "type": "userMessage", "id": "user-1", "content": [] },
+                            { "type": "agentMessage", "id": "assistant-1", "text": "Done" }
+                        ]
+                    }]
+                }
+            }
+        });
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+
+        runtime.block_on(enrich_thread_history_from_rollout(&mut response));
+
+        let items = response["result"]["thread"]["turns"][0]["items"]
+            .as_array()
+            .unwrap();
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[1]["type"], json!("dynamicToolCall"));
+        assert_eq!(items[1]["id"], json!("tool-1"));
+        assert_eq!(items[1]["contentItems"][0]["text"], json!("clean"));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
