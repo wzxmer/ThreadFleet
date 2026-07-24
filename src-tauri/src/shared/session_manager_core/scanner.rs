@@ -11,9 +11,11 @@ use crate::types::{ManagedSession, SessionFileConfidence, SessionFileStatus, Ses
 
 use super::file_map::{is_path_within_root, map_session_files, SessionFileMapping};
 use super::parser::{parse_session_metadata, parse_timestamp_ms, ParsedSessionMetadata};
+use super::preview::read_session_opening_message;
 
 const MIN_SCAN_CONCURRENCY: usize = 2;
 const MAX_SCAN_CONCURRENCY: usize = 4;
+const FALLBACK_PREVIEW_CHAR_LIMIT: usize = 512;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SessionScanDiagnostic {
@@ -227,6 +229,10 @@ pub(crate) fn scan_session_source_with_archive_mode(
         let project_exists = cwd.as_deref().is_some_and(|cwd| Path::new(cwd).is_dir());
         let indexed_title = index_entry.title.filter(|title| !title.trim().is_empty());
         let title_is_fallback = indexed_title.is_none();
+        let preview = title_is_fallback
+            .then(|| read_session_opening_message(&candidate.path).ok().flatten())
+            .flatten()
+            .map(|message| message.chars().take(FALLBACK_PREVIEW_CHAR_LIMIT).collect());
         let title =
             indexed_title.unwrap_or_else(|| fallback_title(&candidate.metadata, &thread_id));
 
@@ -250,7 +256,7 @@ pub(crate) fn scan_session_source_with_archive_mode(
             cwd,
             title,
             title_is_fallback,
-            preview: None,
+            preview,
             created_at: candidate.metadata.created_at,
             // File mtime and index writes are implementation details, not session usage time.
             // Only persisted rollout activity owns the last-used timestamp.

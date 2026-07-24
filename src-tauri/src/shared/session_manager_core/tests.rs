@@ -140,12 +140,30 @@ fn source_scan_marks_project_name_title_as_fallback_when_index_title_is_missing(
         json!("vscode"),
         Some("user"),
     );
+    let path = session_path(&source_root, false, "thread-without-index-title");
+    let mut file = fs::OpenOptions::new().append(true).open(path).unwrap();
+    let opening_message = format!("修复启动会话标题{}", "后".repeat(600));
+    writeln!(
+        file,
+        "{}",
+        json!({
+            "timestamp": "2026-07-10T08:01:00Z",
+            "type": "event_msg",
+            "payload": {
+                "type": "user_message",
+                "message": opening_message
+            }
+        })
+    )
+    .unwrap();
 
     let result = scan_session_source(&source("source-a", &source_root));
 
     assert_eq!(result.sessions[0].title, "CodexMonitor");
     assert!(result.sessions[0].title_is_fallback);
-    assert_eq!(result.sessions[0].preview, None);
+    let preview = result.sessions[0].preview.as_deref().unwrap();
+    assert!(preview.starts_with("修复启动会话标题"));
+    assert_eq!(preview.chars().count(), 512);
 }
 
 #[test]

@@ -83,7 +83,7 @@ pub(crate) fn read_session_conversation_page(
 
     Ok(SessionConversationPreview {
         opening_message: if cursor.is_none() {
-            read_opening_message(path)?
+            read_session_opening_message(path)?
         } else {
             None
         },
@@ -134,7 +134,7 @@ pub(crate) fn read_session_conversation(path: &Path) -> Result<SessionConversati
     })
 }
 
-fn read_opening_message(path: &Path) -> Result<Option<String>, String> {
+pub(crate) fn read_session_opening_message(path: &Path) -> Result<Option<String>, String> {
     let file = File::open(path).map_err(|error| error.to_string())?;
     let reader = BufReader::new(file.take(HEAD_PREVIEW_BYTES));
     for line in reader.lines() {
