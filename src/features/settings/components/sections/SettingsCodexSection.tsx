@@ -260,6 +260,10 @@ export function SettingsCodexSection({
   const [keyProfileGroupNameDraft, setKeyProfileGroupNameDraft] = useState("");
   const [keyProfileKeyDraft, setKeyProfileKeyDraft] = useState("");
   const [keyProfileKeyVisible, setKeyProfileKeyVisible] = useState(false);
+  const [keyProfileNewApiAccessTokenDraft, setKeyProfileNewApiAccessTokenDraft] =
+    useState("");
+  const [keyProfileNewApiAccessTokenVisible, setKeyProfileNewApiAccessTokenVisible] =
+    useState(false);
   const [keyProfileBaseUrlDraft, setKeyProfileBaseUrlDraft] = useState("");
   const [keyProfileProviderKindDraft, setKeyProfileProviderKindDraft] =
     useState<CodexKeyProfile["providerKind"]>("custom");
@@ -324,6 +328,8 @@ export function SettingsCodexSection({
     setKeyProfileGroupNameDraft("");
     setKeyProfileKeyDraft("");
     setKeyProfileKeyVisible(false);
+    setKeyProfileNewApiAccessTokenDraft("");
+    setKeyProfileNewApiAccessTokenVisible(false);
     setKeyProfileBaseUrlDraft("");
     setKeyProfileProviderKindDraft("custom");
     setKeyProfileUsageProtocolDraft("auto");
@@ -455,6 +461,7 @@ export function SettingsCodexSection({
       name: keyProfileNameDraft.trim(),
       providerKind: keyProfileProviderKindDraft ?? "custom",
       usageProtocol: keyProfileUsageProtocolDraft,
+      newApiAccessToken: keyProfileNewApiAccessTokenDraft.trim() || null,
       keyEnvVar: DEFAULT_CODEX_KEY_ENV_VAR,
       key: keyProfileKeyDraft.trim(),
       baseUrlEnvVar: DEFAULT_CODEX_BASE_URL_ENV_VAR,
@@ -507,6 +514,8 @@ export function SettingsCodexSection({
     setKeyProfileBaseUrlDraft(profile.baseUrl ?? "");
     setKeyProfileProviderKindDraft(profile.providerKind ?? "custom");
     setKeyProfileUsageProtocolDraft(profile.usageProtocol ?? "auto");
+    setKeyProfileNewApiAccessTokenDraft(profile.newApiAccessToken ?? "");
+    setKeyProfileNewApiAccessTokenVisible(false);
     setKeyProfileModelDraft(profile.model ?? "");
     setKeyProfileContextWindowDraft(
       profile.contextWindow == null ? "" : String(profile.contextWindow),
@@ -1248,6 +1257,37 @@ export function SettingsCodexSection({
               {keyProfileKeyVisible ? t("common.hide") : t("common.show")}
             </button>
           </div>
+          {keyProfileUsageProtocolDraft === "auto" ||
+          keyProfileUsageProtocolDraft === "new-api" ? (
+            <div className="settings-key-profile-secret">
+              <div className="settings-field-row">
+                <input
+                  className="settings-input"
+                  type={keyProfileNewApiAccessTokenVisible ? "text" : "password"}
+                  placeholder={t("settings.codex.newApiAccessTokenPlaceholder")}
+                  value={keyProfileNewApiAccessTokenDraft}
+                  onChange={(event) =>
+                    setKeyProfileNewApiAccessTokenDraft(event.target.value)
+                  }
+                  aria-label={t("settings.codex.newApiAccessTokenAria")}
+                />
+                <button
+                  type="button"
+                  className="ghost settings-button-compact"
+                  onClick={() =>
+                    setKeyProfileNewApiAccessTokenVisible((visible) => !visible)
+                  }
+                >
+                  {keyProfileNewApiAccessTokenVisible
+                    ? t("common.hide")
+                    : t("common.show")}
+                </button>
+              </div>
+              <div className="settings-help">
+                {t("settings.codex.newApiAccessTokenHelp")}
+              </div>
+            </div>
+          ) : null}
           <input
             className="settings-input"
             placeholder={t("settings.codex.baseUrlPlaceholder")}

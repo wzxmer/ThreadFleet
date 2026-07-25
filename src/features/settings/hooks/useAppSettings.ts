@@ -252,6 +252,7 @@ function normalizeCodexKeyProfiles(
         name: profile.name?.trim() || `Key ${index + 1}`,
         providerKind,
         usageProtocol,
+        newApiAccessToken: profile.newApiAccessToken?.trim() || null,
         keyEnvVar: profile.keyEnvVar?.trim() || DEFAULT_CODEX_KEY_ENV_VAR,
         key: profile.key?.trim() || "",
         baseUrlEnvVar: profile.baseUrlEnvVar?.trim() || DEFAULT_CODEX_BASE_URL_ENV_VAR,

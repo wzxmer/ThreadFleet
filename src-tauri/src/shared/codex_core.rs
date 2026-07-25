@@ -1662,7 +1662,7 @@ fn resolve_third_party_usage_credentials(
     settings: &AppSettings,
     document: &toml_edit::Document,
     default_api_key: Option<String>,
-) -> Option<(String, String, String)> {
+) -> Option<(String, String, String, Option<String>)> {
     let active_profile = settings
         .active_codex_key_profile_id
         .as_deref()
@@ -1681,6 +1681,7 @@ fn resolve_third_party_usage_credentials(
                 base_url,
                 profile.key.clone(),
                 profile.usage_protocol.clone(),
+                profile.new_api_access_token.clone(),
             )
         });
     }
@@ -1692,7 +1693,7 @@ fn resolve_third_party_usage_credentials(
     if codex_config::is_official_openai_url(&base_url) {
         return None;
     }
-    default_api_key.map(|api_key| (base_url, api_key, "auto".to_string()))
+    default_api_key.map(|api_key| (base_url, api_key, "auto".to_string(), None))
 }
 
 pub(crate) async fn workspace_third_party_key_usage_core(
@@ -1721,12 +1722,13 @@ pub(crate) async fn workspace_third_party_key_usage_core(
     };
     let credentials = resolve_third_party_usage_credentials(settings, &document, default_api_key);
 
-    let Some((base_url, api_key, usage_protocol)) = credentials else {
+    let Some((base_url, api_key, usage_protocol, new_api_access_token)) = credentials else {
         return Ok(Value::Null);
     };
     provider_profiles_core::third_party_key_usage_core(
         base_url,
         api_key,
+        new_api_access_token,
         timezone,
         day_start_unix,
         Some(usage_protocol),
@@ -1823,7 +1825,8 @@ base_url = "{base_url}"
             Some((
                 "https://fcodex.top/v1".to_string(),
                 "sk-default".to_string(),
-                "auto".to_string()
+                "auto".to_string(),
+                None,
             ))
         );
     }
@@ -1836,6 +1839,7 @@ base_url = "{base_url}"
             name: "Profile".to_string(),
             provider_kind: "deepseek".to_string(),
             usage_protocol: "auto".to_string(),
+            new_api_access_token: Some("access-profile".to_string()),
             key_env_var: "OPENAI_API_KEY".to_string(),
             key: "sk-profile".to_string(),
             base_url_env_var: "OPENAI_BASE_URL".to_string(),
@@ -1863,7 +1867,8 @@ base_url = "{base_url}"
             Some((
                 "https://api.deepseek.com/v1".to_string(),
                 "sk-profile".to_string(),
-                "auto".to_string()
+                "auto".to_string(),
+                Some("access-profile".to_string()),
             ))
         );
     }

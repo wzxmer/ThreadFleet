@@ -1840,6 +1840,7 @@ pub(crate) async fn get_provider_status(
 pub(crate) async fn third_party_key_usage(
     base_url: String,
     api_key: String,
+    new_api_access_token: Option<String>,
     timezone: Option<String>,
     day_start_unix: Option<i64>,
     usage_protocol: Option<String>,
@@ -1854,6 +1855,7 @@ pub(crate) async fn third_party_key_usage(
             json!({
                 "baseUrl": base_url,
                 "apiKey": api_key,
+                "newApiAccessToken": new_api_access_token,
                 "timezone": timezone,
                 "dayStartUnix": day_start_unix,
                 "usageProtocol": usage_protocol,
@@ -1865,6 +1867,7 @@ pub(crate) async fn third_party_key_usage(
     provider_profiles_core::third_party_key_usage_core(
         base_url,
         api_key,
+        new_api_access_token,
         timezone,
         day_start_unix,
         usage_protocol,

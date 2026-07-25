@@ -237,6 +237,7 @@ mod tests {
             name: "Provider".to_string(),
             provider_kind: "custom".to_string(),
             usage_protocol: "auto".to_string(),
+            new_api_access_token: None,
             key_env_var: "IGNORED_KEY_ENV".to_string(),
             key: "sk-test".to_string(),
             base_url_env_var: "IGNORED_BASE_URL_ENV".to_string(),

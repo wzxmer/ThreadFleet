@@ -301,6 +301,7 @@ fn parse_usage_number(value: Option<&Value>) -> Option<f64> {
 fn normalized_usage_snapshot(
     source: &str,
     balance_usd: Option<f64>,
+    balance_scope: &str,
     today_cost_usd: Option<f64>,
     total_cost_usd: Option<f64>,
     average_latency_ms: Option<f64>,
@@ -317,6 +318,7 @@ fn normalized_usage_snapshot(
     json!({
         "source": source,
         "balanceUsd": balance_usd,
+        "balanceScope": balance_scope,
         "todayCostUsd": today_cost_usd,
         "totalCostUsd": total_cost_usd,
         "spendPeriod": spend_period,
@@ -353,6 +355,7 @@ fn normalize_sub2_usage_payload(payload: &Value) -> Value {
     normalized_usage_snapshot(
         "sub2",
         balance_usd,
+        "account",
         today_cost_usd,
         None,
         average_latency_ms,
@@ -440,6 +443,7 @@ fn summarize_new_api_logs(
 fn normalize_new_api_usage_payload(
     usage_payload: &Value,
     log_payload: Option<&Value>,
+    account_payload: Option<&Value>,
     day_start_unix: Option<i64>,
     quota_per_unit: f64,
 ) -> Result<Value, String> {
@@ -455,16 +459,26 @@ fn normalize_new_api_usage_payload(
     if total_available.is_none() && total_used.is_none() && !is_unlimited {
         return Err("Failed to parse New API key usage response".to_string());
     }
+    let account_balance_usd = account_payload
+        .and_then(|payload| payload.get("data"))
+        .and_then(|data| parse_usage_number(data.get("quota")))
+        .map(|value| value / quota_per_unit);
+    let token_balance_usd = (!is_unlimited)
+        .then(|| total_available.map(|value| value / quota_per_unit))
+        .flatten();
     let log_summary = summarize_new_api_logs(log_payload, day_start_unix, quota_per_unit);
     Ok(normalized_usage_snapshot(
         "new-api",
-        (!is_unlimited)
-            .then(|| total_available.map(|value| value / quota_per_unit))
-            .flatten(),
+        account_balance_usd.or(token_balance_usd),
+        if account_balance_usd.is_some() {
+            "account"
+        } else {
+            "token"
+        },
         log_summary.today_cost_usd,
         total_used.map(|value| value / quota_per_unit),
         log_summary.average_latency_ms,
-        is_unlimited,
+        is_unlimited && account_balance_usd.is_none(),
         !log_summary.complete,
     ))
 }
@@ -493,6 +507,7 @@ async fn fetch_new_api_usage(
     client: &reqwest::Client,
     base_url: &str,
     api_key: &str,
+    new_api_access_token: Option<&str>,
     day_start_unix: Option<i64>,
     known_quota_per_unit: Option<f64>,
 ) -> Result<Value, String> {
@@ -506,15 +521,26 @@ async fn fetch_new_api_usage(
     };
     let usage_url = build_new_api_url(base_url, "usage/token/")?;
     let logs_url = build_new_api_url(base_url, "log/token")?;
-    let (usage_result, logs_result) = future::join(
+    let account_future = async {
+        let access_token = new_api_access_token
+            .map(str::trim)
+            .filter(|value| !value.is_empty())?;
+        let account_url = build_new_api_url(base_url, "user/self").ok()?;
+        get_provider_usage_json(client, account_url, Some(access_token))
+            .await
+            .ok()
+    };
+    let (usage_result, logs_result, account_payload) = future::join3(
         get_provider_usage_json(client, usage_url, Some(api_key)),
         get_provider_usage_json(client, logs_url, Some(api_key)),
+        account_future,
     )
     .await;
     let usage_payload = usage_result?;
     normalize_new_api_usage_payload(
         &usage_payload,
         logs_result.as_ref().ok(),
+        account_payload.as_ref(),
         day_start_unix,
         quota_per_unit,
     )
@@ -523,6 +549,7 @@ async fn fetch_new_api_usage(
 pub(crate) async fn third_party_key_usage_core(
     base_url: String,
     api_key: String,
+    new_api_access_token: Option<String>,
     timezone: Option<String>,
     day_start_unix: Option<i64>,
     usage_protocol: Option<String>,
@@ -533,6 +560,10 @@ pub(crate) async fn third_party_key_usage_core(
     }
     let base_url = base_url.trim();
     let api_key = api_key.trim();
+    let new_api_access_token = new_api_access_token
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
     if base_url.is_empty() || api_key.is_empty() {
         return Err("Third-party provider base URL and key are required".to_string());
     }
@@ -547,7 +578,15 @@ pub(crate) async fn third_party_key_usage_core(
             fetch_sub2_usage(&client, base_url, api_key, timezone.as_deref()).await
         }
         ProviderUsageProtocol::NewApi => {
-            fetch_new_api_usage(&client, base_url, api_key, day_start_unix, None).await
+            fetch_new_api_usage(
+                &client,
+                base_url,
+                api_key,
+                new_api_access_token,
+                day_start_unix,
+                None,
+            )
+            .await
         }
         ProviderUsageProtocol::Disabled => Ok(Value::Null),
         ProviderUsageProtocol::Auto => {
@@ -560,7 +599,15 @@ pub(crate) async fn third_party_key_usage_core(
             {
                 return match detection.protocol {
                     ProviderUsageProtocol::NewApi => {
-                        fetch_new_api_usage(&client, base_url, api_key, day_start_unix, None).await
+                        fetch_new_api_usage(
+                            &client,
+                            base_url,
+                            api_key,
+                            new_api_access_token,
+                            day_start_unix,
+                            None,
+                        )
+                        .await
                     }
                     ProviderUsageProtocol::Sub2 => {
                         fetch_sub2_usage(&client, base_url, api_key, timezone.as_deref()).await
@@ -578,6 +625,7 @@ pub(crate) async fn third_party_key_usage_core(
                     &client,
                     base_url,
                     api_key,
+                    new_api_access_token,
                     day_start_unix,
                     Some(quota_per_unit),
                 )
@@ -990,6 +1038,7 @@ mod tests {
             serde_json::json!({
                 "source": "sub2",
                 "balanceUsd": 12.5,
+                "balanceScope": "account",
                 "todayCostUsd": 0.125,
                 "totalCostUsd": null,
                 "spendPeriod": "today",
@@ -1018,17 +1067,50 @@ mod tests {
         });
 
         assert_eq!(
-            normalize_new_api_usage_payload(&usage, Some(&logs), Some(100), 500_000.0)
+            normalize_new_api_usage_payload(&usage, Some(&logs), None, Some(100), 500_000.0)
                 .expect("normalized usage"),
             serde_json::json!({
                 "source": "new-api",
                 "balanceUsd": 2.5,
+                "balanceScope": "token",
                 "todayCostUsd": 0.1,
                 "totalCostUsd": 0.5,
                 "spendPeriod": "today",
                 "averageLatencyMs": 2000.0,
                 "isUnlimited": false,
                 "isPartial": false,
+            })
+        );
+    }
+
+    #[test]
+    fn new_api_account_balance_overrides_unlimited_token_quota() {
+        let usage = serde_json::json!({
+            "data": {
+                "total_available": 0,
+                "total_used": 250_000,
+                "unlimited_quota": true
+            }
+        });
+        let account = serde_json::json!({
+            "data": {
+                "quota": 3_750_000
+            }
+        });
+
+        assert_eq!(
+            normalize_new_api_usage_payload(&usage, None, Some(&account), Some(100), 500_000.0,)
+                .expect("normalized account usage"),
+            serde_json::json!({
+                "source": "new-api",
+                "balanceUsd": 7.5,
+                "balanceScope": "account",
+                "todayCostUsd": null,
+                "totalCostUsd": 0.5,
+                "spendPeriod": "total",
+                "averageLatencyMs": null,
+                "isUnlimited": false,
+                "isPartial": true,
             })
         );
     }
@@ -1063,6 +1145,7 @@ mod tests {
             name: "Gateway".to_string(),
             provider_kind: "deepseek".to_string(),
             usage_protocol: "auto".to_string(),
+            new_api_access_token: None,
             key_env_var: "IGNORED_KEY_ENV".to_string(),
             key: "sk-provider".to_string(),
             base_url_env_var: "IGNORED_BASE_URL_ENV".to_string(),
@@ -1125,6 +1208,7 @@ mod tests {
             name: "DeepSeek".to_string(),
             provider_kind: "deepseek".to_string(),
             usage_protocol: "auto".to_string(),
+            new_api_access_token: None,
             key_env_var: "OPENAI_API_KEY".to_string(),
             key: "sk-provider".to_string(),
             base_url_env_var: "OPENAI_BASE_URL".to_string(),
@@ -1164,6 +1248,7 @@ mod tests {
             name: "Legacy".to_string(),
             provider_kind: "custom".to_string(),
             usage_protocol: "auto".to_string(),
+            new_api_access_token: None,
             key_env_var: "LEGACY_API_KEY".to_string(),
             key: "sk-provider".to_string(),
             base_url_env_var: "LEGACY_BASE_URL".to_string(),
@@ -1214,6 +1299,7 @@ mod tests {
             name: "OpenCode Zen".to_string(),
             provider_kind: "opencode".to_string(),
             usage_protocol: "auto".to_string(),
+            new_api_access_token: None,
             key_env_var: "OPENAI_API_KEY".to_string(),
             key: "sk-provider".to_string(),
             base_url_env_var: "OPENAI_BASE_URL".to_string(),
@@ -1270,6 +1356,7 @@ mod tests {
             name: "OpenCode Zen".to_string(),
             provider_kind: "opencode".to_string(),
             usage_protocol: "auto".to_string(),
+            new_api_access_token: None,
             key_env_var: "OPENAI_API_KEY".to_string(),
             key: "sk-provider".to_string(),
             base_url_env_var: "OPENAI_BASE_URL".to_string(),

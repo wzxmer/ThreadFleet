@@ -26,6 +26,7 @@ import {
   getGitStatus,
   getOpenAppIcon,
   getThreadTokenUsage,
+  getThirdPartyKeyUsage,
   getWorkspaceThirdPartyKeyUsage,
   getProviderModels,
   listThreads,
@@ -911,6 +912,32 @@ describe("tauri invoke wrappers", () => {
 
     expect(invokeMock).toHaveBeenCalledWith("set_tray_labels", {
       labels,
+    });
+  });
+
+  it("maps the optional New API access token for direct provider usage", async () => {
+    const invokeMock = vi.mocked(invoke);
+    invokeMock.mockResolvedValueOnce({
+      balanceUsd: 7.5,
+      balanceScope: "account",
+      todayCostUsd: 1.25,
+      isUnlimited: false,
+    });
+
+    await getThirdPartyKeyUsage(
+      "https://new-api.example/v1",
+      "sk-provider",
+      "new-api",
+      " access-secret ",
+    );
+
+    expect(invokeMock).toHaveBeenCalledWith("third_party_key_usage", {
+      baseUrl: "https://new-api.example/v1/usage",
+      apiKey: "sk-provider",
+      newApiAccessToken: "access-secret",
+      timezone: expect.any(String),
+      dayStartUnix: expect.any(Number),
+      usageProtocol: "new-api",
     });
   });
 

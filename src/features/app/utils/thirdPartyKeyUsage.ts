@@ -1,5 +1,6 @@
 export type ThirdPartyKeyUsageSnapshot = {
   balanceUsd: number | null;
+  balanceScope?: "account" | "token";
   todayCostUsd: number | null;
   totalCostUsd: number | null;
   spendPeriod: "today" | "total" | null;
@@ -15,6 +16,7 @@ type ThirdPartyUsageTodayPayload = {
 
 type ThirdPartyUsagePayload = {
   balanceUsd?: unknown;
+  balanceScope?: unknown;
   todayCostUsd?: unknown;
   totalCostUsd?: unknown;
   spendPeriod?: unknown;
@@ -73,6 +75,10 @@ export function normalizeThirdPartyUsagePayload(
   }
   const data = payload as ThirdPartyUsagePayload;
   const canonicalBalanceUsd = parseNumericValue(data.balanceUsd);
+  const canonicalBalanceScope =
+    data.balanceScope === "account" || data.balanceScope === "token"
+      ? data.balanceScope
+      : null;
   const canonicalTodayCostUsd = parseNumericValue(data.todayCostUsd);
   const canonicalTotalCostUsd = parseNumericValue(data.totalCostUsd);
   const canonicalAverageLatencyMs = parseNumericValue(data.averageLatencyMs);
@@ -98,6 +104,7 @@ export function normalizeThirdPartyUsagePayload(
     }
     return {
       balanceUsd: canonicalBalanceUsd,
+      ...(canonicalBalanceScope ? { balanceScope: canonicalBalanceScope } : {}),
       todayCostUsd: canonicalTodayCostUsd,
       totalCostUsd: canonicalTotalCostUsd,
       spendPeriod:

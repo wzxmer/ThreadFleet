@@ -86,4 +86,30 @@ describe("thirdPartyKeyUsage", () => {
       isPartial: true,
     });
   });
+
+  it("preserves whether a New API balance is an account balance", () => {
+    expect(
+      normalizeThirdPartyUsagePayload({
+        source: "new-api",
+        balanceUsd: 7.5,
+        balanceScope: "account",
+        todayCostUsd: 1.25,
+        totalCostUsd: 3.5,
+        spendPeriod: "today",
+        averageLatencyMs: 1200,
+        isUnlimited: false,
+        isPartial: false,
+      }),
+    ).toEqual({
+      source: "new-api",
+      balanceUsd: 7.5,
+      balanceScope: "account",
+      todayCostUsd: 1.25,
+      totalCostUsd: 3.5,
+      spendPeriod: "today",
+      averageLatencyMs: 1200,
+      isUnlimited: false,
+      isPartial: false,
+    });
+  });
 });

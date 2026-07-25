@@ -817,6 +817,8 @@ pub(crate) struct CodexKeyProfile {
     pub(crate) provider_kind: String,
     #[serde(default = "default_provider_usage_protocol")]
     pub(crate) usage_protocol: String,
+    #[serde(default)]
+    pub(crate) new_api_access_token: Option<String>,
     #[serde(default = "default_codex_key_env_var")]
     pub(crate) key_env_var: String,
     #[serde(default)]

@@ -136,6 +136,7 @@ pub(super) async fn try_handle(
                 Ok(value) => value,
                 Err(err) => return Some(Err(err)),
             };
+            let new_api_access_token = parse_optional_string(params, "newApiAccessToken");
             let timezone = parse_optional_string(params, "timezone");
             let day_start_unix = params.get("dayStartUnix").and_then(Value::as_i64);
             let usage_protocol = parse_optional_string(params, "usageProtocol");
@@ -143,6 +144,7 @@ pub(super) async fn try_handle(
                 provider_profiles_core::third_party_key_usage_core(
                     base_url,
                     api_key,
+                    new_api_access_token,
                     timezone,
                     day_start_unix,
                     usage_protocol,

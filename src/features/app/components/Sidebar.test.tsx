@@ -415,6 +415,30 @@ describe("Sidebar", () => {
     expect(screen.queryByText("今日消费")).toBeNull();
   });
 
+  it("labels an unlimited New API key as token quota", () => {
+    render(
+      <Sidebar
+        {...baseProps}
+        useTokenUsageStats
+        thirdPartyProviderUsage={{
+          balanceUsd: null,
+          balanceScope: "token",
+          todayCostUsd: 1.16,
+          totalCostUsd: 3.25,
+          spendPeriod: "today",
+          averageLatencyMs: 14_100,
+          isUnlimited: true,
+          isPartial: false,
+          source: "new-api",
+        }}
+      />,
+    );
+
+    expect(screen.getByText("令牌额度")).toBeTruthy();
+    expect(screen.getByText("不限")).toBeTruthy();
+    expect(screen.queryByText("余额")).toBeNull();
+  });
+
   it("switches third-party key profiles from the usage panel", () => {
     const onSelectCodexKeyProfile = vi.fn();
     render(

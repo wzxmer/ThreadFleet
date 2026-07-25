@@ -424,6 +424,7 @@ export async function getThirdPartyKeyUsage(
   baseUrl: string,
   apiKey: string,
   usageProtocol: "auto" | "sub2" | "new-api" | "disabled" = "auto",
+  newApiAccessToken?: string | null,
 ): Promise<ThirdPartyKeyUsageSnapshot | null> {
   const usageUrl = buildThirdPartyUsageUrl(baseUrl);
   if (!usageUrl || !apiKey.trim()) {
@@ -437,6 +438,7 @@ export async function getThirdPartyKeyUsage(
   const response = await invoke<unknown>("third_party_key_usage", {
     baseUrl: usageUrl,
     apiKey,
+    newApiAccessToken: newApiAccessToken?.trim() || null,
     timezone,
     dayStartUnix,
     usageProtocol,

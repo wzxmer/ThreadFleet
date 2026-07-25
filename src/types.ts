@@ -632,6 +632,7 @@ export type CodexKeyProfile = {
   name: string;
   providerKind?: CodexProviderKind;
   usageProtocol?: "auto" | "sub2" | "new-api" | "disabled";
+  newApiAccessToken?: string | null;
   keyEnvVar: string;
   key: string;
   baseUrlEnvVar: string;

@@ -511,6 +511,7 @@ mod tests {
             name: "Company".to_string(),
             provider_kind: "custom".to_string(),
             usage_protocol: "auto".to_string(),
+            new_api_access_token: None,
             key_env_var: "COMPANY_API_KEY".to_string(),
             key: "super-secret-provider-key".to_string(),
             base_url_env_var: "COMPANY_BASE_URL".to_string(),

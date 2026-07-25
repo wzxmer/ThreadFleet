@@ -130,7 +130,13 @@ function ThirdPartyUsageSummary({
       {providerUsage ? (
         <>
           <div className="sidebar-usage-stat">
-            <span>{t("sidebar.usageBalance")}</span>
+            <span>
+              {t(
+                providerUsage.balanceScope === "token"
+                  ? "sidebar.usageTokenQuota"
+                  : "sidebar.usageBalance",
+              )}
+            </span>
             <strong>
               {providerUsage.isUnlimited
                 ? t("sidebar.usageUnlimited")

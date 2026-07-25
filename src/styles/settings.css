@@ -210,6 +210,13 @@
   gap: 8px;
 }
 
+.settings-key-profile-secret {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .settings-provider-profile-list {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

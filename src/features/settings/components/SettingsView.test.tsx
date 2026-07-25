@@ -1981,6 +1981,16 @@ describe("SettingsView Codex defaults", () => {
     fireEvent.change(screen.getByLabelText("用量接口类型"), {
       target: { value: "new-api" },
     });
+    fireEvent.change(screen.getByLabelText("New API Access Token"), {
+      target: { value: "access-secret" },
+    });
+    const accessTokenField = screen.getByLabelText("New API Access Token");
+    const accessTokenHelp = screen.getByText(
+      "用于读取 New API 账户余额；API 密钥仍用于读取令牌消费。未填写或验证失败时回退显示令牌额度。",
+    );
+    expect(
+      accessTokenHelp.closest(".settings-key-profile-secret")?.contains(accessTokenField),
+    ).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "添加并启用" }));
 
     const calls = onUpdateAppSettings.mock.calls;
@@ -1988,6 +1998,7 @@ describe("SettingsView Codex defaults", () => {
     expect(nextSettings.codexKeyProfiles[nextSettings.codexKeyProfiles.length - 1]).toMatchObject({
       name: "New API",
       usageProtocol: "new-api",
+      newApiAccessToken: "access-secret",
     });
   });
 
