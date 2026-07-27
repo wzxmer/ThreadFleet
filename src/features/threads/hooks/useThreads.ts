@@ -82,6 +82,7 @@ type UseThreadsOptions = {
   model?: string | null;
   workflowProviderKind?: CodexProviderKind;
   workflowRuntimeMode?: WorkflowRuntimeMode;
+  computerControlRoutingEnabled?: boolean;
   workflowSkills?: SkillOption[];
   workflowAgents?: WorkflowAgentOption[];
   getWorkflowGateId?: (workspaceId: string, threadId: string) => string | null;
@@ -139,6 +140,7 @@ export function useThreads({
   model,
   workflowProviderKind = "openai",
   workflowRuntimeMode = "shadow",
+  computerControlRoutingEnabled = true,
   workflowSkills = [],
   workflowAgents = [],
   getWorkflowGateId,
@@ -1364,6 +1366,7 @@ export function useThreads({
     model,
     workflowProviderKind,
     workflowRuntimeMode,
+    computerControlRoutingEnabled,
     workflowSkills,
     workflowAgents,
     getWorkflowGateId,

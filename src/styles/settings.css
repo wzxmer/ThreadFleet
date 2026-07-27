@@ -1617,6 +1617,90 @@
   word-break: break-all;
   overflow-wrap: anywhere;
 }
+
+.settings-computer-control {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-muted);
+}
+
+.settings-computer-control-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.settings-computer-control-heading {
+  min-width: 0;
+}
+
+.settings-computer-control-toggle {
+  padding: 11px 13px;
+}
+
+.settings-computer-control-status {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  border-top: 1px solid var(--border-muted);
+  border-bottom: 1px solid var(--border-muted);
+}
+
+.settings-computer-control-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 34px;
+  padding: 0 2px;
+}
+
+.settings-computer-control-status-row + .settings-computer-control-status-row {
+  border-top: 1px solid var(--border-muted);
+}
+
+.settings-computer-control-status dt,
+.settings-computer-control-status dd {
+  margin: 0;
+  font-size: 11px;
+}
+
+.settings-computer-control-status dt {
+  color: var(--text-muted);
+}
+
+.settings-computer-control-status dd {
+  flex: 0 0 auto;
+  font-weight: 650;
+  color: var(--status-unknown);
+}
+
+.settings-computer-control-status dd[data-status="ready"] {
+  color: var(--status-success);
+}
+
+.settings-computer-control-status dd[data-status="missing"],
+.settings-computer-control-status dd[data-status="unsupported"] {
+  color: var(--status-warning);
+}
+
+.settings-computer-control-status dd[data-status="failed"] {
+  color: var(--status-error);
+}
+
+.settings-computer-control-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 12px;
+  color: var(--text-faint);
+  font-size: 10px;
+}
+
 .settings-empty {
   color: var(--text-faint);
   font-size: 12px;
@@ -1711,6 +1795,16 @@
 }
 
 @media (max-width: 720px) {
+  .settings-computer-control-header {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .settings-computer-control-header .settings-button-compact {
+    align-self: flex-start;
+  }
+
   .settings-window {
     width: min(680px, 96vw);
     height: min(760px, calc(100vh - env(safe-area-inset-top, 0px) - 20px));

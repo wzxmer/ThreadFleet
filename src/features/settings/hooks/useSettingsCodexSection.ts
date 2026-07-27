@@ -7,6 +7,7 @@ import type {
   CodexSyncDiagnostics,
   CodexStatus,
   CodexUpdateResult,
+  ComputerControlCapabilitySnapshot,
   WorkspaceInfo,
 } from "@/types";
 import {
@@ -14,7 +15,7 @@ import {
   getCodexStatus,
   getCodexSyncDiagnostics,
 } from "@services/tauri";
-import { listMcpServerStatus } from "@services/tauri";
+import { getComputerControlStatus, listMcpServerStatus } from "@services/tauri";
 import { useGlobalAgentsMd } from "./useGlobalAgentsMd";
 import { useGlobalCodexConfigToml } from "./useGlobalCodexConfigToml";
 import { useSettingsDefaultModels } from "./useSettingsDefaultModels";
@@ -77,6 +78,12 @@ export type SettingsCodexSectionProps = {
     error: string | null;
     workspaceName: string | null;
   };
+  computerControlStatusState: {
+    status: "idle" | "loading" | "done";
+    result: ComputerControlCapabilitySnapshot | null;
+    error: string | null;
+    workspaceName: string | null;
+  };
   globalAgentsMeta: string;
   globalAgentsError: string | null;
   globalAgentsContent: string;
@@ -105,6 +112,7 @@ export type SettingsCodexSectionProps = {
   onRefreshCodexStatus: () => void;
   onRefreshCodexSyncDiagnostics: () => void;
   onRefreshMcpStatus: () => void;
+  onRefreshComputerControlStatus: () => void;
   onRefreshGlobalAgents: () => void;
   onSaveGlobalAgents: () => void;
   onRefreshGlobalConfig: () => void;
@@ -148,6 +156,12 @@ export const useSettingsCodexSection = ({
   const [mcpStatusState, setMcpStatusState] = useState<{
     status: "idle" | "loading" | "done";
     result: unknown | null;
+    error: string | null;
+    workspaceName: string | null;
+  }>({ status: "idle", result: null, error: null, workspaceName: null });
+  const [computerControlStatusState, setComputerControlStatusState] = useState<{
+    status: "idle" | "loading" | "done";
+    result: ComputerControlCapabilitySnapshot | null;
     error: string | null;
     workspaceName: string | null;
   }>({ status: "idle", result: null, error: null, workspaceName: null });
@@ -276,10 +290,51 @@ export const useSettingsCodexSection = ({
       });
   }, [projects]);
 
+  const refreshComputerControlStatus = useCallback(() => {
+    const workspace = projects.find((entry) => entry.connected) ?? null;
+    if (!workspace) {
+      setComputerControlStatusState({
+        status: "done",
+        result: null,
+        error: "settings.codex.mcpNeedsWorkspace",
+        workspaceName: null,
+      });
+      return;
+    }
+    setComputerControlStatusState((current) => ({
+      status: "loading",
+      result: current.result,
+      error: null,
+      workspaceName: workspace.name,
+    }));
+    getComputerControlStatus(workspace.id, true)
+      .then((result) => {
+        setComputerControlStatusState({
+          status: "done",
+          result,
+          error: null,
+          workspaceName: workspace.name,
+        });
+      })
+      .catch((error) => {
+        setComputerControlStatusState({
+          status: "done",
+          result: null,
+          error: error instanceof Error ? error.message : String(error),
+          workspaceName: workspace.name,
+        });
+      });
+  }, [projects]);
+
   useEffect(() => {
     refreshCodexStatus();
     refreshCodexSyncDiagnostics();
-  }, [refreshCodexStatus, refreshCodexSyncDiagnostics]);
+    refreshComputerControlStatus();
+  }, [
+    refreshCodexStatus,
+    refreshCodexSyncDiagnostics,
+    refreshComputerControlStatus,
+  ]);
 
   useEffect(() => {
     setCodexPathDraft(appSettings.codexBin ?? "");
@@ -457,6 +512,7 @@ export const useSettingsCodexSection = ({
     codexStatusState,
     codexSyncDiagnosticsState,
     mcpStatusState,
+    computerControlStatusState,
     globalAgentsMeta: globalAgentsEditorMeta.meta,
     globalAgentsError,
     globalAgentsContent,
@@ -485,6 +541,7 @@ export const useSettingsCodexSection = ({
     onRefreshCodexStatus: refreshCodexStatus,
     onRefreshCodexSyncDiagnostics: refreshCodexSyncDiagnostics,
     onRefreshMcpStatus: refreshMcpStatus,
+    onRefreshComputerControlStatus: refreshComputerControlStatus,
     onRefreshGlobalAgents: () => {
       void refreshGlobalAgents();
     },

@@ -15,6 +15,7 @@ import {
   readWorkspaceFile,
   rollbackThread as rollbackThreadService,
   workflowPreflightPreview as workflowPreflightPreviewService,
+  computerControlPreflight as computerControlPreflightService,
 } from "@services/tauri";
 import type { SendMessageResult, WorkspaceInfo } from "@/types";
 import { useThreadMessaging } from "./useThreadMessaging";
@@ -38,6 +39,7 @@ vi.mock("@services/tauri", () => ({
   readWorkspaceFile: vi.fn(),
   rollbackThread: vi.fn(),
   workflowPreflightPreview: vi.fn(),
+  computerControlPreflight: vi.fn(),
 }));
 
 vi.mock("./useReviewPrompt", () => ({
@@ -136,6 +138,11 @@ describe("useThreadMessaging telemetry", () => {
           kind: "application",
           value: "run focused validation and review the task-owned changed diff",
         },
+        {
+          sourceId: "cm.computer-control",
+          kind: "application",
+          value: "untrusted workflow collision",
+        },
       ],
       completionPlan: {
         required: true,
@@ -167,6 +174,19 @@ describe("useThreadMessaging telemetry", () => {
   });
 
   it("records prompt_sent once for one message send", async () => {
+    vi.mocked(computerControlPreflightService).mockResolvedValueOnce({
+      schemaVersion: 1,
+      decisionId: "cmcc-reserved-context",
+      taskKind: "native_windows",
+      primaryBackend: "windows_ui",
+      availability: "ready",
+      enforcement: "hard",
+      reasonCodes: ["native_windows_task", "backend_ready"],
+      executionHost: "local",
+      snapshotAgeMs: 0,
+      contextFragment:
+        '{"decisionId":"cmcc-reserved-context","primaryBackend":"windows_ui"}',
+    });
     const ensureWorkspaceRuntimeCodexArgs = vi.fn(async () => undefined);
     const ensureThreadRuntimeForWorkspace = vi.fn(
       async () => "thread-1",
@@ -307,6 +327,10 @@ describe("useThreadMessaging telemetry", () => {
             kind: "application",
             value: expect.stringContaining("task-owned changed diff"),
           }),
+          "cm.computer-control": {
+            kind: "application",
+            value: expect.stringContaining("windows_ui"),
+          },
           "cm.skill.0": expect.objectContaining({
             kind: "application",
             value: expect.stringContaining("public-check"),
@@ -376,7 +400,19 @@ describe("useThreadMessaging telemetry", () => {
     );
   });
 
-  it("skips workflow preflight and context when runtime mode is off", async () => {
+  it("applies computer-control context even when workflow runtime mode is off", async () => {
+    vi.mocked(computerControlPreflightService).mockResolvedValueOnce({
+      schemaVersion: 1,
+      decisionId: "cmcc-native",
+      taskKind: "native_windows",
+      primaryBackend: "windows_ui",
+      availability: "ready",
+      enforcement: "hard",
+      reasonCodes: ["native_windows_task", "backend_ready"],
+      executionHost: "local",
+      snapshotAgeMs: 0,
+      contextFragment: '{"decisionId":"cmcc-native","primaryBackend":"windows_ui"}',
+    });
     const { result } = renderHook(() =>
       useThreadMessaging({
         activeWorkspace: workspace,
@@ -414,17 +450,32 @@ describe("useThreadMessaging telemetry", () => {
     });
 
     expect(workflowPreflightPreviewService).not.toHaveBeenCalled();
+    expect(computerControlPreflightService).toHaveBeenCalledWith(
+      "ws-1",
+      "hello",
+      expect.stringMatching(/^cmcc-/),
+    );
     expect(sendUserMessageService).toHaveBeenCalledWith(
       "ws-1",
       "thread-1",
       "hello",
-      expect.not.objectContaining({ additionalContext: expect.anything() }),
+      expect.objectContaining({
+        additionalContext: {
+          "cm.computer-control": {
+            kind: "application",
+            value: expect.stringContaining("windows_ui"),
+          },
+        },
+      }),
     );
   });
 
   it("does not block sending when host workflow preflight fails", async () => {
     vi.mocked(workflowPreflightPreviewService).mockRejectedValueOnce(
       new Error("preflight unavailable"),
+    );
+    vi.mocked(computerControlPreflightService).mockRejectedValueOnce(
+      new Error("unknown command: computer_control_preflight"),
     );
     const onDebug = vi.fn();
     const { result } = renderHook(() =>
@@ -470,6 +521,12 @@ describe("useThreadMessaging telemetry", () => {
       expect.objectContaining({
         label: "workflow/host preflight error",
         payload: "preflight unavailable",
+      }),
+    );
+    expect(onDebug).toHaveBeenCalledWith(
+      expect.objectContaining({
+        label: "computer-control/preflight error",
+        payload: "unknown command: computer_control_preflight",
       }),
     );
   });
@@ -522,6 +579,17 @@ describe("useThreadMessaging telemetry", () => {
         "image",
         ["/home/.codex/codex-monitor/attachments/pending/draft/image.png"],
       );
+    });
+    vi.mocked(computerControlPreflightService).mockResolvedValue({
+      schemaVersion: 1,
+      decisionId: "cmcc-test",
+      taskKind: "direct",
+      primaryBackend: "direct",
+      availability: "ready",
+      enforcement: "hard",
+      reasonCodes: ["direct_task", "backend_ready"],
+      executionHost: "local",
+      snapshotAgeMs: 0,
     });
 
     expect(dispatch).toHaveBeenCalledWith(
@@ -752,6 +820,68 @@ describe("useThreadMessaging telemetry", () => {
     await act(async () => {
       await sendPromise;
     });
+  });
+
+  it("reuses the computer-control decision id when steering the same active turn", async () => {
+    const renderMessaging = (active: boolean) =>
+      useThreadMessaging({
+        activeWorkspace: workspace,
+        activeThreadId: "thread-1",
+        accessMode: "current",
+        model: null,
+        workflowRuntimeMode: "off",
+        effort: null,
+        collaborationMode: null,
+        reviewDeliveryMode: "inline",
+        steerEnabled: true,
+        customPrompts: [],
+        threadStatusById: active
+          ? {
+            "thread-1": {
+              isProcessing: true,
+              hasUnread: false,
+              isReviewing: false,
+              processingStartedAt: 1,
+              lastDurationMs: null,
+            },
+          }
+          : {},
+        activeTurnIdByThread: active ? { "thread-1": "turn-1" } : {},
+        rateLimitsByWorkspace: {},
+        pendingInterruptsRef: { current: new Set<string>() },
+        dispatch: vi.fn(),
+        getCustomName: vi.fn(() => undefined),
+        markProcessing: vi.fn(),
+        markReviewing: vi.fn(),
+        setActiveTurnId: vi.fn(),
+        recordThreadActivity: vi.fn(),
+        safeMessageActivity: vi.fn(),
+        pushThreadErrorMessage: vi.fn(),
+        ensureThreadForActiveWorkspace: vi.fn(async () => "thread-1"),
+        ensureThreadForWorkspace: vi.fn(async () => "thread-1"),
+        refreshThread: vi.fn(async () => null),
+        forkThreadForWorkspace: vi.fn(async () => null),
+        updateThreadParent: vi.fn(),
+      });
+    const { result, rerender } = renderHook(
+      ({ active }) => renderMessaging(active),
+      { initialProps: { active: false } },
+    );
+
+    await act(async () => {
+      await result.current.sendUserMessageToThread(workspace, "thread-1", "first", []);
+    });
+    rerender({ active: true });
+    await act(async () => {
+      await result.current.sendUserMessageToThread(workspace, "thread-1", "follow up", []);
+    });
+
+    const decisionIds = vi
+      .mocked(computerControlPreflightService)
+      .mock.calls.map((call) => call[2]);
+    expect(decisionIds).toHaveLength(2);
+    expect(decisionIds[1]).toBe(decisionIds[0]);
+    expect(steerTurnService).toHaveBeenCalledTimes(1);
   });
 
   it("exposes a pending turn start immediately while runtime preparation is unresolved", async () => {

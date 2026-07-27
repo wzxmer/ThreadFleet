@@ -167,6 +167,8 @@ fn can_retry_after_disconnect(method: &str) -> bool {
             | "account_read"
             | "apps_list"
             | "collaboration_mode_list"
+            | "computer_control_status"
+            | "computer_control_preflight"
             | "connect_workspace"
             | "experimental_feature_list"
             | "set_workspace_runtime_codex_args"

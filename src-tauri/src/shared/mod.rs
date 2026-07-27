@@ -4,6 +4,8 @@ pub(crate) mod attachment_storage_core;
 pub(crate) mod codex_aux_core;
 pub(crate) mod codex_core;
 pub(crate) mod codex_update_core;
+#[allow(dead_code)]
+pub(crate) mod computer_control_core;
 pub(crate) mod config_toml_core;
 pub(crate) mod execution_binding_core;
 pub(crate) mod execution_router_core;

@@ -329,6 +329,7 @@ function buildDefaultSettings(): AppSettings {
     tokenEfficiencyMode: "quality",
     toolOutputTokenLimit: null,
     workflowRuntimeMode: "shadow",
+    computerControlRoutingEnabled: true,
     uiScale: UI_SCALE_DEFAULT,
     appLanguage: "system",
     theme: "system",
@@ -473,6 +474,7 @@ function normalizeAppSettings(settings: AppSettings): AppSettings {
     )
       ? settings.workflowRuntimeMode
       : "shadow",
+    computerControlRoutingEnabled: settings.computerControlRoutingEnabled !== false,
     uiScale: clampUiScale(settings.uiScale),
     appLanguage: allowedAppLanguages.has(settings.appLanguage)
       ? settings.appLanguage

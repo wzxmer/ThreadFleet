@@ -87,8 +87,8 @@ use shared::session_manager_core::runtime::{
 };
 use shared::session_manager_core::service::SessionManagerRuntime;
 use shared::{
-    agents_config_core, codex_aux_core, codex_core, files_core, git_core, git_ui_core,
-    knowledge_adapter_core, local_usage_core, provider_profiles_core, settings_core,
+    agents_config_core, codex_aux_core, codex_core, computer_control_core, files_core, git_core,
+    git_ui_core, knowledge_adapter_core, local_usage_core, provider_profiles_core, settings_core,
     workflow_gate_adapter_core, workflow_preflight_core, workspaces_core, worktree_core,
 };
 use storage::{read_settings, read_workspaces};
@@ -1613,6 +1613,42 @@ impl DaemonState {
         limit: Option<u32>,
     ) -> Result<Value, String> {
         codex_core::list_mcp_server_status_core(&self.sessions, workspace_id, cursor, limit).await
+    }
+
+    async fn computer_control_status(
+        &self,
+        workspace_id: String,
+        force_refresh: bool,
+    ) -> Result<Value, String> {
+        let snapshot = codex_core::computer_control_status_core(
+            &self.sessions,
+            &self.workspaces,
+            workspace_id,
+            force_refresh,
+            "remote:codex-monitor-daemon".to_string(),
+        )
+        .await?;
+        serde_json::to_value(snapshot).map_err(|error| error.to_string())
+    }
+
+    async fn computer_control_preflight(
+        &self,
+        workspace_id: String,
+        task: String,
+        explicit_backend: Option<computer_control_core::ComputerControlBackend>,
+        decision_id: String,
+    ) -> Result<Value, String> {
+        let decision = codex_core::computer_control_preflight_core(
+            &self.sessions,
+            &self.workspaces,
+            workspace_id,
+            task,
+            explicit_backend,
+            decision_id,
+            "remote:codex-monitor-daemon".to_string(),
+        )
+        .await?;
+        serde_json::to_value(decision).map_err(|error| error.to_string())
     }
 
     async fn archive_thread(

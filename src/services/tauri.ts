@@ -71,6 +71,9 @@ import type {
   ExecutionBindingRecord,
   ExecutionBindingRegisterInput,
   TurnExecutionSummary,
+  ComputerControlCapabilitySnapshot,
+  ComputerControlBackend,
+  ComputerControlRouteDecision,
 } from "../types";
 import {
   buildThirdPartyUsageUrl,
@@ -1644,6 +1647,30 @@ export async function listMcpServerStatus(
 
 export async function resumeThread(workspaceId: string, threadId: string) {
   return invoke<any>("resume_thread", { workspaceId, threadId });
+}
+
+export async function getComputerControlStatus(
+  workspaceId: string,
+  forceRefresh = false,
+): Promise<ComputerControlCapabilitySnapshot> {
+  return invoke<ComputerControlCapabilitySnapshot>("computer_control_status", {
+    workspaceId,
+    forceRefresh,
+  });
+}
+
+export async function computerControlPreflight(
+  workspaceId: string,
+  task: string,
+  decisionId: string,
+  explicitBackend?: ComputerControlBackend | null,
+): Promise<ComputerControlRouteDecision> {
+  return invoke<ComputerControlRouteDecision>("computer_control_preflight", {
+    workspaceId,
+    task,
+    decisionId,
+    explicitBackend: explicitBackend ?? null,
+  });
 }
 
 export async function getThreadTokenUsage(

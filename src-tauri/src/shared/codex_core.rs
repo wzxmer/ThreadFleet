@@ -1,4 +1,5 @@
 use base64::{engine::general_purpose::STANDARD, Engine as _};
+use futures_util::future::join4;
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
 use std::io::Read;
@@ -20,6 +21,19 @@ use crate::codex::home::{
 };
 use crate::rules;
 use crate::shared::account::{build_account_response, read_auth_account, read_auth_api_key};
+use crate::shared::computer_control_core::{
+    attach_computer_control_context, build_capability_snapshot, classify_computer_control_task,
+    effective_plugin_enabled, infer_computer_control_task_signals,
+    normalize_browser_backend_capability, normalize_browser_runtime_evidence,
+    normalize_mcp_server_capability_with_identity, normalize_plugin_management_status,
+    normalize_skill_availability, route_computer_control, snapshot_is_fresh,
+    BrowserBackendEvidence, ComputerControlAvailability, ComputerControlBackend,
+    ComputerControlBackendCapability, ComputerControlCapabilitySnapshot,
+    ComputerControlRouteDecision, ComputerControlRouteRequest, ComputerControlSnapshotInput,
+    ComputerControlTaskKind, McpServerStatusListResponse, PluginListResponse, SkillsListResponse,
+    BROWSER_PLUGIN_ID, BROWSER_SKILL_NAME, CHROME_PLUGIN_ID, CHROME_SKILL_NAME,
+    COMPUTER_USE_PLUGIN_ID, NODE_REPL_SERVER_NAME, WINDOWS_UI_SERVER_NAME,
+};
 use crate::shared::{config_toml_core, provider_profiles_core, workflow_registry_core};
 use crate::types::{AppSettings, WorkspaceEntry};
 
@@ -38,6 +52,10 @@ const THREAD_LIST_SOURCE_KINDS: &[&str] = &[
     "unknown",
 ];
 const LOCAL_CODEX_WORKSPACE_ID: &str = "__local_codex_sessions__";
+// MCP discovery can cross the ten-second mark on a cold app-server start while
+// its child servers initialize. Keep this below the session request timeout,
+// but leave enough headroom for the real startup path.
+const COMPUTER_CONTROL_PROBE_TIMEOUT: Duration = Duration::from_secs(20);
 
 #[allow(dead_code)]
 fn image_extension_for_path(path: &str) -> Option<String> {
@@ -956,6 +974,195 @@ pub(crate) async fn list_mcp_server_status_core(
     session
         .send_request_for_workspace(&workspace_id, "mcpServerStatus/list", params)
         .await
+}
+
+fn response_result(response: Result<Value, String>) -> Option<Value> {
+    response
+        .ok()?
+        .get("result")
+        .filter(|result| !result.is_null())
+        .cloned()
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
+pub(crate) async fn computer_control_status_core(
+    sessions: &Mutex<HashMap<String, Arc<WorkspaceSession>>>,
+    workspaces: &Mutex<HashMap<String, WorkspaceEntry>>,
+    workspace_id: String,
+    force_refresh: bool,
+    execution_host: String,
+) -> Result<ComputerControlCapabilitySnapshot, String> {
+    let session = get_session_clone(sessions, &workspace_id).await?;
+    let observed_at_ms = now_ms();
+    if force_refresh {
+        session.invalidate_computer_control_snapshot().await;
+    } else {
+        if let Some(snapshot) = session.computer_control_snapshot.lock().await.clone() {
+            if snapshot_is_fresh(
+                &snapshot,
+                &session.computer_control_runtime_fingerprint,
+                observed_at_ms,
+            ) {
+                return Ok(snapshot);
+            }
+        }
+    }
+
+    let workspace_path = resolve_workspace_path_core(workspaces, &workspace_id).await?;
+    let mcp_request = timeout(
+        COMPUTER_CONTROL_PROBE_TIMEOUT,
+        session.send_request_for_workspace(
+            &workspace_id,
+            "mcpServerStatus/list",
+            json!({ "cursor": null, "limit": 100, "detail": "toolsAndAuthOnly" }),
+        ),
+    );
+    let plugin_request = timeout(
+        COMPUTER_CONTROL_PROBE_TIMEOUT,
+        session.send_request_for_workspace(
+            &workspace_id,
+            "plugin/list",
+            json!({ "cwds": [workspace_path.clone()], "marketplaceKinds": ["local"] }),
+        ),
+    );
+    let skills_request = timeout(
+        COMPUTER_CONTROL_PROBE_TIMEOUT,
+        session.send_request_for_workspace(
+            &workspace_id,
+            "skills/list",
+            json!({ "cwd": workspace_path.clone() }),
+        ),
+    );
+    let config_request = timeout(
+        COMPUTER_CONTROL_PROBE_TIMEOUT,
+        session.send_request_for_workspace(
+            &workspace_id,
+            "config/read",
+            json!({ "cwd": workspace_path, "includeLayers": false }),
+        ),
+    );
+    let (mcp_response, plugin_response, skills_response, config_response) =
+        join4(mcp_request, plugin_request, skills_request, config_request).await;
+
+    let mcp_result = mcp_response.ok().and_then(response_result);
+    let plugin_result = plugin_response.ok().and_then(response_result);
+    let skills_result = skills_response.ok().and_then(response_result);
+    let config_result = config_response.ok().and_then(response_result);
+    let mcp: Option<McpServerStatusListResponse> = mcp_result
+        .as_ref()
+        .and_then(|value| serde_json::from_value(value.clone()).ok());
+    let plugins: Option<PluginListResponse> = plugin_result
+        .as_ref()
+        .and_then(|value| serde_json::from_value(value.clone()).ok());
+    let skills: Option<SkillsListResponse> = skills_result
+        .as_ref()
+        .and_then(|value| serde_json::from_value(value.clone()).ok());
+
+    let windows_ui = normalize_mcp_server_capability_with_identity(
+        mcp.as_ref(),
+        mcp_result.is_none(),
+        WINDOWS_UI_SERVER_NAME,
+        Some("sbroenne.windows-mcp"),
+    );
+    let node_repl = normalize_mcp_server_capability_with_identity(
+        mcp.as_ref(),
+        mcp_result.is_none(),
+        NODE_REPL_SERVER_NAME,
+        Some("rmcp"),
+    );
+    let node_repl_availability = node_repl.availability;
+    let browser_capability = |plugin_id: &str, skill_name: &str| {
+        let management = normalize_plugin_management_status(
+            plugins.as_ref(),
+            plugin_result.is_none(),
+            plugin_id,
+        );
+        let skill =
+            normalize_skill_availability(skills.as_ref(), skills_result.is_none(), skill_name);
+        let runtime_tools = normalize_browser_runtime_evidence(
+            effective_plugin_enabled(config_result.as_ref(), plugin_id),
+            skill,
+        );
+        normalize_browser_backend_capability(BrowserBackendEvidence {
+            plugin_management: management,
+            runtime_tools,
+            node_repl: node_repl_availability,
+        })
+    };
+    let computer_use_reason =
+        match effective_plugin_enabled(config_result.as_ref(), COMPUTER_USE_PLUGIN_ID) {
+            Some(false) => "computer_use_disabled_by_cm",
+            Some(true) => "computer_use_disable_override_not_effective",
+            None => "computer_use_disable_override_unverified",
+        };
+    let snapshot = build_capability_snapshot(ComputerControlSnapshotInput {
+        observed_at_ms,
+        execution_host,
+        runtime_fingerprint: session.computer_control_runtime_fingerprint.clone(),
+        windows_ui,
+        chrome: browser_capability(CHROME_PLUGIN_ID, CHROME_SKILL_NAME),
+        browser: browser_capability(BROWSER_PLUGIN_ID, BROWSER_SKILL_NAME),
+        computer_use: ComputerControlBackendCapability::new(
+            ComputerControlAvailability::Unsupported,
+            computer_use_reason,
+        ),
+    });
+    *session.computer_control_snapshot.lock().await = Some(snapshot.clone());
+    Ok(snapshot)
+}
+
+pub(crate) async fn computer_control_preflight_core(
+    sessions: &Mutex<HashMap<String, Arc<WorkspaceSession>>>,
+    workspaces: &Mutex<HashMap<String, WorkspaceEntry>>,
+    workspace_id: String,
+    task: String,
+    explicit_backend: Option<ComputerControlBackend>,
+    decision_id: String,
+    execution_host: String,
+) -> Result<ComputerControlRouteDecision, String> {
+    let signals = infer_computer_control_task_signals(&task, explicit_backend);
+    let classification = classify_computer_control_task(&signals);
+    let observed_at_ms = now_ms();
+    let snapshot = if classification.task_kind == ComputerControlTaskKind::Direct {
+        build_capability_snapshot(ComputerControlSnapshotInput {
+            observed_at_ms,
+            execution_host,
+            runtime_fingerprint: "direct-no-probe".to_string(),
+            windows_ui: ComputerControlBackendCapability::new(
+                ComputerControlAvailability::Unknown,
+                "not_probed_for_direct_task",
+            ),
+            chrome: ComputerControlBackendCapability::new(
+                ComputerControlAvailability::Unknown,
+                "not_probed_for_direct_task",
+            ),
+            browser: ComputerControlBackendCapability::new(
+                ComputerControlAvailability::Unknown,
+                "not_probed_for_direct_task",
+            ),
+            computer_use: ComputerControlBackendCapability::new(
+                ComputerControlAvailability::Unsupported,
+                "computer_use_disabled_by_cm",
+            ),
+        })
+    } else {
+        computer_control_status_core(sessions, workspaces, workspace_id, false, execution_host)
+            .await?
+    };
+    Ok(attach_computer_control_context(route_computer_control(
+        ComputerControlRouteRequest {
+            decision_id,
+            classification: &classification,
+            snapshot: &snapshot,
+            now_ms: now_ms(),
+        },
+    )))
 }
 
 pub(crate) async fn archive_thread_core(

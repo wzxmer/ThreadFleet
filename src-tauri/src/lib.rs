@@ -291,6 +291,8 @@ pub fn run() {
             codex::rollback_thread,
             codex::list_threads,
             codex::list_mcp_server_status,
+            codex::computer_control_status,
+            codex::computer_control_preflight,
             codex::archive_thread,
             codex::compact_thread,
             codex::set_thread_name,

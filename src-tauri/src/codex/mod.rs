@@ -643,6 +643,71 @@ pub(crate) async fn list_mcp_server_status(
 }
 
 #[tauri::command]
+pub(crate) async fn computer_control_status(
+    workspace_id: String,
+    force_refresh: Option<bool>,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<Value, String> {
+    if remote_backend::is_remote_mode(&*state).await {
+        return remote_backend::call_remote(
+            &*state,
+            app,
+            "computer_control_status",
+            json!({ "workspaceId": workspace_id, "forceRefresh": force_refresh }),
+        )
+        .await;
+    }
+
+    let snapshot = codex_core::computer_control_status_core(
+        &state.sessions,
+        &state.workspaces,
+        workspace_id,
+        force_refresh.unwrap_or(false),
+        "local".to_string(),
+    )
+    .await?;
+    serde_json::to_value(snapshot).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub(crate) async fn computer_control_preflight(
+    workspace_id: String,
+    task: String,
+    explicit_backend: Option<crate::shared::computer_control_core::ComputerControlBackend>,
+    decision_id: String,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<Value, String> {
+    if remote_backend::is_remote_mode(&*state).await {
+        return remote_backend::call_remote(
+            &*state,
+            app,
+            "computer_control_preflight",
+            json!({
+                "workspaceId": workspace_id,
+                "task": task,
+                "explicitBackend": explicit_backend,
+                "decisionId": decision_id
+            }),
+        )
+        .await;
+    }
+
+    let decision = codex_core::computer_control_preflight_core(
+        &state.sessions,
+        &state.workspaces,
+        workspace_id,
+        task,
+        explicit_backend,
+        decision_id,
+        "local".to_string(),
+    )
+    .await?;
+    serde_json::to_value(decision).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub(crate) async fn archive_thread(
     workspace_id: String,
     thread_id: String,

@@ -11,6 +11,8 @@ import type {
   CodexSyncDiagnostics,
   CodexStatus,
   CodexUpdateResult,
+  ComputerControlAvailability,
+  ComputerControlCapabilitySnapshot,
   ModelOption,
 } from "@/types";
 import {
@@ -72,6 +74,12 @@ type SettingsCodexSectionProps = {
     error: string | null;
     workspaceName: string | null;
   };
+  computerControlStatusState: {
+    status: "idle" | "loading" | "done";
+    result: ComputerControlCapabilitySnapshot | null;
+    error: string | null;
+    workspaceName: string | null;
+  };
   globalAgentsMeta: string;
   globalAgentsError: string | null;
   globalAgentsContent: string;
@@ -100,6 +108,7 @@ type SettingsCodexSectionProps = {
   onRefreshCodexStatus: () => void;
   onRefreshCodexSyncDiagnostics: () => void;
   onRefreshMcpStatus: () => void;
+  onRefreshComputerControlStatus: () => void;
   onRefreshGlobalAgents: () => void;
   onSaveGlobalAgents: () => void;
   onRefreshGlobalConfig: () => void;
@@ -175,6 +184,7 @@ export function SettingsCodexSection({
   codexStatusState,
   codexSyncDiagnosticsState,
   mcpStatusState,
+  computerControlStatusState,
   globalAgentsMeta,
   globalAgentsError,
   globalAgentsContent,
@@ -203,12 +213,13 @@ export function SettingsCodexSection({
   onRefreshCodexStatus,
   onRefreshCodexSyncDiagnostics,
   onRefreshMcpStatus,
+  onRefreshComputerControlStatus,
   onRefreshGlobalAgents,
   onSaveGlobalAgents,
   onRefreshGlobalConfig,
   onSaveGlobalConfig,
 }: SettingsCodexSectionProps) {
-  const { t } = useI18n();
+  const { language, t } = useI18n();
   const loadingLabel = t("common.loading");
   const refreshLabel = t("common.refresh");
   const saveLabel = t("common.save");
@@ -218,6 +229,22 @@ export function SettingsCodexSection({
   const notFoundLabel = t("settings.codex.notFound");
   const okLabel = t("settings.codex.ok");
   const failedLabel = t("settings.codex.failed");
+  const computerControlAvailabilityLabel = (
+    availability: ComputerControlAvailability,
+  ) => {
+    switch (availability) {
+      case "ready":
+        return t("settings.codex.computerControlReady");
+      case "missing":
+        return t("settings.codex.computerControlMissing");
+      case "failed":
+        return t("settings.codex.computerControlFailed");
+      case "unsupported":
+        return t("settings.codex.computerControlUnsupported");
+      default:
+        return t("settings.codex.computerControlUnknown");
+    }
+  };
   const latestModelSlug = defaultModels[0]?.model ?? null;
   const savedModelSlug = useMemo(
     () => coerceSavedModelSlug(appSettings.lastComposerModelId, defaultModels),
@@ -1671,6 +1698,108 @@ export function SettingsCodexSection({
           {t("settings.codex.mcpCommandHelpPrefix")} <code>/mcp</code>{" "}
           {t("settings.codex.mcpCommandHelpMiddle")}{" "}
           <code>codex mcp login &lt;server&gt;</code>.
+        </div>
+        <div className="settings-computer-control">
+          <div className="settings-computer-control-header">
+            <div className="settings-computer-control-heading">
+              <div className="settings-field-label">
+                {t("settings.codex.computerControlTitle")}
+              </div>
+              <div className="settings-help">
+                {t("settings.codex.computerControlHelp")}
+              </div>
+            </div>
+            <button
+              type="button"
+              className="ghost settings-button-compact"
+              onClick={onRefreshComputerControlStatus}
+              disabled={computerControlStatusState.status === "loading"}
+            >
+              {computerControlStatusState.status === "loading"
+                ? loadingLabel
+                : refreshLabel}
+            </button>
+          </div>
+          <SettingsToggleRow
+            className="settings-computer-control-toggle"
+            title={t("settings.codex.computerControlRouting")}
+            subtitle={t("settings.codex.computerControlRoutingHelp")}
+          >
+            <SettingsToggleSwitch
+              pressed={appSettings.computerControlRoutingEnabled !== false}
+              aria-label={t("settings.codex.computerControlRouting")}
+              onClick={() =>
+                void onUpdateAppSettings({
+                  ...appSettings,
+                  computerControlRoutingEnabled:
+                    appSettings.computerControlRoutingEnabled === false,
+                })
+              }
+            />
+          </SettingsToggleRow>
+          {computerControlStatusState.error && (
+            <div className="settings-help settings-help-error">
+              {t("settings.codex.computerControlReadFailed")}: {" "}
+              {computerControlStatusState.error === "settings.codex.mcpNeedsWorkspace"
+                ? t("settings.codex.mcpNeedsWorkspace")
+                : computerControlStatusState.error}
+            </div>
+          )}
+          {computerControlStatusState.result && (
+            <>
+              <dl
+                className="settings-computer-control-status"
+                aria-label={t("settings.codex.computerControlStatus")}
+              >
+                {[
+                  [
+                    "windows_ui",
+                    t("settings.codex.computerControlNativeWindows"),
+                  ],
+                  [
+                    "chrome",
+                    t("settings.codex.computerControlSignedInWeb"),
+                  ],
+                  [
+                    "browser",
+                    t("settings.codex.computerControlIsolatedWeb"),
+                  ],
+                ].map(([backend, label]) => {
+                  const capability =
+                    computerControlStatusState.result?.backends[
+                      backend as "windows_ui" | "chrome" | "browser"
+                    ];
+                  if (!capability) {
+                    return null;
+                  }
+                  return (
+                    <div key={backend} className="settings-computer-control-status-row">
+                      <dt>{label}</dt>
+                      <dd data-status={capability.availability}>
+                        {computerControlAvailabilityLabel(capability.availability)}
+                      </dd>
+                    </div>
+                  );
+                })}
+              </dl>
+              <div className="settings-computer-control-meta">
+                <span>
+                  {computerControlStatusState.result.executionHost.startsWith("remote:")
+                    ? t("settings.codex.computerControlHostRemote")
+                    : t("settings.codex.computerControlHostLocal")}
+                  {computerControlStatusState.workspaceName
+                    ? ` · ${computerControlStatusState.workspaceName}`
+                    : ""}
+                </span>
+                <span>
+                  {t("settings.codex.computerControlLastChecked")}: {" "}
+                  {new Date(
+                    computerControlStatusState.result.observedAtMs,
+                  ).toLocaleString(language === "zh" ? "zh-CN" : "en-US")}
+                </span>
+              </div>
+            </>
+          )}
         </div>
         <div className="settings-field-actions">
           <button

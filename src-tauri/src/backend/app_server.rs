@@ -14,6 +14,10 @@ use tokio::time::{timeout, Instant};
 
 use crate::backend::events::{AppServerEvent, EventSink};
 use crate::codex::args::parse_codex_args;
+use crate::shared::computer_control_core::{
+    computer_control_runtime_fingerprint, ComputerControlCapabilitySnapshot,
+    COMPUTER_USE_DISABLE_OVERRIDE,
+};
 use crate::shared::process_core::{kill_child_process_tree, tokio_command};
 use crate::shared::provider_gateway_core::ProviderGatewayShutdown;
 use crate::types::WorkspaceEntry;
@@ -560,6 +564,8 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
 pub(crate) struct WorkspaceSession {
     pub(crate) codex_args: Option<String>,
     pub(crate) provider_runtime_fingerprint: Option<String>,
+    pub(crate) computer_control_runtime_fingerprint: String,
+    pub(crate) computer_control_snapshot: Mutex<Option<ComputerControlCapabilitySnapshot>>,
     pub(crate) child: Mutex<Child>,
     pub(crate) stdin: Mutex<ChildStdin>,
     pub(crate) pending: Mutex<HashMap<u64, oneshot::Sender<Value>>>,
@@ -587,9 +593,15 @@ impl WorkspaceSession {
         stdin: ChildStdin,
         owner_workspace_id: String,
     ) -> Self {
+        let computer_control_runtime_fingerprint = computer_control_runtime_fingerprint(
+            codex_args.as_deref(),
+            provider_runtime_fingerprint.as_deref(),
+        );
         Self {
             codex_args,
             provider_runtime_fingerprint,
+            computer_control_runtime_fingerprint,
+            computer_control_snapshot: Mutex::new(None),
             child: Mutex::new(child),
             stdin: Mutex::new(stdin),
             pending: Mutex::new(HashMap::new()),
@@ -610,6 +622,10 @@ impl WorkspaceSession {
 
     pub(crate) fn mark_output_closed(&self) {
         self.output_closed.store(true, Ordering::SeqCst);
+    }
+
+    pub(crate) async fn invalidate_computer_control_snapshot(&self) {
+        *self.computer_control_snapshot.lock().await = None;
     }
 
     pub(crate) async fn shutdown(&self) {
@@ -976,6 +992,14 @@ pub(crate) fn build_codex_command_with_bin(
     Ok(command)
 }
 
+fn computer_control_app_server_args() -> Vec<String> {
+    vec![
+        "-c".to_string(),
+        COMPUTER_USE_DISABLE_OVERRIDE.to_string(),
+        "app-server".to_string(),
+    ]
+}
+
 pub(crate) fn resolve_codex_command_path(codex_bin: Option<&str>) -> String {
     let bin = codex_bin
         .filter(|value| !value.trim().is_empty())
@@ -1075,7 +1099,7 @@ pub(crate) async fn spawn_workspace_session<E: EventSink>(
     let mut command = build_codex_command_with_bin(
         codex_bin,
         codex_args.as_deref(),
-        vec!["app-server".to_string()],
+        computer_control_app_server_args(),
     )?;
     command.current_dir(&entry.path);
     if let Some(path) = codex_home.as_ref() {
@@ -1093,9 +1117,16 @@ pub(crate) async fn spawn_workspace_session<E: EventSink>(
     let stdout = child.stdout.take().ok_or("missing stdout")?;
     let stderr = child.stderr.take().ok_or("missing stderr")?;
 
+    let comparison_codex_args = comparison_codex_args.or_else(|| codex_args.clone());
+    let computer_control_runtime_fingerprint = computer_control_runtime_fingerprint(
+        codex_args.as_deref(),
+        provider_runtime_fingerprint.as_deref(),
+    );
     let session = Arc::new(WorkspaceSession {
-        codex_args: comparison_codex_args.or(codex_args),
+        codex_args: comparison_codex_args,
         provider_runtime_fingerprint,
+        computer_control_runtime_fingerprint,
+        computer_control_snapshot: Mutex::new(None),
         child: Mutex::new(child),
         stdin: Mutex::new(stdin),
         pending: Mutex::new(HashMap::new()),
@@ -1464,7 +1495,8 @@ pub(crate) async fn spawn_history_workspace_session<E: EventSink>(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_initialize_params, build_turn_error_event, extract_related_thread_ids,
+        build_codex_command_with_bin, build_initialize_params, build_turn_error_event,
+        computer_control_app_server_args, extract_related_thread_ids,
         extract_thread_entries_from_thread_list_result, extract_thread_id, normalize_root_path,
         remove_matching_active_turn, resolve_workspace_for_cwd,
         should_suppress_hidden_thread_event, source_subagent_kind,
@@ -1472,6 +1504,33 @@ mod tests {
     };
     use serde_json::json;
     use std::collections::HashMap;
+
+    #[test]
+    fn mandatory_computer_use_override_follows_user_args_and_precedes_subcommand() {
+        let command = build_codex_command_with_bin(
+            Some("codex.exe".to_string()),
+            Some("-c model=custom -c plugins.computer-use@openai-bundled.enabled=true"),
+            computer_control_app_server_args(),
+        )
+        .expect("command");
+        let args = command
+            .as_std()
+            .get_args()
+            .map(|arg| arg.to_string_lossy().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            args,
+            vec![
+                "-c",
+                "model=custom",
+                "-c",
+                "plugins.computer-use@openai-bundled.enabled=true",
+                "-c",
+                "plugins.computer-use@openai-bundled.enabled=false",
+                "app-server",
+            ]
+        );
+    }
 
     #[test]
     fn stale_terminal_turn_cannot_clear_a_newer_active_turn() {

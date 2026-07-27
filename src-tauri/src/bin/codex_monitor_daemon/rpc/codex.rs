@@ -298,6 +298,44 @@ pub(super) async fn try_handle(
                     .await,
             )
         }
+        "computer_control_status" => {
+            let workspace_id = match parse_string(params, "workspaceId") {
+                Ok(value) => value,
+                Err(err) => return Some(Err(err)),
+            };
+            let force_refresh = parse_optional_bool(params, "forceRefresh").unwrap_or(false);
+            Some(
+                state
+                    .computer_control_status(workspace_id, force_refresh)
+                    .await,
+            )
+        }
+        "computer_control_preflight" => {
+            let workspace_id = match parse_string(params, "workspaceId") {
+                Ok(value) => value,
+                Err(err) => return Some(Err(err)),
+            };
+            let task = match parse_string(params, "task") {
+                Ok(value) => value,
+                Err(err) => return Some(Err(err)),
+            };
+            let decision_id = match parse_string(params, "decisionId") {
+                Ok(value) => value,
+                Err(err) => return Some(Err(err)),
+            };
+            let explicit_backend = match parse_optional_string(params, "explicitBackend") {
+                Some(value) => match serde_json::from_value(Value::String(value)) {
+                    Ok(value) => Some(value),
+                    Err(error) => return Some(Err(format!("invalid explicitBackend: {error}"))),
+                },
+                None => None,
+            };
+            Some(
+                state
+                    .computer_control_preflight(workspace_id, task, explicit_backend, decision_id)
+                    .await,
+            )
+        }
         "archive_thread" => {
             let workspace_id = match parse_string(params, "workspaceId") {
                 Ok(value) => value,

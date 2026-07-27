@@ -1007,6 +1007,11 @@ pub(crate) struct AppSettings {
     )]
     pub(crate) workflow_runtime_mode: String,
     #[serde(
+        default = "default_computer_control_routing_enabled",
+        rename = "computerControlRoutingEnabled"
+    )]
+    pub(crate) computer_control_routing_enabled: bool,
+    #[serde(
         default = "default_command_execution_policy",
         rename = "commandExecutionPolicy"
     )]
@@ -1892,6 +1897,10 @@ fn default_workflow_runtime_mode() -> String {
     "shadow".to_string()
 }
 
+fn default_computer_control_routing_enabled() -> bool {
+    true
+}
+
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
@@ -1935,6 +1944,7 @@ impl Default for AppSettings {
             token_efficiency_mode: default_token_efficiency_mode(),
             tool_output_token_limit: None,
             workflow_runtime_mode: default_workflow_runtime_mode(),
+            computer_control_routing_enabled: default_computer_control_routing_enabled(),
             command_execution_policy: default_command_execution_policy(),
             python_interpreter_path: None,
             ui_scale: 1.0,

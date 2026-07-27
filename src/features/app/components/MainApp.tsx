@@ -807,6 +807,7 @@ export default function MainApp() {
     model: resolvedModel,
     workflowProviderKind: activeCodexKeyProfile?.providerKind ?? "openai",
     workflowRuntimeMode: appSettings.workflowRuntimeMode ?? "shadow",
+    computerControlRoutingEnabled: appSettings.computerControlRoutingEnabled !== false,
     workflowSkills: skills,
     workflowAgents: agents,
     getWorkflowGateId,

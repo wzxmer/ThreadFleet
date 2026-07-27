@@ -100,6 +100,47 @@ export type TrayLabels = {
   quit: string;
 };
 
+export type ComputerControlBackend =
+  | "direct"
+  | "windows_ui"
+  | "chrome"
+  | "browser"
+  | "computer_use";
+
+export type ComputerControlAvailability =
+  | "ready"
+  | "missing"
+  | "failed"
+  | "unknown"
+  | "unsupported";
+
+export type ComputerControlBackendCapability = {
+  availability: ComputerControlAvailability;
+  reasonCode: string;
+  diagnostic?: string;
+};
+
+export type ComputerControlCapabilitySnapshot = {
+  schemaVersion: number;
+  observedAtMs: number;
+  executionHost: string;
+  runtimeFingerprint: string;
+  backends: Record<ComputerControlBackend, ComputerControlBackendCapability>;
+};
+
+export type ComputerControlRouteDecision = {
+  schemaVersion: number;
+  decisionId: string;
+  taskKind: "direct" | "native_windows" | "signed_in_web" | "isolated_web" | "explicit" | "unknown";
+  primaryBackend: ComputerControlBackend;
+  availability: ComputerControlAvailability;
+  enforcement: "hard" | "advisory" | "unavailable";
+  reasonCodes: string[];
+  executionHost: string;
+  snapshotAgeMs: number;
+  contextFragment?: string;
+};
+
 export type NativeMenuLabels = {
   about: string;
   checkForUpdates: string;
@@ -728,6 +769,7 @@ export type AppSettings = {
   tokenEfficiencyMode?: TokenEfficiencyMode;
   toolOutputTokenLimit?: number | null;
   workflowRuntimeMode?: WorkflowRuntimeMode;
+  computerControlRoutingEnabled?: boolean;
   commandExecutionPolicy?: CommandExecutionPolicy;
   pythonInterpreterPath?: string | null;
   uiScale: number;

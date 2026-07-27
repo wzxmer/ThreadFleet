@@ -3,6 +3,7 @@ import type { Dispatch, MutableRefObject } from "react";
 import * as Sentry from "@sentry/react";
 import type {
   AppMention,
+  ComputerControlRouteDecision,
   CodexProviderKind,
   ComposerSendIntent,
   RateLimitSnapshot,
@@ -14,6 +15,7 @@ import type {
   SkillOption,
   WorkflowAgentOption,
   WorkflowHostPreflightPreview,
+  WorkflowAdditionalContext,
   WorkflowRuntimeMode,
   ThreadTokenUsage,
   WorkspaceInfo,
@@ -31,6 +33,7 @@ import {
   readWorkspaceFile,
   rollbackThread as rollbackThreadService,
   workflowPreflightPreview as workflowPreflightPreviewService,
+  computerControlPreflight as computerControlPreflightService,
 } from "@services/tauri";
 import { useI18n } from "@/features/i18n/I18nProvider";
 import { buildWorkflowPreflightPreview } from "@/features/workflow/utils/workflowPreflight";
@@ -69,6 +72,7 @@ import {
 
 const TEXT_ATTACHMENT_EXTENSIONS = /\.(txt|md|markdown|json|jsonc|yaml|yml|toml|xml|html?|css|scss|sass|less|js|jsx|ts|tsx|mjs|cjs|rs|go|py|rb|php|java|kt|kts|swift|c|cc|cpp|cxx|h|hpp|cs|sh|bash|zsh|fish|ps1|bat|cmd|sql|csv|tsv|log|diff|patch|ini|env|gitignore|dockerfile)$/i;
 const WORKFLOW_PREFLIGHT_TIMEOUT_MS = 1_500;
+const COMPUTER_CONTROL_PREFLIGHT_TIMEOUT_MS = 1_500;
 
 type OptimisticUserMessage = {
   id: string;
@@ -111,6 +115,27 @@ async function workflowPreflightWithTimeout(
         timeoutId = setTimeout(
           () => reject(new Error("workflow preflight timed out")),
           WORKFLOW_PREFLIGHT_TIMEOUT_MS,
+        );
+      }),
+    ]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
+async function computerControlPreflightWithTimeout(
+  promise: Promise<ComputerControlRouteDecision>,
+) {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(
+          () => reject(new Error("computer control preflight timed out")),
+          COMPUTER_CONTROL_PREFLIGHT_TIMEOUT_MS,
         );
       }),
     ]);
@@ -301,6 +326,7 @@ type UseThreadMessagingOptions = {
   model?: string | null;
   workflowProviderKind?: CodexProviderKind;
   workflowRuntimeMode?: WorkflowRuntimeMode;
+  computerControlRoutingEnabled?: boolean;
   workflowSkills?: SkillOption[];
   workflowAgents?: WorkflowAgentOption[];
   getWorkflowGateId?: (workspaceId: string, threadId: string) => string | null;
@@ -372,6 +398,7 @@ export function useThreadMessaging({
   model,
   workflowProviderKind = "openai",
   workflowRuntimeMode = "shadow",
+  computerControlRoutingEnabled = true,
   workflowSkills = [],
   workflowAgents = [],
   getWorkflowGateId,
@@ -411,6 +438,9 @@ export function useThreadMessaging({
   const { t } = useI18n();
   const interruptInFlightRef = useRef(new Set<string>());
   const pendingTurnStartSequenceRef = useRef(0);
+  const computerControlDecisionByThreadRef = useRef(
+    new Map<string, { turnId: string | null; decisionId: string }>(),
+  );
   const [pendingTurnStartByThread, setPendingTurnStartByThread] = useState<
     Record<string, PendingTurnStart>
   >({});
@@ -704,6 +734,33 @@ export function useThreadMessaging({
           Boolean(options?.replaceMessageId),
         );
       }
+      const existingComputerControlDecision =
+        computerControlDecisionByThreadRef.current.get(threadId);
+      const computerControlDecisionId =
+        shouldSteer &&
+          activeTurnId &&
+          existingComputerControlDecision?.turnId === activeTurnId
+          ? existingComputerControlDecision.decisionId
+          : `cmcc-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      computerControlDecisionByThreadRef.current.set(threadId, {
+        turnId: shouldSteer ? activeTurnId : null,
+        decisionId: computerControlDecisionId,
+      });
+      const computerControlPreviewPromise: Promise<{
+        decision: ComputerControlRouteDecision | null;
+        error: unknown;
+      }> = computerControlRoutingEnabled
+        ? computerControlPreflightWithTimeout(
+          computerControlPreflightService(
+            workspace.id,
+            finalText,
+            computerControlDecisionId,
+          ),
+        ).then(
+          (decision) => ({ decision, error: null }),
+          (error: unknown) => ({ decision: null, error }),
+        )
+        : Promise.resolve({ decision: null, error: null });
       const workflowEnabled = workflowRuntimeMode !== "off";
       const workflowPreview = workflowEnabled
         ? buildWorkflowPreflightPreview({
@@ -784,6 +841,36 @@ export function useThreadMessaging({
         },
       });
       try {
+        const computerControlPreviewResult = await computerControlPreviewPromise;
+        const computerControlDecision = computerControlPreviewResult.decision;
+        if (computerControlDecision) {
+          onDebug?.({
+            id: `${Date.now()}-client-computer-control-preflight`,
+            timestamp: Date.now(),
+            source: "client",
+            label: "computer-control/preflight",
+            payload: {
+              decisionId: computerControlDecision.decisionId,
+              taskKind: computerControlDecision.taskKind,
+              primaryBackend: computerControlDecision.primaryBackend,
+              availability: computerControlDecision.availability,
+              enforcement: computerControlDecision.enforcement,
+              executionHost: computerControlDecision.executionHost,
+              contextApplied: Boolean(computerControlDecision.contextFragment),
+            },
+          });
+        } else if (computerControlPreviewResult.error) {
+          const error = computerControlPreviewResult.error;
+          onDebug?.({
+            id: `${Date.now()}-client-computer-control-preflight-error`,
+            timestamp: Date.now(),
+            source: "error",
+            label: "computer-control/preflight error",
+            payload:
+              extractRpcErrorMessage(error) ??
+              (error instanceof Error ? error.message : String(error)),
+          });
+        }
         let hostPreview: WorkflowHostPreflightPreview | null = null;
         const hostPreviewResult = await hostPreviewPromise;
         if (hostPreviewResult.preview) {
@@ -859,6 +946,19 @@ export function useThreadMessaging({
         const appliedWorkflowContext = workflowRuntimeMode === "active"
           ? workflowContext.additionalContext
           : {};
+        const computerControlContext: WorkflowAdditionalContext =
+          computerControlDecision?.contextFragment
+            ? {
+              "cm.computer-control": {
+                kind: "application",
+                value: computerControlDecision.contextFragment,
+              },
+            }
+            : {};
+        const appliedAdditionalContext: WorkflowAdditionalContext = {
+          ...appliedWorkflowContext,
+          ...computerControlContext,
+        };
         if (workflowPreview) {
           onDebug?.({
             id: `${Date.now()}-client-workflow-context-compiled`,
@@ -884,8 +984,8 @@ export function useThreadMessaging({
             images: preparedAttachments.images,
             appMentions,
           }),
-          ...(Object.keys(appliedWorkflowContext).length > 0
-            ? { additionalContext: appliedWorkflowContext }
+          ...(Object.keys(appliedAdditionalContext).length > 0
+            ? { additionalContext: appliedAdditionalContext }
             : {}),
         };
         const sendTurnStartRequest = async () =>
@@ -941,7 +1041,7 @@ export function useThreadMessaging({
 
         let response: Record<string, unknown> = shouldSteer
           ? (await (appMentions.length > 0 ||
-            Object.keys(appliedWorkflowContext).length > 0
+            Object.keys(appliedAdditionalContext).length > 0
             ? steerTurnService(
               workspace.id,
               threadId,
@@ -949,7 +1049,7 @@ export function useThreadMessaging({
               preparedAttachments.text,
               preparedAttachments.images,
               appMentions,
-              appliedWorkflowContext,
+              appliedAdditionalContext,
             )
             : steerTurnService(
               workspace.id,
@@ -1015,6 +1115,10 @@ export function useThreadMessaging({
           const steeredTurnId = asString(result?.turnId ?? result?.turn_id ?? "");
           if (steeredTurnId) {
             setActiveTurnId(threadId, steeredTurnId);
+            computerControlDecisionByThreadRef.current.set(threadId, {
+              turnId: steeredTurnId,
+              decisionId: computerControlDecisionId,
+            });
           }
           return { status: "sent" };
         }
@@ -1037,6 +1141,10 @@ export function useThreadMessaging({
           turnId,
         });
         setActiveTurnId(threadId, turnId);
+        computerControlDecisionByThreadRef.current.set(threadId, {
+          turnId,
+          decisionId: computerControlDecisionId,
+        });
         return { status: "sent" };
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
@@ -1076,6 +1184,7 @@ export function useThreadMessaging({
       beginPendingTurnStart,
       clearPendingTurnStart,
       collaborationMode,
+      computerControlRoutingEnabled,
       customPrompts,
       dispatch,
       effort,

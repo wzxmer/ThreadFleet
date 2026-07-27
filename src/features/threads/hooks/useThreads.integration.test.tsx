@@ -51,6 +51,18 @@ vi.mock("@services/tauri", () => ({
   rememberApprovalRule: vi.fn(),
   createContentReference: vi.fn(),
   sendUserMessage: vi.fn(),
+  computerControlPreflight: vi.fn().mockResolvedValue({
+    schemaVersion: 1,
+    decisionId: "cmcc-integration-direct",
+    taskKind: "direct",
+    primaryBackend: "direct",
+    availability: "ready",
+    enforcement: "hard",
+    reasonCodes: ["direct_task", "backend_ready"],
+    executionHost: "local",
+    snapshotAgeMs: 0,
+    contextFragment: null,
+  }),
   workflowPreflightPreview: vi.fn().mockResolvedValue({
     mode: "shadow",
     providerKind: "openai",

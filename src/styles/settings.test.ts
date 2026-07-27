@@ -20,4 +20,14 @@ describe("settings Provider diagnostics styles", () => {
     expect(valueRule?.[1]).toContain("min-width: 0");
     expect(valueRule?.[1]).toContain("overflow-wrap: anywhere");
   });
+
+  it("keeps computer-control status and responsive rules feature-scoped", () => {
+    expect(settingsCss).toContain(".settings-computer-control-status-row");
+    expect(settingsCss).toMatch(
+      /@media \(max-width: 720px\)[\s\S]*?\.settings-computer-control-header\s*\{[\s\S]*?flex-direction: column;/,
+    );
+    expect(settingsCss).not.toMatch(
+      /(^|\n)button\s*\{[\s\S]*?computer-control/,
+    );
+  });
 });
