@@ -32,6 +32,7 @@ If a behavior must work in both app and daemon, implement it in `src-tauri/src/s
 | Change thread state transitions | `src/features/threads/hooks/useThreadsReducer.ts`, `src/features/threads/hooks/threadReducer/*`, `src/features/threads/hooks/useThreads.ts`, focused thread hooks under `src/features/threads/hooks/*` |
 | Change workspace lifecycle/worktree behavior | `src/features/workspaces/hooks/useWorkspaces.ts`, `src-tauri/src/workspaces/commands.rs`, `src-tauri/src/shared/workspaces_core.rs`, `src-tauri/src/shared/workspaces_core/*`, `src-tauri/src/shared/worktree_core.rs` |
 | Change settings model/load/update | `src/features/settings/components/SettingsView.tsx`, `src/features/settings/hooks/useAppSettings.ts`, `src/services/tauri.ts`, `src-tauri/src/settings/mod.rs`, `src-tauri/src/shared/settings_core.rs`, `src-tauri/src/types.rs`, `src/types.ts` |
+| Change computer-control capability discovery, routing, status UI, or preflight context | `src-tauri/src/shared/computer_control_core.rs`, `src-tauri/src/shared/codex_core.rs`, `src-tauri/src/backend/app_server.rs`, `src-tauri/src/codex/mod.rs`, `src-tauri/src/bin/codex_monitor_daemon.rs`, `src-tauri/src/bin/codex_monitor_daemon/rpc/codex.rs`, `src-tauri/src/remote_backend/mod.rs`, `src/services/tauri.ts`, `src/features/threads/hooks/useThreadMessaging.ts`, `src/features/settings/components/sections/SettingsCodexSection.tsx`, `src/types.ts` |
 | Bind a thread to an external WorkflowGate and read its status | `src/features/composer/components/WorkflowGateBindingPrompt.tsx`, `src/features/threads/hooks/useThreadCodexParams.ts`, `src/services/tauri.ts`, `src-tauri/src/codex/mod.rs`, `src-tauri/src/shared/workflow_gate_adapter_core.rs`, `src-tauri/src/bin/codex_monitor_daemon/rpc/codex.rs` |
 | Read DevKnowledgeBase status/query results or write Intake/tasks through `kb-core` | `src/features/settings/components/sections/SettingsWorkflowSection.tsx`, `src/services/tauri.ts`, `src-tauri/src/codex/mod.rs`, `src-tauri/src/shared/knowledge_adapter_core.rs`, `src-tauri/src/bin/codex_monitor_daemon/rpc/codex.rs` |
 | Change Git/GitHub backend behavior | `src/features/git/hooks/*`, `src/services/tauri.ts`, `src-tauri/src/git/mod.rs`, `src-tauri/src/shared/git_ui_core.rs`, `src-tauri/src/shared/git_ui_core/*`, `src-tauri/src/shared/git_core.rs`, `src-tauri/src/bin/codex_monitor_daemon/rpc.rs`, `src-tauri/src/bin/codex_monitor_daemon/rpc/git.rs` |
@@ -119,6 +120,7 @@ When adding a new method, keep method names and payload shape aligned with `src/
 All cross-runtime domain behavior belongs in `src-tauri/src/shared/*`:
 
 - Codex threads/approvals/account/skills/config: `src-tauri/src/shared/codex_core.rs`
+- Computer-control payload parsing, capability snapshots, task classification, and route decisions: `src-tauri/src/shared/computer_control_core.rs`
 - Codex helper commands: `src-tauri/src/shared/codex_aux_core.rs`
 - Codex update/version helpers: `src-tauri/src/shared/codex_update_core.rs`
 - Workspaces/worktrees: `src-tauri/src/shared/workspaces_core.rs`, `src-tauri/src/shared/workspaces_core/*`, `src-tauri/src/shared/worktree_core.rs`

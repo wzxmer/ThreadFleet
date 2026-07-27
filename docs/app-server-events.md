@@ -1,4 +1,4 @@
-# App-Server Events Reference (Codex `87db9bc18ba5bc82c1cb4e4381b44f693ee35623` / `rust-v0.144.5`)
+# App-Server Events Reference (Codex `5d1fbf26c43abc65a203928b2e31561cb039e06d` / `rust-v0.144.6`)
 
 This document helps agents quickly answer:
 - Which app-server events ThreadFleet supports right now.
@@ -8,7 +8,7 @@ This document helps agents quickly answer:
 
 When updating this document:
 1. Confirm the intended Codex baseline. This revision is pinned to
-   `87db9bc18ba5bc82c1cb4e4381b44f693ee35623` (`rust-v0.144.5`); do not replace it with
+   `5d1fbf26c43abc65a203928b2e31561cb039e06d` (`rust-v0.144.6`); do not replace it with
    `origin/main` unless the baseline is intentionally advanced.
 2. Compare Codex events vs ThreadFleet routing.
 3. Compare Codex client request methods vs ThreadFleet outgoing request methods.
@@ -20,7 +20,7 @@ Related project skill:
 
 Multi-agent schema notes:
 - Upstream `spawn_agent` can expose per-spawn `model`, `reasoning_effort`, `service_tier`, and `fork_turns`.
-- In Codex 0.144.5, `features.multi_agent_v2.hide_spawn_agent_metadata` defaults to `true`; when enabled, the tool schema removes `agent_type`, `model`, `reasoning_effort`, and `service_tier`. Automatic routing must inspect the effective runtime schema before using overrides.
+- In Codex 0.144.6, `features.multi_agent_v2.hide_spawn_agent_metadata` defaults to `true`; when enabled, the tool schema removes `agent_type`, `model`, `reasoning_effort`, and `service_tier`. Automatic routing must inspect the effective runtime schema before using overrides.
 - `fork_turns` accepts `none`, `all`, or a positive recent-turn count and defaults to `all`. Full-history forks cannot override agent type, model, or reasoning effort; heterogeneous children require `none` or a bounded recent-turn count.
 - Upstream validates requested model IDs and reasoning efforts against the current model catalog. It has no generic per-spawn metadata or token-level context budget field.
 - Multi-agent items have two observed shapes: a real `spawn_agent` can arrive as `subAgentActivity` with the spawn call `id` and `agentThreadId`, while metadata-visible generic collaboration items arrive as `collabAgentToolCall`. The latter must be checked for `tool = spawn_agent` before treating it as a binding; `wait`/`wait_agent` is not a spawn. Neither shape carries portable plan ID, node ID, task name, or correlation metadata. ThreadFleet retains model/effort only as actual binding evidence; they are not planned routing values.
@@ -195,6 +195,8 @@ These are v2 request methods ThreadFleet currently sends to Codex app-server:
 - `experimentalFeature/list`
 - `collaborationMode/list` (experimental)
 - `mcpServerStatus/list`
+- `plugin/list`
+- `config/read`
 - `account/login/start`
 - `account/login/cancel`
 - `account/rateLimits/read`
@@ -212,12 +214,24 @@ Runtime ownership:
 Notes:
 - `turn/start` now forwards the optional `serviceTier` override (`"fast"` for `/fast`, `null` for default/off) alongside `model`, `effort`, and `collaborationMode`.
 - `turn/interrupt` acknowledgement is not treated as terminal. ThreadFleet keeps the matching turn active until `turn/completed` arrives; after a bounded wait it may use `thread/read` on the same execution runtime to confirm that exact turn is `completed`, `interrupted`, or `failed`. An unknown or still-running status remains fail-closed so Provider runtime switching cannot terminate live work.
-- `turn/start` and `turn/steer` forward CM workflow rules, matched skills/agents, and bounded knowledge excerpts through experimental `additionalContext` entries. CM initializes app-server with `experimentalApi: true`; this context is separate from persisted user input.
-- `spawn_agent` is an internal Codex collaboration tool, not a ThreadFleet-to-app-server request. In the Codex 0.144.5 runtime, its live item may be `subAgentActivity` with child-thread metadata; when a `collabAgentToolCall` shape is emitted, CM accepts it for binding only when its tool is `spawn_agent`. `wait` and `wait_agent` collaboration items are excluded.
+- `turn/start` and `turn/steer` forward CM workflow rules, matched skills/agents, bounded knowledge excerpts, and non-direct computer-control route decisions through experimental `additionalContext` entries. The `cm.computer-control` entry is independent of Workflow mode, omitted for direct tasks, and contains only normalized route metadata. CM initializes app-server with `experimentalApi: true`; this context is separate from persisted user input.
+- `spawn_agent` is an internal Codex collaboration tool, not a ThreadFleet-to-app-server request. In the Codex 0.144.6 runtime, its live item may be `subAgentActivity` with child-thread metadata; when a `collabAgentToolCall` shape is emitted, CM accepts it for binding only when its tool is `spawn_agent`. `wait` and `wait_agent` collaboration items are excluded.
 - `execution_router_shadow_preview` accepts an optional approved-plan reference plus expected and actual bindings. The shared core validates plan-reference shape, checks the expected model/effort against the observed model catalog, and returns `bindingAudit`; missing evidence or mismatch produces `decision-gate` advice without dispatching, switching models, or mutating runtime configuration.
 - CM automatically observes real spawn-shaped `item/started` / `item/completed` items (`subAgentActivity`, or `collabAgentToolCall` with `tool = spawn_agent`) and persists actual bindings in an app/daemon sidecar keyed by source, runtime, workspace, parent thread, and spawn call ID. Default hidden metadata leaves model/effort null; this remains fail-closed until expected binding evidence arrives. Exact retries are idempotent, and sender/actual conflicts or expired/stale registrations fail closed.
 - Portable workflow remains the source of approved expected bindings. Its adapter must explicitly register the approved expected envelope against the same collab tool-call ID; expected-first and actual-first arrival are both supported across restart. CM does not derive expected model/effort from free-form text, event order, prompt similarity, or model/effort coincidence.
 - Because the upstream item has no portable node correlation metadata, CM cannot safely infer which concurrent plan node produced a call. Fully automatic plan-node correlation remains blocked pending upstream metadata or a controlled adapter hook. This sidecar does not enable Active Router, spawn children, or replace the portable Root Task Ledger.
+
+### Computer-Control Protocol Contract
+
+At the pinned `rust-v0.144.6` baseline:
+
+- `plugin/list` accepts optional `cwds` and `marketplaceKinds`. Its response contains `marketplaces`, `featuredPluginIds`, and `marketplaceLoadErrors`; each plugin summary includes `id`, `name`, `enabled`, `installed`, and `availability`.
+- `plugin/list` is used only as management and discovery evidence. Its `enabled` field is not proof that the current app-server process loaded the plugin's skills, MCP servers, apps, or tools.
+- `config/read` is used only to read the effective plugin enablement booleans needed by the capability snapshot. CM does not return or persist raw config layers, origins, paths, environment values, credentials, or native-pipe data.
+- `mcpServerStatus/list` accepts `cursor`, `limit`, `detail`, and optional `threadId`; `detail` is `full` or `toolsAndAuthOnly`. A listed server is considered ready only from stable server identity plus a non-empty tool map. `authStatus: "unsupported"` means the server does not use supported OAuth, not that the server failed.
+- Capability discovery sends `mcpServerStatus/list`, `plugin/list`, `skills/list`, and `config/read` concurrently on the owning app-server session. Cold MCP startup may exceed ten seconds, so the capability probe allows 20 seconds while the resulting runtime-bound snapshot remains cached for 30 seconds; manual refresh invalidates that snapshot.
+- ThreadFleet appends `-c plugins.computer-use@openai-bundled.enabled=false` after user Codex arguments for every owned app-server process. This is a runtime-only last-wins override and is included in the runtime fingerprint; it never writes the user's `config.toml`.
+- `turn/start` and `turn/steer` expose no stable per-turn tool allowlist at this baseline. Browser backend selection is therefore advisory; CM must not describe it as a hard tool gate.
 
 ### M2.5B Evidence Contract
 
@@ -234,7 +248,7 @@ The regression test `persisted_binding_evidence_contains_no_prompt_or_context_pa
 
 Compared against Codex v2 request methods, ThreadFleet currently does not send:
 
-At the baseline hash, upstream defines 118 non-deprecated client requests; CM sends 24 including `initialize`, leaving 94 below unsupported.
+At the baseline hash, upstream defines 118 non-deprecated client requests; CM sends 26 including `initialize`, leaving 92 below unsupported.
 
 - `account/logout`
 - `account/rateLimitResetCredit/consume`
@@ -247,7 +261,6 @@ At the baseline hash, upstream defines 118 non-deprecated client requests; CM se
 - `command/exec/write`
 - `config/batchWrite`
 - `config/mcpServer/reload`
-- `config/read`
 - `config/value/write`
 - `configRequirements/read`
 - `environment/add` (experimental)
@@ -279,7 +292,6 @@ At the baseline hash, upstream defines 118 non-deprecated client requests; CM se
 - `permissionProfile/list`
 - `plugin/install`
 - `plugin/installed`
-- `plugin/list`
 - `plugin/read`
 - `plugin/share/checkout`
 - `plugin/share/delete`
@@ -364,7 +376,7 @@ Deprecated server requests `applyPatchApproval` and `execCommandApproval` are de
 
 ## Upstream Classification
 
-Classifications above are from Codex `87db9bc18ba5bc82c1cb4e4381b44f693ee35623` (`rust-v0.144.5`):
+Classifications above are from Codex `5d1fbf26c43abc65a203928b2e31561cb039e06d` (`rust-v0.144.6`):
 
 - `experimental`: the protocol declaration carries `#[experimental(...)]`.
 - `deprecated`: the declaration or adjacent upstream documentation explicitly
