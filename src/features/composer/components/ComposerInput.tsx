@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ChangeEvent,
   ClipboardEvent,
+  CompositionEvent,
   CSSProperties,
   KeyboardEvent,
   RefObject,
@@ -153,6 +154,9 @@ export function ComposerInput({
   const { t } = useI18n();
   const suggestionListRef = useRef<HTMLDivElement | null>(null);
   const suggestionRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const isComposingRef = useRef(false);
+  const committedCompositionRef = useRef<string | null>(null);
+  const [compositionText, setCompositionText] = useState<string | null>(null);
   const [progressBounds, setProgressBounds] = useState({ width: 0, height: 0 });
   const { isPhoneLayout, isPhoneTallInput } = useComposerInputLayout({
     isExpanded,
@@ -270,16 +274,50 @@ export function ComposerInput({
 
   const handleTextareaChange = useCallback(
     (event: ChangeEvent<HTMLTextAreaElement>) => {
-      onTextChange(event.target.value, event.target.selectionStart);
+      const next = event.target.value;
+      if (isComposingRef.current) {
+        setCompositionText(next);
+        return;
+      }
+      const committedComposition = committedCompositionRef.current;
+      committedCompositionRef.current = null;
+      if (committedComposition === next) {
+        return;
+      }
+      onTextChange(next, event.target.selectionStart);
     },
     [onTextChange],
   );
 
   const handleTextareaSelect = useCallback(
     (event: SyntheticEvent<HTMLTextAreaElement>) => {
+      if (isComposingRef.current) {
+        return;
+      }
       onSelectionChange((event.target as HTMLTextAreaElement).selectionStart);
     },
     [onSelectionChange],
+  );
+
+  const handleCompositionStart = useCallback(
+    (event: CompositionEvent<HTMLTextAreaElement>) => {
+      isComposingRef.current = true;
+      committedCompositionRef.current = null;
+      setCompositionText(event.currentTarget.value);
+    },
+    [],
+  );
+
+  const handleCompositionEnd = useCallback(
+    (event: CompositionEvent<HTMLTextAreaElement>) => {
+      const next = event.currentTarget.value;
+      const cursor = event.currentTarget.selectionStart;
+      isComposingRef.current = false;
+      committedCompositionRef.current = next;
+      setCompositionText(null);
+      onTextChange(next, cursor);
+    },
+    [onTextChange],
   );
 
   const handleTextareaPaste = useCallback(
@@ -397,9 +435,11 @@ export function ComposerInput({
                 ? t("composer.reviewPlaceholder")
                 : t("composer.placeholder")
             }
-            value={text}
+            value={compositionText ?? text}
             onChange={handleTextareaChange}
             onSelect={handleTextareaSelect}
+            onCompositionStart={handleCompositionStart}
+            onCompositionEnd={handleCompositionEnd}
             disabled={disabled}
             onKeyDown={onKeyDown}
             onDragOver={handleDragOver}
