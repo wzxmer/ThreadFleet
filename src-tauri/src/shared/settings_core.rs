@@ -36,6 +36,8 @@ pub(crate) struct CodexSyncDiagnosticsDto {
     pub(crate) user_profile: Option<String>,
     pub(crate) codex_home_path: Option<String>,
     pub(crate) codex_home_source: String,
+    pub(crate) default_codex_home_path: Option<String>,
+    pub(crate) shares_default_codex_sessions: Option<bool>,
     pub(crate) sessions_path: Option<String>,
     pub(crate) sessions_exists: bool,
     pub(crate) session_file_count: usize,
@@ -196,6 +198,11 @@ pub(crate) fn get_codex_sync_diagnostics_core(settings: &AppSettings) -> CodexSy
         .map(str::trim)
         .filter(|value| !value.is_empty());
     let codex_home = codex_home::resolve_settings_codex_home(settings);
+    let default_codex_home = codex_home::resolve_default_codex_home();
+    let shares_default_codex_sessions = codex_home
+        .as_deref()
+        .zip(default_codex_home.as_deref())
+        .map(|(current, default)| paths_share_session_library(current, default));
     let codex_home_source = if configured_codex_home.is_some() {
         "设置"
     } else {
@@ -228,11 +235,42 @@ pub(crate) fn get_codex_sync_diagnostics_core(settings: &AppSettings) -> CodexSy
             }),
         codex_home_path: path_to_string(codex_home.as_deref()),
         codex_home_source,
+        default_codex_home_path: path_to_string(default_codex_home.as_deref()),
+        shares_default_codex_sessions,
         sessions_exists: path_exists(sessions_path.as_deref()),
         sessions_path: path_to_string(sessions_path.as_deref()),
         session_file_count,
         latest_session_path,
         latest_session_modified_ms,
+    }
+}
+
+fn paths_share_session_library(current: &Path, official: &Path) -> bool {
+    if current == official {
+        return true;
+    }
+
+    let current = fs::canonicalize(current).unwrap_or_else(|_| current.to_path_buf());
+    let official = fs::canonicalize(official).unwrap_or_else(|_| official.to_path_buf());
+    if current == official {
+        return true;
+    }
+
+    normalized_path_key(&current) == normalized_path_key(&official)
+}
+
+fn normalized_path_key(path: &Path) -> String {
+    let normalized = normalize_windows_namespace_path(&path.to_string_lossy());
+    #[cfg(windows)]
+    {
+        normalized
+            .replace('/', "\\")
+            .trim_end_matches('\\')
+            .to_lowercase()
+    }
+    #[cfg(not(windows))]
+    {
+        normalized.trim_end_matches('/').to_string()
     }
 }
 
@@ -304,4 +342,34 @@ fn collect_session_file_stats(path: Option<&Path>) -> (usize, Option<String>, Op
     }
 
     (count, path_to_string(latest_path.as_deref()), latest_ms)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_library_paths_match_after_canonicalization() {
+        let temp_root = std::env::temp_dir().join(format!(
+            "codex-monitor-session-sharing-{}",
+            std::process::id()
+        ));
+        let nested = temp_root.join("sessions-root");
+        fs::create_dir_all(&nested).expect("create session root");
+
+        assert!(paths_share_session_library(
+            &nested,
+            &temp_root.join(".").join("sessions-root")
+        ));
+
+        fs::remove_dir_all(temp_root).expect("remove session root");
+    }
+
+    #[test]
+    fn different_session_library_paths_do_not_match() {
+        assert!(!paths_share_session_library(
+            Path::new("/tmp/threadfleet-codex-home"),
+            Path::new("/tmp/official-codex-home"),
+        ));
+    }
 }

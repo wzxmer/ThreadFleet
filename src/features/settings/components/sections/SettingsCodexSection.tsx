@@ -29,6 +29,7 @@ import {
   resolveCodexProviderBaseUrl,
 } from "@/utils/providerProfiles";
 import type { ProviderSessionDiagnostics } from "@settings/utils/providerSessionDiagnostics";
+import { CodexSessionSharingStatus } from "./CodexSessionSharingStatus";
 
 type SettingsCodexSectionProps = {
   mode?: "codex" | "providers";
@@ -736,61 +737,11 @@ export function SettingsCodexSection({
         )}
       </div>
 
-      <div className="settings-field">
-        <div className="settings-field-row settings-field-row-between">
-          <div>
-            <div className="settings-field-label">会话同步诊断</div>
-            <div className="settings-help">
-              检查当前用户、有效 CODEX_HOME 和 sessions 文件统计。
-            </div>
-          </div>
-          <button
-            type="button"
-            className="ghost settings-button-compact"
-            onClick={onRefreshCodexSyncDiagnostics}
-            disabled={codexSyncDiagnosticsState.status === "loading"}
-          >
-            {codexSyncDiagnosticsState.status === "loading" ? loadingLabel : refreshLabel}
-          </button>
-        </div>
-        {codexSyncDiagnosticsState.error && (
-          <div className="settings-help settings-help-error">
-            {codexSyncDiagnosticsState.error}
-          </div>
-        )}
-        {codexSyncDiagnosticsState.result && (
-          <div className="settings-doctor">
-            <div className="settings-doctor-body">
-              <div>用户：{codexSyncDiagnosticsState.result.username ?? unknownLabel}</div>
-              <div>用户目录：{codexSyncDiagnosticsState.result.userProfile ?? unknownLabel}</div>
-              <div>
-                CODEX_HOME（{codexSyncDiagnosticsState.result.codexHomeSource}）：
-                {codexSyncDiagnosticsState.result.codexHomePath ?? "未解析"}
-              </div>
-              <div>
-                sessions：
-                {codexSyncDiagnosticsState.result.sessionsExists ? foundLabel : notFoundLabel}
-                {codexSyncDiagnosticsState.result.sessionsPath
-                  ? ` (${codexSyncDiagnosticsState.result.sessionsPath})`
-                  : ""}
-              </div>
-              <div>会话文件：{codexSyncDiagnosticsState.result.sessionFileCount} 个</div>
-              <div>
-                最新会话：
-                {codexSyncDiagnosticsState.result.latestSessionPath ?? "未找到"}
-              </div>
-              {codexSyncDiagnosticsState.result.latestSessionModifiedMs && (
-                <div>
-                  最新修改：
-                  {new Date(
-                    codexSyncDiagnosticsState.result.latestSessionModifiedMs,
-                  ).toLocaleString()}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
+      <CodexSessionSharingStatus
+        backendMode={appSettings.backendMode}
+        state={codexSyncDiagnosticsState}
+        onRefresh={onRefreshCodexSyncDiagnostics}
+      />
 
       <div className="settings-divider" />
 

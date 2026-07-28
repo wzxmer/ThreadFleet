@@ -931,6 +931,8 @@ export type CodexSyncDiagnostics = {
   userProfile: string | null;
   codexHomePath: string | null;
   codexHomeSource: string;
+  defaultCodexHomePath: string | null;
+  sharesDefaultCodexSessions: boolean | null;
   sessionsPath: string | null;
   sessionsExists: boolean;
   sessionFileCount: number;
