@@ -1,4 +1,4 @@
-use tauri::{State, Window};
+use tauri::{Manager, State, Window};
 
 use crate::shared::agents_config_core;
 use crate::shared::settings_core::{
@@ -38,6 +38,8 @@ pub(crate) async fn update_app_settings(
         *state.remote_backend.lock().await = None;
     }
     ensure_remote_runtime_for_settings(&updated, state).await;
+    crate::files::attachments::allow_attachment_asset_scope(window.app_handle(), &updated)
+        .map_err(|error| format!("Failed to allow attachment previews: {error}"))?;
     let _ = window::apply_window_appearance(&window, updated.theme.as_str());
     Ok(updated)
 }

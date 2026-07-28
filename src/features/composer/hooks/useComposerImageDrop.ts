@@ -177,10 +177,14 @@ export function useComposerImageDrop({
       return;
     }
     const items = Array.from(event.clipboardData?.items ?? []);
-    const files = items
+    const itemFiles = items
       .filter((item) => item.kind === "file" || item.type.startsWith("image/"))
       .map((item) => item.getAsFile())
       .filter((file): file is File => Boolean(file));
+    const files =
+      itemFiles.length > 0
+        ? itemFiles
+        : Array.from(event.clipboardData?.files ?? []);
     const filePaths = files
       .map((file) => (file as File & { path?: string }).path ?? "")
       .filter(Boolean)

@@ -135,6 +135,13 @@ pub fn run() {
         })
         .setup(|app| {
             let state = state::AppState::load(&app.handle());
+            {
+                let settings = state
+                    .app_settings
+                    .try_lock()
+                    .expect("new app settings lock must be available");
+                files::attachments::allow_attachment_asset_scope(&app.handle(), &settings)?;
+            }
             app.manage(state);
             #[cfg(desktop)]
             {

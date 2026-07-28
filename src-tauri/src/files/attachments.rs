@@ -2,6 +2,7 @@ use base64::prelude::*;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
+use tauri::Manager;
 use uuid::Uuid;
 
 use crate::codex::home::resolve_settings_codex_home;
@@ -9,9 +10,22 @@ use crate::shared::attachment_storage_core::{
     attachments_root, pending_attachment_dir, session_attachment_dir,
 };
 use crate::state::AppState;
+use crate::types::AppSettings;
 
 const LEGACY_ATTACHMENTS_DIR: &str = ".codex-monitor/attachments";
 const PENDING_ATTACHMENT_MAX_AGE: Duration = Duration::from_secs(30 * 24 * 60 * 60);
+
+pub(crate) fn allow_attachment_asset_scope(
+    app_handle: &tauri::AppHandle,
+    settings: &AppSettings,
+) -> tauri::Result<()> {
+    if let Some(codex_home) = resolve_settings_codex_home(settings) {
+        app_handle
+            .asset_protocol_scope()
+            .allow_directory(attachments_root(&codex_home), true)?;
+    }
+    Ok(())
+}
 
 #[derive(Debug)]
 struct AttachmentEntry {

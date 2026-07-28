@@ -180,6 +180,29 @@ describe("useComposerImageDrop", () => {
     restoreFileReader();
   });
 
+  it("falls back to clipboard files when pasted items are unavailable", async () => {
+    const restoreFileReader = setMockFileReader();
+    const onAttachImages = vi.fn();
+    const hook = renderImageDropHook({ disabled: false, onAttachImages });
+    const preventDefault = vi.fn();
+    const file = new File(["data"], "paste.png", { type: "image/png" });
+
+    await act(async () => {
+      await hook.result.handlePaste({
+        clipboardData: { items: [], files: [file] },
+        preventDefault,
+      } as unknown as React.ClipboardEvent<HTMLTextAreaElement>);
+    });
+
+    expect(preventDefault).toHaveBeenCalled();
+    expect(onAttachImages).toHaveBeenCalledWith([
+      'data:image/png;name="paste.png";base64,MOCK',
+    ]);
+
+    hook.unmount();
+    restoreFileReader();
+  });
+
   it("handles pasted inline non-image files without treating them as images", async () => {
     const restoreFileReader = setMockFileReader();
     const onAttachImages = vi.fn();
