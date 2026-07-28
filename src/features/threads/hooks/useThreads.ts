@@ -188,6 +188,9 @@ export function useThreads({
   const replaceOnResumeRef = useRef<Record<string, boolean>>({});
   const pendingInterruptsRef = useRef<Set<string>>(new Set());
   const planByThreadRef = useRef(state.planByThread);
+  const planReconcileRef = useRef<
+    ((workspaceId: string, threadId: string) => Promise<void>) | null
+  >(null);
   const itemsByThreadRef = useRef(state.itemsByThread);
   const threadsByWorkspaceRef = useRef(state.threadsByWorkspace);
   const activeThreadIdByWorkspaceRef = useRef(state.activeThreadIdByWorkspace);
@@ -699,6 +702,10 @@ export function useThreads({
     onDebug,
   });
 
+  const reconcilePlan = useCallback((workspaceId: string, threadId: string) => {
+    return planReconcileRef.current?.(workspaceId, threadId) ?? Promise.resolve();
+  }, []);
+
   const threadHandlers = useThreadEventHandlers({
     activeThreadId,
     dispatch,
@@ -716,6 +723,7 @@ export function useThreads({
     recordThreadActivity,
     recordTurnActivity,
     shouldContinueAfterError,
+    reconcilePlan,
     onUserMessageCreated,
     pushThreadErrorMessage,
     onDebug,
@@ -988,6 +996,10 @@ export function useThreads({
     onThreadCodexMetadataDetected,
     hydrateTurnExecutionSummary,
   });
+
+  planReconcileRef.current = async (workspaceId, threadId) => {
+    await readThreadForWorkspace(workspaceId, threadId, true, false);
+  };
 
   const findWorkspaceIdForThread = useCallback((threadId: string) => {
     for (const [workspaceId, threads] of Object.entries(

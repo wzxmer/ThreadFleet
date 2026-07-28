@@ -95,6 +95,22 @@ subscriptions.
 - `turn/plan/updated`
 - `turn/started`
 
+### Plan state handling
+
+- `turn/plan/updated` is the source of truth for structured steps and their
+  statuses. `item/plan/delta` remains a separate display stream and is never
+  parsed to infer structured status.
+- A terminal turn with a fully completed structured plan clears that plan.
+- A terminal turn with pending or in-progress steps triggers at most one
+  forced `thread/read` for that workspace, thread, and turn. If no final
+  structured update arrives, ThreadFleet keeps the steps visible and marks
+  them stale; it never changes unfinished steps to completed.
+- A completed structured update arriving after terminal state clears the plan.
+  A late unfinished update remains visible and stale.
+- Turn start and steer requests include a short `cm.plan-consistency`
+  application context asking agents that use `update_plan` to publish a final
+  accurate update before their final response.
+
 ## Additional Stream Methods Handled In ThreadFleet
 
 These arrive on the same frontend event stream but are not Codex v2

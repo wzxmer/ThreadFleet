@@ -1148,10 +1148,14 @@ export type TurnPlanStep = {
   status: TurnPlanStepStatus;
 };
 
+export type TurnPlanSyncState = "live" | "reconciling" | "stale";
+
 export type TurnPlan = {
   turnId: string;
   explanation: string | null;
   steps: TurnPlanStep[];
+  syncState?: TurnPlanSyncState;
+  updatedAt?: number;
 };
 
 export type TurnExecutionStatus =

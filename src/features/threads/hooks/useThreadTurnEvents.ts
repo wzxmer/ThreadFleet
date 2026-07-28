@@ -41,6 +41,7 @@ type UseThreadTurnEventsOptions = {
   safeMessageActivity: () => void;
   recordThreadActivity: (workspaceId: string, threadId: string, timestamp?: number) => void;
   shouldContinueAfterError?: (threadId: string, turnId: string) => boolean;
+  reconcilePlan?: (workspaceId: string, threadId: string) => Promise<void>;
 };
 
 function newExecutionId() {
@@ -48,6 +49,26 @@ function newExecutionId() {
     return crypto.randomUUID();
   }
   return `execution-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+const MAX_TRACKED_PLAN_TURNS = 8;
+
+function rememberRecentTurnId(
+  store: Record<string, string[]>,
+  threadId: string,
+  turnId: string,
+) {
+  const current = store[threadId] ?? [];
+  store[threadId] = [...current.filter((candidate) => candidate !== turnId), turnId]
+    .slice(-MAX_TRACKED_PLAN_TURNS);
+}
+
+function hasRecentTurnId(
+  store: Record<string, string[]>,
+  threadId: string,
+  turnId: string,
+) {
+  return store[threadId]?.includes(turnId) === true;
 }
 
 export function useThreadTurnEvents({
@@ -66,6 +87,7 @@ export function useThreadTurnEvents({
   safeMessageActivity,
   recordThreadActivity,
   shouldContinueAfterError,
+  reconcilePlan,
 }: UseThreadTurnEventsOptions) {
   const immediateActiveTurnIdByThreadRef = useRef<Record<string, string | null>>({});
   const lastReducerActiveTurnIdByThreadRef = useRef<Record<string, string | null>>({});
@@ -74,6 +96,30 @@ export function useThreadTurnEvents({
   const lastExecutionTurnIdByThreadRef = useRef<Record<string, string>>({});
   const lastFinalizedTurnIdByThreadRef = useRef<Record<string, string>>({});
   const terminalActivityPendingByThreadRef = useRef<Record<string, boolean>>({});
+  const terminalPlanTurnIdsByThreadRef = useRef<Record<string, string[]>>({});
+  const reconciledPlanTurnIdsByThreadRef = useRef<Record<string, string[]>>({});
+
+  const setPlan = useCallback(
+    (threadId: string, plan: TurnPlan | null) => {
+      planByThreadRef.current = {
+        ...planByThreadRef.current,
+        [threadId]: plan,
+      };
+      dispatch({ type: "setThreadPlan", threadId, plan });
+    },
+    [dispatch, planByThreadRef],
+  );
+
+  const clearPlan = useCallback(
+    (threadId: string) => {
+      planByThreadRef.current = {
+        ...planByThreadRef.current,
+        [threadId]: null,
+      };
+      dispatch({ type: "clearThreadPlan", threadId });
+    },
+    [dispatch, planByThreadRef],
+  );
 
   const getLatestKnownActiveTurnId = useCallback(
     (threadId: string) => {
@@ -123,10 +169,70 @@ export function useThreadTurnEvents({
   const clearCompletedPlan = useCallback(
     (threadId: string, turnId: string) => {
       if (shouldClearCompletedPlan(threadId, turnId)) {
-        dispatch({ type: "clearThreadPlan", threadId });
+        clearPlan(threadId);
+        return true;
       }
+      return false;
     },
-    [dispatch, shouldClearCompletedPlan],
+    [clearPlan, shouldClearCompletedPlan],
+  );
+
+  const reconcileTerminalPlan = useCallback(
+    (workspaceId: string, threadId: string, turnId: string) => {
+      const resolvedTurnId = turnId || planByThreadRef.current[threadId]?.turnId || "";
+      if (!resolvedTurnId) {
+        return;
+      }
+      rememberRecentTurnId(
+        terminalPlanTurnIdsByThreadRef.current,
+        threadId,
+        resolvedTurnId,
+      );
+      if (clearCompletedPlan(threadId, resolvedTurnId)) {
+        return;
+      }
+      const plan = planByThreadRef.current[threadId];
+      if (!plan || plan.turnId !== resolvedTurnId || plan.steps.length === 0) {
+        return;
+      }
+      if (
+        hasRecentTurnId(
+          reconciledPlanTurnIdsByThreadRef.current,
+          threadId,
+          resolvedTurnId,
+        )
+      ) {
+        return;
+      }
+      rememberRecentTurnId(
+        reconciledPlanTurnIdsByThreadRef.current,
+        threadId,
+        resolvedTurnId,
+      );
+      setPlan(threadId, { ...plan, syncState: "reconciling" });
+
+      void (reconcilePlan?.(workspaceId, threadId) ?? Promise.resolve())
+        .catch(() => undefined)
+        .then(() => {
+          const latestPlan = planByThreadRef.current[threadId];
+          if (
+            !hasRecentTurnId(
+              terminalPlanTurnIdsByThreadRef.current,
+              threadId,
+              resolvedTurnId,
+            ) ||
+            !latestPlan ||
+            latestPlan.turnId !== resolvedTurnId
+          ) {
+            return;
+          }
+          if (clearCompletedPlan(threadId, resolvedTurnId)) {
+            return;
+          }
+          setPlan(threadId, { ...latestPlan, syncState: "stale" });
+        });
+    },
+    [clearCompletedPlan, planByThreadRef, reconcilePlan, setPlan],
   );
 
   const finalizeTerminalTurn = useCallback(
@@ -372,14 +478,14 @@ export function useThreadTurnEvents({
         threadId,
       );
       setActiveTurnId(threadId, null);
-      clearCompletedPlan(threadId, turnId);
+      reconcileTerminalPlan(workspaceId, threadId, turnId);
     },
     [
       finalizeTerminalTurn,
       getLatestKnownActiveTurnId,
       markProcessing,
       pendingInterruptsRef,
-      clearCompletedPlan,
+      reconcileTerminalPlan,
       setActiveTurnId,
     ],
   );
@@ -407,7 +513,7 @@ export function useThreadTurnEvents({
         continuationPendingByThreadRef.current[threadId] = false;
         markProcessing(threadId, false);
         setActiveTurnId(threadId, null);
-        clearCompletedPlan(threadId, terminalTurnId ?? "");
+        reconcileTerminalPlan(workspaceId, threadId, terminalTurnId ?? "");
         return;
       }
       if (
@@ -422,7 +528,7 @@ export function useThreadTurnEvents({
             terminalTurnId ?? "",
             statusType === "systemerror" ? "failed" : "completed",
           );
-          clearCompletedPlan(threadId, terminalTurnId ?? "");
+          reconcileTerminalPlan(workspaceId, threadId, terminalTurnId ?? "");
         }
         markProcessing(threadId, false);
         if (statusType === "notloaded") {
@@ -446,7 +552,7 @@ export function useThreadTurnEvents({
       markProcessing,
       markReviewing,
       pendingInterruptsRef,
-      clearCompletedPlan,
+      reconcileTerminalPlan,
       setActiveTurnId,
       setThreadLoaded,
     ],
@@ -506,9 +612,35 @@ export function useThreadTurnEvents({
         payload.explanation,
         payload.plan,
       );
-      dispatch({ type: "setThreadPlan", threadId, plan: normalized });
+      if (!normalized) {
+        setPlan(threadId, null);
+        return;
+      }
+      const nextPlan = {
+        ...normalized,
+        syncState: "live" as const,
+        updatedAt: Date.now(),
+      };
+      if (
+        hasRecentTurnId(terminalPlanTurnIdsByThreadRef.current, threadId, turnId)
+      ) {
+        const currentPlan = planByThreadRef.current[threadId];
+        if (currentPlan && currentPlan.turnId !== turnId) {
+          return;
+        }
+        if (
+          nextPlan.steps.length > 0 &&
+          nextPlan.steps.every((step) => step.status === "completed")
+        ) {
+          clearPlan(threadId);
+          return;
+        }
+        setPlan(threadId, { ...nextPlan, syncState: "stale" });
+        return;
+      }
+      setPlan(threadId, nextPlan);
     },
-    [dispatch],
+    [clearPlan, dispatch, setPlan],
   );
 
   const onTurnDiffUpdated = useCallback(

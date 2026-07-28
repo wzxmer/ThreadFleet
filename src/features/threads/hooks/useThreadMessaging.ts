@@ -73,6 +73,13 @@ import {
 const TEXT_ATTACHMENT_EXTENSIONS = /\.(txt|md|markdown|json|jsonc|yaml|yml|toml|xml|html?|css|scss|sass|less|js|jsx|ts|tsx|mjs|cjs|rs|go|py|rb|php|java|kt|kts|swift|c|cc|cpp|cxx|h|hpp|cs|sh|bash|zsh|fish|ps1|bat|cmd|sql|csv|tsv|log|diff|patch|ini|env|gitignore|dockerfile)$/i;
 const WORKFLOW_PREFLIGHT_TIMEOUT_MS = 1_500;
 const COMPUTER_CONTROL_PREFLIGHT_TIMEOUT_MS = 1_500;
+const PLAN_CONSISTENCY_CONTEXT: WorkflowAdditionalContext = {
+  "cm.plan-consistency": {
+    kind: "application",
+    value:
+      "If you use update_plan, keep step statuses current and issue one final plan update before the final response. Never mark unfinished work completed.",
+  },
+};
 
 type OptimisticUserMessage = {
   id: string;
@@ -956,6 +963,7 @@ export function useThreadMessaging({
             }
             : {};
         const appliedAdditionalContext: WorkflowAdditionalContext = {
+          ...PLAN_CONSISTENCY_CONTEXT,
           ...appliedWorkflowContext,
           ...computerControlContext,
         };

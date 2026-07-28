@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RateLimitSnapshot, TurnPlan } from "@/types";
 import { interruptTurn } from "@services/tauri";
@@ -27,6 +27,7 @@ type SetupOverrides = {
   planByThread?: Record<string, TurnPlan | null>;
   activeTurnByThread?: Record<string, string | null>;
   rateLimitsByWorkspace?: Record<string, RateLimitSnapshot | null>;
+  reconcilePlan?: (workspaceId: string, threadId: string) => Promise<void>;
 };
 
 const makeOptions = (overrides: SetupOverrides = {}) => {
@@ -46,6 +47,7 @@ const makeOptions = (overrides: SetupOverrides = {}) => {
   const pushThreadErrorMessage = vi.fn();
   const safeMessageActivity = vi.fn();
   const recordThreadActivity = vi.fn();
+  const reconcilePlan = vi.fn(overrides.reconcilePlan ?? (async () => undefined));
   const pendingInterruptsRef = {
     current: new Set(overrides.pendingInterrupts ?? []),
   };
@@ -69,6 +71,7 @@ const makeOptions = (overrides: SetupOverrides = {}) => {
       pushThreadErrorMessage,
       safeMessageActivity,
       recordThreadActivity,
+      reconcilePlan,
     }),
   );
 
@@ -86,6 +89,7 @@ const makeOptions = (overrides: SetupOverrides = {}) => {
     pushThreadErrorMessage,
     safeMessageActivity,
     recordThreadActivity,
+    reconcilePlan,
     pendingInterruptsRef,
     planByThreadRef,
   };
@@ -844,8 +848,9 @@ describe("useThreadTurnEvents", () => {
     });
   });
 
-  it("keeps the active plan when at least one step is not completed", () => {
-    const { result, dispatch } = makeOptions({
+  it("reconciles once and marks an unfinished terminal plan stale", async () => {
+    let finishReconcile: (() => void) | null = null;
+    const { result, dispatch, reconcilePlan } = makeOptions({
       planByThread: {
         "thread-1": {
           turnId: "turn-1",
@@ -856,12 +861,36 @@ describe("useThreadTurnEvents", () => {
           ],
         },
       },
+      reconcilePlan: () =>
+        new Promise<void>((resolve) => {
+          finishReconcile = resolve;
+        }),
     });
 
     act(() => {
       result.current.onTurnCompleted("ws-1", "thread-1", "turn-1");
+      result.current.onTurnCompleted("ws-1", "thread-1", "turn-1");
     });
 
+    expect(reconcilePlan).toHaveBeenCalledTimes(1);
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "setThreadPlan",
+      threadId: "thread-1",
+      plan: expect.objectContaining({ syncState: "reconciling" }),
+    });
+
+    await act(async () => {
+      finishReconcile?.();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(dispatch).toHaveBeenCalledWith({
+        type: "setThreadPlan",
+        threadId: "thread-1",
+        plan: expect.objectContaining({ syncState: "stale" }),
+      });
+    });
     expect(dispatch).not.toHaveBeenCalledWith({
       type: "clearThreadPlan",
       threadId: "thread-1",
@@ -918,9 +947,13 @@ describe("useThreadTurnEvents", () => {
 
   it("dispatches normalized plan updates", () => {
     const { result, dispatch } = makeOptions();
-    const normalized = { id: "turn-3", steps: [] };
+    const normalized: TurnPlan = {
+      turnId: "turn-3",
+      explanation: "Plan",
+      steps: [],
+    };
 
-    vi.mocked(normalizePlanUpdate).mockReturnValue(normalized as never);
+    vi.mocked(normalizePlanUpdate).mockReturnValue(normalized);
 
     act(() => {
       result.current.onTurnPlanUpdated("ws-1", "thread-1", "turn-3", {
@@ -937,8 +970,98 @@ describe("useThreadTurnEvents", () => {
     expect(dispatch).toHaveBeenCalledWith({
       type: "setThreadPlan",
       threadId: "thread-1",
-      plan: normalized,
+      plan: {
+        ...normalized,
+        syncState: "live",
+        updatedAt: expect.any(Number),
+      },
     });
+  });
+
+  it("clears a completed plan update that arrives after terminal state", () => {
+    const { result, dispatch } = makeOptions();
+    vi.mocked(normalizePlanUpdate).mockReturnValue({
+      turnId: "turn-4",
+      explanation: "Done",
+      steps: [{ step: "Finish", status: "completed" }],
+    });
+
+    act(() => {
+      result.current.onTurnCompleted("ws-1", "thread-1", "turn-4");
+      result.current.onTurnPlanUpdated("ws-1", "thread-1", "turn-4", {
+        explanation: "Done",
+        plan: [],
+      });
+    });
+
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "clearThreadPlan",
+      threadId: "thread-1",
+    });
+  });
+
+  it("marks an unfinished plan update stale when it arrives after terminal state", () => {
+    const { result, dispatch } = makeOptions();
+    vi.mocked(normalizePlanUpdate).mockReturnValue({
+      turnId: "turn-5",
+      explanation: "Incomplete",
+      steps: [{ step: "Verify", status: "inProgress" }],
+    });
+
+    act(() => {
+      result.current.onTurnCompleted("ws-1", "thread-1", "turn-5", "failed");
+      result.current.onTurnPlanUpdated("ws-1", "thread-1", "turn-5", {
+        explanation: "Incomplete",
+        plan: [],
+      });
+    });
+
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "setThreadPlan",
+      threadId: "thread-1",
+      plan: expect.objectContaining({
+        syncState: "stale",
+        steps: [{ step: "Verify", status: "inProgress" }],
+      }),
+    });
+    expect(dispatch).not.toHaveBeenCalledWith({
+      type: "clearThreadPlan",
+      threadId: "thread-1",
+    });
+  });
+
+  it("does not let a late terminal plan overwrite a newer turn plan", () => {
+    const newerPlan: TurnPlan = {
+      turnId: "turn-2",
+      explanation: "Current turn",
+      steps: [{ step: "Continue", status: "inProgress" }],
+    };
+    const { result, dispatch, planByThreadRef } = makeOptions({
+      planByThread: { "thread-1": newerPlan },
+    });
+    vi.mocked(normalizePlanUpdate).mockReturnValue({
+      turnId: "turn-1",
+      explanation: "Old turn done",
+      steps: [{ step: "Old work", status: "completed" }],
+    });
+
+    act(() => {
+      result.current.onTurnCompleted("ws-1", "thread-1", "turn-1");
+      result.current.onTurnStarted("ws-1", "thread-1", "turn-2");
+      result.current.onTurnPlanUpdated("ws-1", "thread-1", "turn-1", {
+        explanation: "Old turn done",
+        plan: [],
+      });
+    });
+
+    expect(planByThreadRef.current["thread-1"]).toEqual(newerPlan);
+    expect(dispatch).not.toHaveBeenCalledWith({
+      type: "clearThreadPlan",
+      threadId: "thread-1",
+    });
+    expect(dispatch).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "setThreadPlan" }),
+    );
   });
 
   it("dispatches turn diff updates", () => {

@@ -340,7 +340,7 @@ describe("useThreadMessaging telemetry", () => {
     );
   });
 
-  it("runs shadow preflight without applying additional context", async () => {
+  it("runs shadow preflight without applying workflow context", async () => {
     const { result } = renderHook(() =>
       useThreadMessaging({
         activeWorkspace: workspace,
@@ -396,7 +396,14 @@ describe("useThreadMessaging telemetry", () => {
       "ws-1",
       "thread-1",
       "hello",
-      expect.not.objectContaining({ additionalContext: expect.anything() }),
+      expect.objectContaining({
+        additionalContext: {
+          "cm.plan-consistency": {
+            kind: "application",
+            value: expect.stringContaining("final plan update"),
+          },
+        },
+      }),
     );
   });
 
@@ -461,6 +468,10 @@ describe("useThreadMessaging telemetry", () => {
       "hello",
       expect.objectContaining({
         additionalContext: {
+          "cm.plan-consistency": {
+            kind: "application",
+            value: expect.stringContaining("final plan update"),
+          },
           "cm.computer-control": {
             kind: "application",
             value: expect.stringContaining("windows_ui"),

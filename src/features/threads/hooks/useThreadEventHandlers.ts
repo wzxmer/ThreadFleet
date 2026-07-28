@@ -45,6 +45,7 @@ type ThreadEventHandlersOptions = {
     timestamp?: number,
   ) => void;
   shouldContinueAfterError?: (threadId: string, turnId: string) => boolean;
+  reconcilePlan?: (workspaceId: string, threadId: string) => Promise<void>;
   onUserMessageCreated?: (
     workspaceId: string,
     threadId: string,
@@ -89,6 +90,7 @@ export function useThreadEventHandlers({
   recordThreadActivity,
   recordTurnActivity,
   shouldContinueAfterError,
+  reconcilePlan,
   onUserMessageCreated,
   pushThreadErrorMessage,
   onDebug,
@@ -204,6 +206,7 @@ export function useThreadEventHandlers({
     safeMessageActivity,
     recordThreadActivity,
     shouldContinueAfterError,
+    reconcilePlan,
   });
 
   const onBackgroundThreadAction = useCallback(

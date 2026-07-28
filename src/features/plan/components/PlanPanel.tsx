@@ -1,5 +1,6 @@
 import type { TurnPlan } from "../../../types";
 import { CoordinationPanel } from "@/features/threads/components/CoordinationPanel";
+import { useI18n } from "@/features/i18n/I18nProvider";
 
 type PlanPanelProps = {
   plan: TurnPlan | null;
@@ -39,6 +40,7 @@ export function PlanPanel({
   activeThreadId = null,
   workspacePath = null,
 }: PlanPanelProps) {
+  const { t } = useI18n();
   const showPlanStream = Boolean(
     planStream && (!plan || Boolean(activeTurnId && plan.turnId !== activeTurnId)),
   );
@@ -46,16 +48,32 @@ export function PlanPanel({
   const progress = visiblePlan ? formatProgress(visiblePlan) : "";
   const steps = visiblePlan?.steps ?? [];
   const showEmpty = !showPlanStream && !steps.length && !visiblePlan?.explanation;
-  const emptyLabel = isProcessing ? "Waiting on a plan..." : "No active plan.";
+  const emptyLabel = isProcessing
+    ? t("plan.panel.waiting")
+    : t("plan.panel.empty");
+  const syncLabel =
+    visiblePlan?.syncState === "reconciling"
+      ? t("plan.panel.reconciling")
+      : visiblePlan?.syncState === "stale"
+        ? t("plan.panel.stale")
+        : null;
 
   return (
     <aside className="plan-panel">
       <div className="plan-header">
-        <span>Plan</span>
+        <span>{t("plan.panel.title")}</span>
         {progress && <span className="plan-progress">{progress}</span>}
       </div>
       {visiblePlan?.explanation && (
         <div className="plan-explanation">{visiblePlan.explanation}</div>
+      )}
+      {syncLabel && (
+        <div
+          className={`plan-sync-status ${visiblePlan?.syncState ?? ""}`}
+          role="status"
+        >
+          {syncLabel}
+        </div>
       )}
       {showPlanStream ? (
         <pre className="plan-stream">{planStream}</pre>

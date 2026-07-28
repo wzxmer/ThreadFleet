@@ -1598,7 +1598,7 @@ describe("useThreads UX integration", () => {
       });
     });
 
-    expect(result.current.planByThread["thread-1"]).toEqual({
+    expect(result.current.planByThread["thread-1"]).toMatchObject({
       turnId: "turn-1",
       explanation: "Plan note",
       steps: [{ step: "Do it", status: "inProgress" }],
@@ -1608,7 +1608,7 @@ describe("useThreads UX integration", () => {
       handlers?.onTurnStarted?.("ws-1", "thread-1", "turn-2");
     });
 
-    expect(result.current.planByThread["thread-1"]).toEqual({
+    expect(result.current.planByThread["thread-1"]).toMatchObject({
       turnId: "turn-1",
       explanation: "Plan note",
       steps: [{ step: "Do it", status: "inProgress" }],
@@ -1778,7 +1778,7 @@ describe("useThreads UX integration", () => {
       });
     });
 
-    expect(result.current.planByThread["thread-1"]).toEqual({
+    expect(result.current.planByThread["thread-1"]).toMatchObject({
       turnId: "turn-1",
       explanation: null,
       steps: [
@@ -1810,7 +1810,7 @@ describe("useThreads UX integration", () => {
       });
     });
 
-    expect(result.current.planByThread["thread-1"]).toEqual({
+    expect(result.current.planByThread["thread-1"]).toMatchObject({
       turnId: "turn-2",
       explanation: "Next plan",
       steps: [{ step: "Step 2", status: "completed" }],
@@ -1836,12 +1836,12 @@ describe("useThreads UX integration", () => {
       });
     });
 
-    expect(result.current.planByThread["thread-1"]).toEqual({
+    expect(result.current.planByThread["thread-1"]).toMatchObject({
       turnId: "turn-1",
       explanation: "Thread 1 plan",
       steps: [{ step: "Step 1", status: "pending" }],
     });
-    expect(result.current.planByThread["thread-2"]).toEqual({
+    expect(result.current.planByThread["thread-2"]).toMatchObject({
       turnId: "turn-2",
       explanation: "Thread 2 plan",
       steps: [{ step: "Step 2", status: "completed" }],
@@ -1863,7 +1863,7 @@ describe("useThreads UX integration", () => {
       });
     });
 
-    expect(result.current.planByThread["thread-1"]).toEqual({
+    expect(result.current.planByThread["thread-1"]).toMatchObject({
       turnId: "turn-1",
       explanation: "All done",
       steps: [{ step: "Step 1", status: "completed" }],
@@ -1876,7 +1876,15 @@ describe("useThreads UX integration", () => {
     expect(result.current.planByThread["thread-1"]).toBeNull();
   });
 
-  it("keeps plans visible on turn completion when steps remain", () => {
+  it("reconciles once and marks remaining plan steps stale on turn completion", async () => {
+    vi.mocked(readThread).mockResolvedValue({
+      result: {
+        thread: {
+          id: "thread-1",
+          turns: [],
+        },
+      },
+    });
     const { result } = renderHook(() =>
       useThreads({
         activeWorkspace: workspace,
@@ -1893,13 +1901,19 @@ describe("useThreads UX integration", () => {
 
     act(() => {
       handlers?.onTurnCompleted?.("ws-1", "thread-1", "turn-1");
+      handlers?.onTurnCompleted?.("ws-1", "thread-1", "turn-1");
     });
 
-    expect(result.current.planByThread["thread-1"]).toEqual({
-      turnId: "turn-1",
-      explanation: "Still in progress",
-      steps: [{ step: "Step 1", status: "inProgress" }],
+    await waitFor(() => {
+      expect(result.current.planByThread["thread-1"]).toMatchObject({
+        turnId: "turn-1",
+        explanation: "Still in progress",
+        steps: [{ step: "Step 1", status: "inProgress" }],
+        syncState: "stale",
+      });
     });
+    expect(readThread).toHaveBeenCalledTimes(1);
+    expect(readThread).toHaveBeenCalledWith("ws-1", "thread-1");
   });
 
   it("interrupts immediately even before a turn id is available", async () => {
