@@ -17,6 +17,7 @@ import {
   listThreads,
   listWorkspaces,
   readThread,
+  readThreadPage,
   resumeThread,
   scanManagedSessions,
   sendUserMessage as sendUserMessageService,
@@ -90,6 +91,7 @@ vi.mock("@services/tauri", () => ({
   listWorkspaces: vi.fn(),
   resumeThread: vi.fn(),
   readThread: vi.fn(),
+  readThreadPage: vi.fn(),
   scanManagedSessions: vi.fn(),
   archiveThread: vi.fn(),
   generateRunMetadata: vi.fn(),
@@ -148,6 +150,7 @@ describe("useThreads UX integration", () => {
     vi.clearAllMocks();
     clearActiveManagedSessionsCache();
     vi.mocked(readThread).mockReset();
+    vi.mocked(readThreadPage).mockRejectedValue(new Error("unknown command"));
     vi.mocked(listWorkspaces).mockResolvedValue([]);
     vi.mocked(listSessionSources).mockResolvedValue([
       {
@@ -1538,7 +1541,7 @@ describe("useThreads UX integration", () => {
     );
   });
 
-  it("preserves resumed history for incremental display and full-history search", async () => {
+  it("bounds hydrated history after scrollback settings are available", async () => {
     const totalItems = 240;
     const items = Array.from({ length: totalItems }, (_, index) =>
       index % 2 === 0
@@ -1578,9 +1581,9 @@ describe("useThreads UX integration", () => {
     });
 
     await waitFor(() => {
-      expect(result.current.activeItems).toHaveLength(totalItems);
+      expect(result.current.activeItems).toHaveLength(200);
     });
-    expect(result.current.activeItems[0]?.id).toBe("server-user-0");
+    expect(result.current.activeItems[0]?.id).toBe("server-user-40");
   });
 
   it("keeps the latest plan visible when a new turn starts", () => {

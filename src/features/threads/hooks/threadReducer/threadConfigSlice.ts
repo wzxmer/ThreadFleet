@@ -15,10 +15,6 @@ export function reduceThreadConfig(state: ThreadState, action: ThreadAction): Th
   switch (action.type) {
     case "setMaxItemsPerThread": {
       const normalized = normalizeMaxItemsPerThread(action.maxItemsPerThread);
-      if (state.maxItemsPerThread === normalized) {
-        return state;
-      }
-
       let itemsByThread = state.itemsByThread;
       if (normalized !== null) {
         for (const [threadId, items] of Object.entries(state.itemsByThread)) {
@@ -30,6 +26,13 @@ export function reduceThreadConfig(state: ThreadState, action: ThreadAction): Th
           }
           itemsByThread[threadId] = items.slice(-normalized);
         }
+      }
+
+      if (
+        state.maxItemsPerThread === normalized &&
+        itemsByThread === state.itemsByThread
+      ) {
+        return state;
       }
 
       return {

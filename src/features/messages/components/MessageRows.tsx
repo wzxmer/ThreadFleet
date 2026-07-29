@@ -285,20 +285,27 @@ const MessageAttachmentList = memo(function MessageAttachmentList({
 const CommandOutput = memo(function CommandOutput({ output }: CommandOutputProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [isPinned, setIsPinned] = useState(true);
-  const displayOutput = useMemo(() => stripAnsiControlCodes(output), [output]);
+  const outputTail = useMemo(() => {
+    let start = output.length;
+    let remainingLines = MAX_COMMAND_OUTPUT_LINES;
+    while (start > 0 && remainingLines > 0) {
+      const newline = output.lastIndexOf("\n", start - 1);
+      if (newline < 0) {
+        start = 0;
+        break;
+      }
+      start = newline;
+      remainingLines -= 1;
+    }
+    const contentStart = start > 0 ? start + 1 : 0;
+    return { contentStart, text: output.slice(contentStart) };
+  }, [output]);
   const lines = useMemo(() => {
-    if (!displayOutput) {
+    if (!outputTail.text) {
       return [];
     }
-    return displayOutput.split(/\r?\n/);
-  }, [displayOutput]);
-  const lineWindow = useMemo(() => {
-    if (lines.length <= MAX_COMMAND_OUTPUT_LINES) {
-      return { offset: 0, lines };
-    }
-    const startIndex = lines.length - MAX_COMMAND_OUTPUT_LINES;
-    return { offset: startIndex, lines: lines.slice(startIndex) };
-  }, [lines]);
+    return stripAnsiControlCodes(outputTail.text).split(/\r?\n/);
+  }, [outputTail]);
 
   const handleScroll = useCallback(() => {
     const node = containerRef.current;
@@ -316,9 +323,9 @@ const CommandOutput = memo(function CommandOutput({ output }: CommandOutputProps
       return;
     }
     node.scrollTop = node.scrollHeight;
-  }, [lineWindow, isPinned]);
+  }, [lines, isPinned]);
 
-  if (lineWindow.lines.length === 0) {
+  if (lines.length === 0) {
     return null;
   }
 
@@ -329,9 +336,9 @@ const CommandOutput = memo(function CommandOutput({ output }: CommandOutputProps
         ref={containerRef}
         onScroll={handleScroll}
       >
-        {lineWindow.lines.map((line, index) => (
+        {lines.map((line, index) => (
           <div
-            key={`${lineWindow.offset + index}-${line}`}
+            key={`${outputTail.contentStart}-${index}-${line}`}
             className="tool-inline-terminal-line"
           >
             {line || " "}

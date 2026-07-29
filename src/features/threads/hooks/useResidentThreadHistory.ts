@@ -3,7 +3,7 @@ import type { Dispatch, MutableRefObject } from "react";
 import type { ApprovalRequest, RequestUserInputRequest } from "@/types";
 import type { ThreadAction, ThreadState } from "./useThreadsReducer";
 
-export const MAX_RESIDENT_THREAD_HISTORIES = 6;
+export const MAX_RESIDENT_THREAD_HISTORIES = 2;
 
 type ReadThreadForWorkspace = (
   workspaceId: string,

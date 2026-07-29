@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useState } from "react";
 import type { Dispatch, MutableRefObject } from "react";
 import type {
   DebugEntry,
@@ -16,12 +16,13 @@ import {
   listThreads as listThreadsService,
   listWorkspaces as listWorkspacesService,
   readThread as readThreadService,
+  readThreadPage as readThreadPageService,
   resumeThread as resumeThreadService,
   startThread as startThreadService,
   verifySessionThreads as verifySessionThreadsService,
 } from "@services/tauri";
 import { LOCAL_CODEX_WORKSPACE_ID } from "@/features/workspaces/domain/localCodexWorkspace";
-import { getThreadTimestamp } from "@utils/threadItems";
+import { buildItemsFromThread, getThreadTimestamp } from "@utils/threadItems";
 import { extractThreadCodexMetadata } from "@threads/utils/threadCodexMetadata";
 import {
   buildThreadSummaryFromThread,
@@ -63,6 +64,33 @@ const THREAD_LIST_TARGET_COUNT = THREAD_LIST_PAGE_SIZE;
 const THREAD_LIST_MAX_PAGES_OLDER = 6;
 const THREAD_LIST_MAX_PAGES_DEFAULT = 6;
 const THREAD_LIST_CURSOR_PAGE_START = "__codex_monitor_page_start__";
+const THREAD_HISTORY_INITIAL_ITEMS = 50;
+const THREAD_HISTORY_INITIAL_BYTES = 1 * 1024 * 1024;
+const THREAD_HISTORY_OLDER_ITEMS = 50;
+const THREAD_HISTORY_OLDER_BYTES = 1 * 1024 * 1024;
+
+export type ThreadHistoryPageState = {
+  nextCursor: string | null;
+  hasMore: boolean;
+  isLoading: boolean;
+  snapshotId: string | null;
+};
+
+function extractThreadHistoryPageState(
+  response: Record<string, unknown> | null,
+): ThreadHistoryPageState | null {
+  const page = response?.codexMonitorHistoryPage;
+  if (!page || typeof page !== "object") {
+    return null;
+  }
+  const value = page as Record<string, unknown>;
+  return {
+    nextCursor: typeof value.nextCursor === "string" ? value.nextCursor : null,
+    hasMore: value.hasMore === true,
+    isLoading: false,
+    snapshotId: typeof value.snapshotId === "string" ? value.snapshotId : null,
+  };
+}
 
 type UseThreadActionsOptions = {
   dispatch: Dispatch<ThreadAction>;
@@ -159,6 +187,9 @@ export function useThreadActions({
   const resumeAppliedGenerationByThreadRef = useRef<Record<string, number>>({});
   const readOnlyLoadedThreadsRef = useRef<Record<string, true>>({});
   const tokenUsageHydrationInFlightRef = useRef<Record<string, true>>({});
+  const [threadHistoryPageByThread, setThreadHistoryPageByThread] = useState<
+    Record<string, ThreadHistoryPageState>
+  >({});
   const threadStatusByIdRef = useRef(threadStatusById);
   const activeTurnIdByThreadRef = useRef(activeTurnIdByThread);
   const getCurrentThreadRuntimeKey = useCallback(() => {
@@ -329,13 +360,43 @@ export function useThreadActions({
         dispatch({ type: "setThreadResumeLoading", threadId, isLoading: true });
       }
       try {
-        const response =
-          (await (readOnly ? readThreadService : resumeThreadService)(
+        let response: Record<string, unknown> | null;
+        if (readOnly) {
+          try {
+            response = (await readThreadPageService(
+              workspaceId,
+              threadId,
+              null,
+              THREAD_HISTORY_INITIAL_ITEMS,
+              THREAD_HISTORY_INITIAL_BYTES,
+            )) as Record<string, unknown> | null;
+          } catch (pageError) {
+            onDebug?.({
+              id: `${Date.now()}-client-thread-read-page-fallback`,
+              timestamp: Date.now(),
+              source: "client",
+              label: "thread/read page fallback",
+              payload: pageError instanceof Error ? pageError.message : String(pageError),
+            });
+            response = (await readThreadService(
+              workspaceId,
+              threadId,
+            )) as Record<string, unknown> | null;
+          }
+          const pageState = extractThreadHistoryPageState(response);
+          setThreadHistoryPageByThread((previous) => {
+            if (!pageState) {
+              const { [threadId]: _, ...rest } = previous;
+              return rest;
+            }
+            return { ...previous, [threadId]: pageState };
+          });
+        } else {
+          response = (await resumeThreadService(
             workspaceId,
             threadId,
-          )) as
-            | Record<string, unknown>
-            | null;
+          )) as Record<string, unknown> | null;
+        }
         onDebug?.({
           id: `${Date.now()}-server-thread-resume`,
           timestamp: Date.now(),
@@ -509,7 +570,6 @@ export function useThreadActions({
               type: "setThreadItems",
               threadId,
               items: hydrationPlan.mergedItems,
-              trimItems: false,
             });
           }
           if (hydrationPlan.threadName) {
@@ -591,6 +651,74 @@ export function useThreadActions({
         true,
       ),
     [resumeThreadForWorkspace],
+  );
+
+  const loadOlderThreadHistory = useCallback(
+    async (workspaceId: string, threadId: string) => {
+      const pageState = threadHistoryPageByThread[threadId];
+      if (!pageState?.hasMore || !pageState.nextCursor || pageState.isLoading) {
+        return false;
+      }
+      const requestedCursor = pageState.nextCursor;
+      setThreadHistoryPageByThread((previous) => ({
+        ...previous,
+        [threadId]: { ...pageState, isLoading: true },
+      }));
+      try {
+        const response = (await readThreadPageService(
+          workspaceId,
+          threadId,
+          requestedCursor,
+          THREAD_HISTORY_OLDER_ITEMS,
+          THREAD_HISTORY_OLDER_BYTES,
+        )) as Record<string, unknown> | null;
+        const thread = extractThreadFromResponse(response);
+        const nextPageState = extractThreadHistoryPageState(response);
+        if (!thread || !nextPageState) {
+          throw new Error("Thread history page response is incomplete");
+        }
+        const olderItems = buildItemsFromThread(thread);
+        const currentItems = itemsByThread[threadId] ?? [];
+        const currentIds = new Set(currentItems.map((item) => item.id));
+        const uniqueOlderItems = olderItems.filter(
+          (item) => !currentIds.has(item.id),
+        );
+        const mergedItems = [...uniqueOlderItems, ...currentItems];
+        if (uniqueOlderItems.length > 0) {
+          dispatch({
+            type: "setThreadItems",
+            threadId,
+            items: mergedItems,
+            trimItems: false,
+          });
+        }
+        setThreadHistoryPageByThread((previous) => ({
+          ...previous,
+          [threadId]: nextPageState,
+        }));
+        return uniqueOlderItems.length > 0;
+      } catch (error) {
+        onDebug?.({
+          id: `${Date.now()}-client-thread-read-page-error`,
+          timestamp: Date.now(),
+          source: "error",
+          label: "thread/read page error",
+          payload: error instanceof Error ? error.message : String(error),
+        });
+        setThreadHistoryPageByThread((previous) => {
+          const current = previous[threadId];
+          if (!current || current.nextCursor !== requestedCursor) {
+            return previous;
+          }
+          return {
+            ...previous,
+            [threadId]: { ...current, isLoading: false },
+          };
+        });
+        return false;
+      }
+    },
+    [dispatch, itemsByThread, onDebug, threadHistoryPageByThread],
   );
 
   const ensureThreadRuntimeForWorkspace = useCallback(
@@ -1861,6 +1989,8 @@ export function useThreadActions({
     forkThreadForWorkspace,
     resumeThreadForWorkspace,
     readThreadForWorkspace,
+    loadOlderThreadHistory,
+    threadHistoryPageByThread,
     ensureThreadRuntimeForWorkspace,
     resumeThreadById,
     refreshThread,

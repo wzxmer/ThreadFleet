@@ -15,6 +15,30 @@ import {
 } from "./threadItems";
 
 describe("threadItems", () => {
+  it("preserves item references when normalization changes nothing", () => {
+    const message: ConversationItem = {
+      id: "msg-stable",
+      kind: "message",
+      role: "assistant",
+      text: "short message",
+    };
+    const changes = [{ path: "src/app.ts", diff: "+const stable = true;" }];
+    const tool: ConversationItem = {
+      id: "tool-stable",
+      kind: "tool",
+      toolType: "fileChange",
+      title: "File changes",
+      detail: "one file",
+      output: "done",
+      changes,
+    };
+
+    expect(normalizeItem(message)).toBe(message);
+    const normalizedTool = normalizeItem(tool);
+    expect(normalizedTool).toBe(tool);
+    expect(normalizedTool.kind === "tool" ? normalizedTool.changes : null).toBe(changes);
+  });
+
   it("truncates long message text in normalizeItem", () => {
     const text = "a".repeat(21000);
     const item: ConversationItem = {

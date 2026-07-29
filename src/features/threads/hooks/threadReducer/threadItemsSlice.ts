@@ -31,8 +31,11 @@ function clearInterruptedThread(
   return { interruptedThreadById: rest };
 }
 
-function prepareLiveThreadItems(items: ConversationItem[]) {
-  return prepareThreadItems(items, { maxItemsPerThread: null });
+function prepareLiveThreadItems(
+  items: ConversationItem[],
+  maxItemsPerThread: number | null,
+) {
+  return prepareThreadItems(items, { maxItemsPerThread });
 }
 
 function mergeCompletedContextCompactionIds(
@@ -70,7 +73,10 @@ export function reduceThreadItems(state: ThreadState, action: ThreadAction): Thr
         ...state,
         itemsByThread: {
           ...state.itemsByThread,
-          [action.threadId]: prepareLiveThreadItems([...list, message]),
+          [action.threadId]: prepareLiveThreadItems(
+            [...list, message],
+            state.maxItemsPerThread,
+          ),
         },
       };
     }
@@ -93,7 +99,7 @@ export function reduceThreadItems(state: ThreadState, action: ThreadAction): Thr
           createdAt: Date.now(),
         });
       }
-      const updatedItems = prepareLiveThreadItems(list);
+      const updatedItems = prepareLiveThreadItems(list, state.maxItemsPerThread);
       const nextThreadsByWorkspace = maybeRenameThreadFromAgent({
         workspaceId: action.workspaceId,
         threadId: action.threadId,
@@ -135,7 +141,7 @@ export function reduceThreadItems(state: ThreadState, action: ThreadAction): Thr
           createdAt: Date.now(),
         });
       }
-      const updatedItems = prepareLiveThreadItems(list);
+      const updatedItems = prepareLiveThreadItems(list, state.maxItemsPerThread);
       const nextThreadsByWorkspace = maybeRenameThreadFromAgent({
         workspaceId: action.workspaceId,
         threadId: action.threadId,
@@ -211,7 +217,7 @@ export function reduceThreadItems(state: ThreadState, action: ThreadAction): Thr
                 ...list.slice(pendingReplacementIndex + 1),
               ]
           : upsertItem(list, nextItem);
-      const updatedItems = prepareLiveThreadItems(nextList);
+      const updatedItems = prepareLiveThreadItems(nextList, state.maxItemsPerThread);
       const completedContextCompactionIds = mergeCompletedContextCompactionIds(
         state.completedContextCompactionIdsByThread[action.threadId],
         [nextItem],
@@ -302,7 +308,10 @@ export function reduceThreadItems(state: ThreadState, action: ThreadAction): Thr
         ...state,
         itemsByThread: {
           ...state.itemsByThread,
-          [action.threadId]: prepareLiveThreadItems(nextList),
+          [action.threadId]: prepareLiveThreadItems(
+            nextList,
+            state.maxItemsPerThread,
+          ),
         },
       };
     }
@@ -328,7 +337,10 @@ export function reduceThreadItems(state: ThreadState, action: ThreadAction): Thr
         ...state,
         itemsByThread: {
           ...state.itemsByThread,
-          [action.threadId]: prepareLiveThreadItems(nextList),
+          [action.threadId]: prepareLiveThreadItems(
+            nextList,
+            state.maxItemsPerThread,
+          ),
         },
         pendingUserMessageReplacementByThread:
           nextPendingUserMessageReplacementByThread,
@@ -398,7 +410,7 @@ export function reduceThreadItems(state: ThreadState, action: ThreadAction): Thr
         ...state,
         itemsByThread: {
           ...state.itemsByThread,
-          [action.threadId]: prepareLiveThreadItems(next),
+          [action.threadId]: prepareLiveThreadItems(next, state.maxItemsPerThread),
         },
       };
     }
@@ -426,7 +438,7 @@ export function reduceThreadItems(state: ThreadState, action: ThreadAction): Thr
         ...state,
         itemsByThread: {
           ...state.itemsByThread,
-          [action.threadId]: prepareLiveThreadItems(next),
+          [action.threadId]: prepareLiveThreadItems(next, state.maxItemsPerThread),
         },
       };
     }
@@ -457,7 +469,7 @@ export function reduceThreadItems(state: ThreadState, action: ThreadAction): Thr
         ...state,
         itemsByThread: {
           ...state.itemsByThread,
-          [action.threadId]: prepareLiveThreadItems(next),
+          [action.threadId]: prepareLiveThreadItems(next, state.maxItemsPerThread),
         },
       };
     }
@@ -494,7 +506,7 @@ export function reduceThreadItems(state: ThreadState, action: ThreadAction): Thr
         ...state,
         itemsByThread: {
           ...state.itemsByThread,
-          [action.threadId]: prepareLiveThreadItems(next),
+          [action.threadId]: prepareLiveThreadItems(next, state.maxItemsPerThread),
         },
       };
     }
@@ -515,7 +527,7 @@ export function reduceThreadItems(state: ThreadState, action: ThreadAction): Thr
         ...state,
         itemsByThread: {
           ...state.itemsByThread,
-          [action.threadId]: prepareLiveThreadItems(next),
+          [action.threadId]: prepareLiveThreadItems(next, state.maxItemsPerThread),
         },
       };
     }

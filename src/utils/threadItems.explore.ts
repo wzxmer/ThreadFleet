@@ -66,56 +66,77 @@ function chooseUserRetryDisplayItem(
 
 export function normalizeItem(item: ConversationItem): ConversationItem {
   if (item.kind === "message") {
-    return { ...item, text: truncateText(item.text) };
+    const text = truncateText(item.text);
+    return text === item.text ? item : { ...item, text };
   }
   if (item.kind === "userInput") {
-    return {
-      ...item,
-      questions: item.questions.map((question) => ({
-        ...question,
-        header: truncateText(question.header, 300),
-        question: truncateText(question.question, 2000),
-        answers: question.answers.map((answer) => truncateText(answer, 2000)),
-      })),
-    };
+    let questionsChanged = false;
+    const questions = item.questions.map((question) => {
+      const header = truncateText(question.header, 300);
+      const questionText = truncateText(question.question, 2000);
+      let answersChanged = false;
+      const answers = question.answers.map((answer) => {
+        const nextAnswer = truncateText(answer, 2000);
+        answersChanged ||= nextAnswer !== answer;
+        return nextAnswer;
+      });
+      if (
+        header === question.header &&
+        questionText === question.question &&
+        !answersChanged
+      ) {
+        return question;
+      }
+      questionsChanged = true;
+      return { ...question, header, question: questionText, answers };
+    });
+    return questionsChanged ? { ...item, questions } : item;
   }
   if (item.kind === "explore") {
     return item;
   }
   if (item.kind === "process") {
-    return {
-      ...item,
-      label: truncateText(item.label, 300),
-      detail: item.detail ? truncateText(item.detail, 1000) : item.detail,
-    };
+    const label = truncateText(item.label, 300);
+    const detail = item.detail ? truncateText(item.detail, 1000) : item.detail;
+    return label === item.label && detail === item.detail
+      ? item
+      : { ...item, label, detail };
   }
   if (item.kind === "reasoning") {
-    return {
-      ...item,
-      summary: truncateText(item.summary),
-      content: truncateText(item.content),
-    };
+    const summary = truncateText(item.summary);
+    const content = truncateText(item.content);
+    return summary === item.summary && content === item.content
+      ? item
+      : { ...item, summary, content };
   }
   if (item.kind === "diff") {
-    return { ...item, diff: truncateText(item.diff) };
+    const diff = truncateText(item.diff);
+    return diff === item.diff ? item : { ...item, diff };
   }
   if (item.kind === "tool") {
-    return {
-      ...item,
-      title: truncateText(item.title, 200),
-      detail: truncateText(item.detail, 2000),
-      output: item.output
-        ? truncateToolText(item.toolType, item.output)
-        : item.output,
-      changes: item.changes
-        ? item.changes.map((change) => ({
-            ...change,
-            diff: change.diff
-              ? truncateToolText(item.toolType, change.diff)
-              : change.diff,
-          }))
-        : item.changes,
-    };
+    const title = truncateText(item.title, 200);
+    const detail = truncateText(item.detail, 2000);
+    const output = item.output
+      ? truncateToolText(item.toolType, item.output)
+      : item.output;
+    let changesChanged = false;
+    const normalizedChanges = item.changes?.map((change) => {
+      const diff = change.diff
+        ? truncateToolText(item.toolType, change.diff)
+        : change.diff;
+      if (diff === change.diff) {
+        return change;
+      }
+      changesChanged = true;
+      return { ...change, diff };
+    });
+    const changes = changesChanged ? normalizedChanges : item.changes;
+    return title === item.title &&
+      detail === item.detail &&
+      output === item.output &&
+      changes === item.changes
+      ? item
+      : { ...item, title, detail, output, changes };
   }
   return item;
 }

@@ -55,6 +55,28 @@ describe("Messages", () => {
     exportMarkdownFileMock.mockReset();
   });
 
+  it("requests an older backend history page after the local window is exhausted", async () => {
+    const onLoadOlderHistory = vi.fn(async () => true);
+    render(
+      <Messages
+        items={[
+          { id: "message-1", kind: "message", role: "assistant", text: "Latest" },
+        ]}
+        threadId="thread-history"
+        workspaceId="ws-history"
+        isThinking={false}
+        hasOlderHistory
+        onLoadOlderHistory={onLoadOlderHistory}
+        openTargets={[]}
+        selectedOpenAppId=""
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "加载更早历史" }));
+
+    await waitFor(() => expect(onLoadOlderHistory).toHaveBeenCalledTimes(1));
+  });
+
   it("summarizes child results and opens long output in a detail drawer", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", {

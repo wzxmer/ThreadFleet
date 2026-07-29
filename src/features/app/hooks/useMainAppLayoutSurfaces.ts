@@ -10,6 +10,7 @@ import type {
   WorkspaceInfo,
 } from "@/types";
 import type { ThreadState } from "@/features/threads/hooks/useThreadsReducer";
+import type { ThreadHistoryPageState } from "@/features/threads/hooks/useThreadActions";
 import { useSidebarProviderUsage } from "@app/hooks/useSidebarProviderUsage";
 import type { ConversationAppearance } from "@app/utils/runtimeThemeAppearance";
 import type { WorkspaceLaunchScriptsState } from "@app/hooks/useWorkspaceLaunchScripts";
@@ -83,6 +84,8 @@ type UseMainAppLayoutSurfacesArgs = {
   activeWorkspaceId: string | null;
   activeThreadId: string | null;
   activeItems: LayoutNodesOptions["primary"]["messagesProps"]["items"];
+  threadHistoryPageByThread: Record<string, ThreadHistoryPageState>;
+  onLoadOlderThreadHistory: (workspaceId: string, threadId: string) => Promise<boolean>;
   itemsByThread: Record<string, ConversationItem[]>;
   userInputRequests: SidebarProps["userInputRequests"];
   approvals: LayoutNodesOptions["primary"]["approvalToastsProps"]["approvals"];
@@ -319,6 +322,8 @@ function buildPrimarySurface({
   activeWorkspaceId,
   activeThreadId,
   activeItems,
+  threadHistoryPageByThread,
+  onLoadOlderThreadHistory,
   subagentResults,
   userInputRequests,
   approvals,
@@ -617,6 +622,16 @@ function buildPrimarySurface({
       isLoadingMessages: activeThreadId
         ? threadResumeLoadingById[activeThreadId] ?? false
         : false,
+      hasOlderHistory: activeThreadId
+        ? threadHistoryPageByThread[activeThreadId]?.hasMore ?? false
+        : false,
+      isLoadingOlderHistory: activeThreadId
+        ? threadHistoryPageByThread[activeThreadId]?.isLoading ?? false
+        : false,
+      onLoadOlderHistory:
+        activeWorkspaceId && activeThreadId
+          ? () => onLoadOlderThreadHistory(activeWorkspaceId, activeThreadId)
+          : undefined,
       processingStartedAt: activeThreadId
         ? threadStatusById[activeThreadId]?.processingStartedAt ??
           pendingTurnStartByThread[activeThreadId]?.startedAt ??
@@ -1206,6 +1221,8 @@ export function useMainAppLayoutSurfaces({
   activeWorkspaceId,
   activeThreadId,
   activeItems,
+  threadHistoryPageByThread,
+  onLoadOlderThreadHistory,
   itemsByThread,
   userInputRequests,
   approvals,
@@ -1428,6 +1445,8 @@ export function useMainAppLayoutSurfaces({
     activeWorkspaceId,
     activeThreadId,
     activeItems,
+    threadHistoryPageByThread,
+    onLoadOlderThreadHistory,
     itemsByThread,
     userInputRequests,
     approvals,

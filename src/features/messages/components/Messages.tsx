@@ -2,6 +2,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -173,6 +174,9 @@ type MessagesProps = {
   workspaceId?: string | null;
   isThinking: boolean;
   isLoadingMessages?: boolean;
+  hasOlderHistory?: boolean;
+  isLoadingOlderHistory?: boolean;
+  onLoadOlderHistory?: () => Promise<boolean>;
   processingStartedAt?: number | null;
   lastDurationMs?: number | null;
   showPollingFetchStatus?: boolean;
@@ -273,6 +277,9 @@ export const Messages = memo(function Messages({
   workspaceId = null,
   isThinking,
   isLoadingMessages = false,
+  hasOlderHistory = false,
+  isLoadingOlderHistory = false,
+  onLoadOlderHistory,
   processingStartedAt = null,
   lastDurationMs = null,
   showPollingFetchStatus = false,
@@ -306,6 +313,11 @@ export const Messages = memo(function Messages({
   onReferenceMessage,
   onResendUserMessage,
 }: MessagesProps) {
+  const pendingOlderHistoryRestoreRef = useRef<{
+    previousItemCount: number;
+    previousScrollHeight: number;
+    previousScrollTop: number;
+  } | null>(null);
   const { t } = useI18n();
   const [stylePanelOpen, setStylePanelOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -422,6 +434,33 @@ export const Messages = memo(function Messages({
     onPlanSubmitChanges,
     onQuoteMessage,
   });
+  useLayoutEffect(() => {
+    const restore = pendingOlderHistoryRestoreRef.current;
+    const container = containerRef.current;
+    if (!restore || !container || items.length === restore.previousItemCount) {
+      return;
+    }
+    container.scrollTop =
+      container.scrollHeight - restore.previousScrollHeight + restore.previousScrollTop;
+    pendingOlderHistoryRestoreRef.current = null;
+  }, [containerRef, items.length]);
+  const handleLoadOlderHistory = useCallback(async () => {
+    if (!onLoadOlderHistory || isLoadingOlderHistory) {
+      return;
+    }
+    const container = containerRef.current;
+    if (container) {
+      pendingOlderHistoryRestoreRef.current = {
+        previousItemCount: items.length,
+        previousScrollHeight: container.scrollHeight,
+        previousScrollTop: container.scrollTop,
+      };
+    }
+    const loaded = await onLoadOlderHistory();
+    if (!loaded) {
+      pendingOlderHistoryRestoreRef.current = null;
+    }
+  }, [containerRef, isLoadingOlderHistory, items.length, onLoadOlderHistory]);
   const handleReferenceMessage = useCallback(
     (action: MessageReferenceAction) => {
       if (onReferenceMessage) {
@@ -1212,6 +1251,18 @@ export const Messages = memo(function Messages({
               "{count}",
               String(hiddenBeforeCount),
             )}
+          </button>
+        )}
+        {hiddenBeforeCount === 0 && hasOlderHistory && (
+          <button
+            type="button"
+            className="messages-history-notice"
+            onClick={() => void handleLoadOlderHistory()}
+            disabled={isLoadingOlderHistory}
+          >
+            {isLoadingOlderHistory
+              ? t("messages.historyLoadingOlder")
+              : t("messages.historyLoadOlder")}
           </button>
         )}
         {groupedItems.map((entry) => {

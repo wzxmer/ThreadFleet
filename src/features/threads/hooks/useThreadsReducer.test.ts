@@ -1302,7 +1302,7 @@ describe("threadReducer", () => {
     expect(trimmed.itemsByThread["thread-1"]?.[0]?.id).toBe("msg-2");
   });
 
-  it("does not trim live thread items when scrollback cap is exceeded", () => {
+  it("trims live thread items when scrollback cap is exceeded", () => {
     const items: ConversationItem[] = Array.from({ length: 3 }, (_, index) => ({
       id: `msg-${index}`,
       kind: "message",
@@ -1313,6 +1313,92 @@ describe("threadReducer", () => {
     const base = {
       ...initialState,
       maxItemsPerThread: 3,
+      itemsByThread: { "thread-1": items },
+    };
+
+    const next = threadReducer(base, {
+      type: "upsertItem",
+      workspaceId: "ws-1",
+      threadId: "thread-1",
+      item: {
+        id: "msg-3",
+        kind: "message",
+        role: "assistant",
+        text: "message 3",
+      },
+    });
+
+    expect(next.itemsByThread["thread-1"]).toHaveLength(3);
+    expect(next.itemsByThread["thread-1"]?.map((item) => item.id)).toEqual([
+      "msg-1",
+      "msg-2",
+      "msg-3",
+    ]);
+  });
+
+  it("trims oversized histories when the scrollback cap is reapplied", () => {
+    const items: ConversationItem[] = Array.from({ length: 5 }, (_, index) => ({
+      id: `msg-${index}`,
+      kind: "message",
+      role: "assistant",
+      text: `message ${index}`,
+    }));
+    const base = {
+      ...initialState,
+      maxItemsPerThread: 3,
+      itemsByThread: { "thread-1": items },
+    };
+
+    const next = threadReducer(base, {
+      type: "setMaxItemsPerThread",
+      maxItemsPerThread: 3,
+    });
+
+    expect(next.itemsByThread["thread-1"]?.map((item) => item.id)).toEqual([
+      "msg-2",
+      "msg-3",
+      "msg-4",
+    ]);
+  });
+
+  it("keeps explicitly paged older history beyond the automatic scrollback cap", () => {
+    const items: ConversationItem[] = Array.from({ length: 5 }, (_, index) => ({
+      id: `msg-${index}`,
+      kind: "message",
+      role: "assistant",
+      text: `message ${index}`,
+    }));
+    const base = {
+      ...initialState,
+      maxItemsPerThread: 3,
+    };
+
+    const next = threadReducer(base, {
+      type: "setThreadItems",
+      threadId: "thread-1",
+      items,
+      trimItems: false,
+    });
+
+    expect(next.itemsByThread["thread-1"]?.map((item) => item.id)).toEqual([
+      "msg-0",
+      "msg-1",
+      "msg-2",
+      "msg-3",
+      "msg-4",
+    ]);
+  });
+
+  it("keeps unlimited live thread history", () => {
+    const items: ConversationItem[] = Array.from({ length: 3 }, (_, index) => ({
+      id: `msg-${index}`,
+      kind: "message",
+      role: "assistant",
+      text: `message ${index}`,
+    }));
+    const base = {
+      ...initialState,
+      maxItemsPerThread: null,
       itemsByThread: { "thread-1": items },
     };
 

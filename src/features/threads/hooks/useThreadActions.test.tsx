@@ -17,6 +17,7 @@ import {
   listThreads,
   listWorkspaces,
   readThread,
+  readThreadPage,
   resumeThread,
   startThread,
   scanManagedSessions,
@@ -43,6 +44,7 @@ vi.mock("@services/tauri", () => ({
   listThreads: vi.fn(),
   listWorkspaces: vi.fn(),
   readThread: vi.fn(),
+  readThreadPage: vi.fn(),
   archiveThread: vi.fn(),
   cancelSessionTask: vi.fn(),
   fetchManagedSessionsPage: vi.fn(),
@@ -90,6 +92,7 @@ describe("useThreadActions", () => {
     clearActiveManagedSessionsCache();
     vi.mocked(listWorkspaces).mockResolvedValue([]);
     vi.mocked(getThreadTokenUsage).mockResolvedValue(null);
+    vi.mocked(readThreadPage).mockRejectedValue(new Error("unknown command"));
     vi.mocked(listSessionSources).mockResolvedValue([
       {
         id: "source-a",
@@ -383,7 +386,6 @@ describe("useThreadActions", () => {
       type: "setThreadItems",
       threadId: "thread-restored",
       items: serverItems,
-      trimItems: false,
     });
     expect(dispatch).toHaveBeenCalledWith({
       type: "setActiveThreadId",
@@ -415,7 +417,6 @@ describe("useThreadActions", () => {
       type: "setThreadItems",
       threadId: "thread-1",
       items: [],
-      trimItems: false,
     });
   });
 
@@ -553,7 +554,6 @@ describe("useThreadActions", () => {
       type: "setThreadItems",
       threadId: "thread-2",
       items: [assistantItem],
-      trimItems: false,
     });
     expect(dispatch).toHaveBeenCalledWith({
       type: "markReviewing",
@@ -800,6 +800,132 @@ describe("useThreadActions", () => {
     );
   });
 
+  it("loads the latest history page and prepends an older page without duplicates", async () => {
+    const latestItems: ConversationItem[] = [
+      { id: "item-3", kind: "message", role: "user", text: "latest question" },
+      { id: "item-4", kind: "message", role: "assistant", text: "latest answer" },
+    ];
+    const olderItems: ConversationItem[] = [
+      { id: "item-1", kind: "message", role: "user", text: "older question" },
+      { id: "item-2", kind: "message", role: "assistant", text: "older answer" },
+    ];
+    vi.mocked(readThreadPage)
+      .mockResolvedValueOnce({
+        codexMonitorReadAuthority: "history-no-active-execution",
+        codexMonitorHistoryPage: {
+          snapshotId: "snapshot-1",
+          nextCursor: "cursor-1",
+          hasMore: true,
+        },
+        result: { thread: { id: "thread-1", turns: [{ items: [] }] } },
+      })
+      .mockResolvedValueOnce({
+        codexMonitorHistoryPage: {
+          snapshotId: "snapshot-1",
+          nextCursor: null,
+          hasMore: false,
+        },
+        result: { thread: { id: "thread-1", turns: [{ items: [] }] } },
+      });
+    vi.mocked(buildItemsFromThread)
+      .mockReturnValueOnce(latestItems)
+      .mockReturnValueOnce(olderItems);
+
+    const { result, dispatch } = renderActions({
+      itemsByThread: { "thread-1": latestItems },
+    });
+
+    await act(async () => {
+      await result.current.readThreadForWorkspace("ws-1", "thread-1", true, true);
+    });
+    expect(readThread).not.toHaveBeenCalled();
+    expect(readThreadPage).toHaveBeenNthCalledWith(
+      1,
+      "ws-1",
+      "thread-1",
+      null,
+      50,
+      1 * 1024 * 1024,
+    );
+    expect(result.current.threadHistoryPageByThread["thread-1"]).toMatchObject({
+      nextCursor: "cursor-1",
+      hasMore: true,
+      isLoading: false,
+    });
+
+    await act(async () => {
+      expect(await result.current.loadOlderThreadHistory("ws-1", "thread-1")).toBe(true);
+    });
+
+    expect(readThreadPage).toHaveBeenNthCalledWith(
+      2,
+      "ws-1",
+      "thread-1",
+      "cursor-1",
+      50,
+      1 * 1024 * 1024,
+    );
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "setThreadItems",
+      threadId: "thread-1",
+      items: [...olderItems, ...latestItems],
+      trimItems: false,
+    });
+    expect(result.current.threadHistoryPageByThread["thread-1"]).toMatchObject({
+      nextCursor: null,
+      hasMore: false,
+      isLoading: false,
+    });
+  });
+
+  it("advances an older-page cursor without reporting duplicate items as inserted", async () => {
+    const latestItems: ConversationItem[] = [
+      { id: "item-1", kind: "message", role: "user", text: "question" },
+      { id: "item-2", kind: "message", role: "assistant", text: "answer" },
+    ];
+    vi.mocked(readThreadPage)
+      .mockResolvedValueOnce({
+        codexMonitorHistoryPage: {
+          snapshotId: "snapshot-1",
+          nextCursor: "cursor-1",
+          hasMore: true,
+        },
+        result: { thread: { id: "thread-1", turns: [{ items: [] }] } },
+      })
+      .mockResolvedValueOnce({
+        codexMonitorHistoryPage: {
+          snapshotId: "snapshot-1",
+          nextCursor: "cursor-2",
+          hasMore: true,
+        },
+        result: { thread: { id: "thread-1", turns: [{ items: [] }] } },
+      });
+    vi.mocked(buildItemsFromThread)
+      .mockReturnValueOnce(latestItems)
+      .mockReturnValueOnce(latestItems);
+
+    const { result, dispatch } = renderActions({
+      itemsByThread: { "thread-1": latestItems },
+    });
+    await act(async () => {
+      await result.current.readThreadForWorkspace("ws-1", "thread-1", true, true);
+    });
+    dispatch.mockClear();
+
+    await act(async () => {
+      expect(await result.current.loadOlderThreadHistory("ws-1", "thread-1")).toBe(false);
+    });
+
+    expect(dispatch).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "setThreadItems" }),
+    );
+    expect(result.current.threadHistoryPageByThread["thread-1"]).toMatchObject({
+      nextCursor: "cursor-2",
+      hasMore: true,
+      isLoading: false,
+    });
+  });
+
   it("hydrates missing token usage after resume completes", async () => {
     let resolveUsage!: (value: Record<string, unknown> | null) => void;
     vi.mocked(getThreadTokenUsage).mockReturnValue(
@@ -1000,7 +1126,6 @@ describe("useThreadActions", () => {
       type: "setThreadItems",
       threadId: "thread-2",
       items: mergedItems,
-      trimItems: false,
     });
   });
 
@@ -1043,7 +1168,6 @@ describe("useThreadActions", () => {
       type: "setThreadItems",
       threadId: "thread-2",
       items: [serverItem],
-      trimItems: false,
     });
   });
 
@@ -1133,7 +1257,6 @@ describe("useThreadActions", () => {
       type: "setThreadItems",
       threadId: "thread-1",
       items: [localItem],
-      trimItems: false,
     });
   });
 
