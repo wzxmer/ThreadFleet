@@ -1732,6 +1732,22 @@ export async function readThread(workspaceId: string, threadId: string) {
   return invoke<any>("read_thread", { workspaceId, threadId });
 }
 
+export async function readThreadPage(
+  workspaceId: string,
+  threadId: string,
+  cursor?: string | null,
+  itemLimit?: number | null,
+  byteLimit?: number | null,
+) {
+  return invoke<any>("read_thread_page", {
+    workspaceId,
+    threadId,
+    cursor,
+    itemLimit,
+    byteLimit,
+  });
+}
+
 export async function verifySessionThreads(
   request: VerifySessionThreadsRequest,
 ): Promise<VerifySessionThreadsResponse> {

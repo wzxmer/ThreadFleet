@@ -221,6 +221,24 @@ pub(super) async fn try_handle(
             };
             Some(state.read_thread(workspace_id, thread_id).await)
         }
+        "read_thread_page" => {
+            let workspace_id = match parse_string(params, "workspaceId") {
+                Ok(value) => value,
+                Err(err) => return Some(Err(err)),
+            };
+            let thread_id = match parse_string(params, "threadId") {
+                Ok(value) => value,
+                Err(err) => return Some(Err(err)),
+            };
+            let cursor = parse_optional_string(params, "cursor");
+            let item_limit = parse_optional_u32(params, "itemLimit");
+            let byte_limit = parse_optional_u32(params, "byteLimit");
+            Some(
+                state
+                    .read_thread_page(workspace_id, thread_id, cursor, item_limit, byte_limit)
+                    .await,
+            )
+        }
         "thread_live_subscribe" => {
             let workspace_id = match parse_string(params, "workspaceId") {
                 Ok(value) => value,

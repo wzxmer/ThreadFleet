@@ -202,6 +202,7 @@ fn can_retry_after_disconnect(method: &str) -> bool {
             | "list_workspaces"
             | "model_list"
             | "read_thread"
+            | "read_thread_page"
             | "fetch_managed_sessions_page"
             | "fetch_managed_session_preview"
             | "search_managed_sessions"

@@ -1423,6 +1423,56 @@ impl DaemonState {
         ))
     }
 
+    async fn read_thread_page(
+        &self,
+        workspace_id: String,
+        thread_id: String,
+        cursor: Option<String>,
+        item_limit: Option<u32>,
+        byte_limit: Option<u32>,
+    ) -> Result<Value, String> {
+        let active_session = active_execution_runtime_for_thread(
+            &self.sessions,
+            &self.session_source_runtimes,
+            &self.source_thread_runtimes,
+            &workspace_id,
+            &thread_id,
+        )
+        .await;
+        if let Some(session) = active_session {
+            let response = codex_core::read_thread_page_with_session_core(
+                &session,
+                workspace_id,
+                thread_id,
+                cursor,
+                item_limit,
+                byte_limit,
+            )
+            .await?;
+            return Ok(codex_core::annotate_thread_read_authority(
+                response,
+                "execution",
+            ));
+        }
+
+        let session = self
+            .history_runtime_for_thread(&workspace_id, &thread_id)
+            .await?;
+        let response = codex_core::read_thread_page_with_session_core(
+            &session,
+            workspace_id,
+            thread_id,
+            cursor,
+            item_limit,
+            byte_limit,
+        )
+        .await?;
+        Ok(codex_core::annotate_thread_read_authority(
+            response,
+            "history-no-active-execution",
+        ))
+    }
+
     async fn turn_execution_summary_get(
         &self,
         mut query: crate::shared::turn_execution_summary_core::TurnExecutionSummaryQuery,

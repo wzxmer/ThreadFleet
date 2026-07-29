@@ -292,6 +292,7 @@ pub fn run() {
             codex::resume_thread,
             codex::get_thread_token_usage,
             codex::read_thread,
+            codex::read_thread_page,
             codex::thread_live_subscribe,
             codex::thread_live_unsubscribe,
             codex::fork_thread,

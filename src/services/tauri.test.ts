@@ -33,6 +33,7 @@ import {
   listSessionSources,
   listMcpServerStatus,
   readThread,
+  readThreadPage,
   getTurnExecutionSummaries,
   upsertTurnExecutionSummary,
   resumeManagedSession,
@@ -810,6 +811,21 @@ describe("tauri invoke wrappers", () => {
     expect(invokeMock).toHaveBeenCalledWith("read_thread", {
       workspaceId: "ws-10",
       threadId: "thread-1",
+    });
+  });
+
+  it("maps pagination limits for read_thread_page", async () => {
+    const invokeMock = vi.mocked(invoke);
+    invokeMock.mockResolvedValueOnce({});
+
+    await readThreadPage("ws-10", "thread-1", "cursor-1", 100, 4_194_304);
+
+    expect(invokeMock).toHaveBeenCalledWith("read_thread_page", {
+      workspaceId: "ws-10",
+      threadId: "thread-1",
+      cursor: "cursor-1",
+      itemLimit: 100,
+      byteLimit: 4_194_304,
     });
   });
 

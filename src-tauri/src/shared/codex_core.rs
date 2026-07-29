@@ -1,6 +1,10 @@
-use base64::{engine::general_purpose::STANDARD, Engine as _};
+use base64::{
+    engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
+    Engine as _,
+};
 use futures_util::future::join4;
 use serde_json::{json, Map, Value};
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -56,6 +60,10 @@ const LOCAL_CODEX_WORKSPACE_ID: &str = "__local_codex_sessions__";
 // its child servers initialize. Keep this below the session request timeout,
 // but leave enough headroom for the real startup path.
 const COMPUTER_CONTROL_PROBE_TIMEOUT: Duration = Duration::from_secs(20);
+const THREAD_HISTORY_PAGE_DEFAULT_ITEMS: usize = 250;
+const THREAD_HISTORY_PAGE_MAX_ITEMS: usize = 500;
+const THREAD_HISTORY_PAGE_DEFAULT_BYTES: usize = 8 * 1024 * 1024;
+const THREAD_HISTORY_PAGE_MAX_BYTES: usize = 16 * 1024 * 1024;
 
 #[allow(dead_code)]
 fn image_extension_for_path(path: &str) -> Option<String> {
@@ -394,6 +402,10 @@ async fn resolve_workspace_path_core(
 
 fn build_read_thread_params(thread_id: String) -> Value {
     json!({ "threadId": thread_id, "includeTurns": true })
+}
+
+fn build_read_thread_metadata_params(thread_id: &str) -> Value {
+    json!({ "threadId": thread_id, "includeTurns": false })
 }
 
 const MAX_ROLLOUT_TOOL_ARGUMENT_CHARS: usize = 200_000;
@@ -872,6 +884,533 @@ pub(crate) async fn read_thread_with_session_core(
 ) -> Result<Value, String> {
     let params = build_read_thread_params(thread_id);
     send_enriched_thread_history_request(session, &workspace_id, "thread/read", params).await
+}
+
+fn thread_history_snapshot_id(response: &Value) -> String {
+    let thread = response.pointer("/result/thread").unwrap_or(&Value::Null);
+    let identity = thread
+        .get("path")
+        .and_then(Value::as_str)
+        .or_else(|| thread.get("id").and_then(Value::as_str))
+        .unwrap_or("unknown-thread");
+    format!("{:x}", Sha256::digest(identity.as_bytes()))
+}
+
+fn encode_thread_history_cursor(snapshot_id: &str, before: usize) -> String {
+    URL_SAFE_NO_PAD
+        .encode(json!({ "version": 1, "snapshotId": snapshot_id, "before": before }).to_string())
+}
+
+fn decode_thread_history_cursor(cursor: &str) -> Result<(String, usize), String> {
+    let bytes = URL_SAFE_NO_PAD
+        .decode(cursor)
+        .map_err(|_| "Invalid thread history cursor".to_string())?;
+    let value: Value =
+        serde_json::from_slice(&bytes).map_err(|_| "Invalid thread history cursor".to_string())?;
+    if value.get("version").and_then(Value::as_u64) != Some(1) {
+        return Err("Unsupported thread history cursor version".to_string());
+    }
+    let snapshot_id = value
+        .get("snapshotId")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "Invalid thread history cursor snapshot".to_string())?
+        .to_string();
+    let before = value
+        .get("before")
+        .and_then(Value::as_u64)
+        .and_then(|value| usize::try_from(value).ok())
+        .ok_or_else(|| "Invalid thread history cursor position".to_string())?;
+    Ok((snapshot_id, before))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct NativeThreadHistoryCursor {
+    snapshot_id: String,
+    upstream_cursor: Option<String>,
+    offset: usize,
+    page_limit: usize,
+    boundary_item_hash: Option<String>,
+}
+
+fn encode_native_thread_history_cursor(cursor: &NativeThreadHistoryCursor) -> String {
+    URL_SAFE_NO_PAD.encode(
+        json!({
+            "version": 2,
+            "source": "threadItemsList",
+            "snapshotId": cursor.snapshot_id,
+            "upstreamCursor": cursor.upstream_cursor,
+            "offset": cursor.offset,
+            "pageLimit": cursor.page_limit,
+            "boundaryItemHash": cursor.boundary_item_hash,
+        })
+        .to_string(),
+    )
+}
+
+fn decode_native_thread_history_cursor(
+    cursor: &str,
+) -> Result<Option<NativeThreadHistoryCursor>, String> {
+    let bytes = URL_SAFE_NO_PAD
+        .decode(cursor)
+        .map_err(|_| "Invalid thread history cursor".to_string())?;
+    let value: Value =
+        serde_json::from_slice(&bytes).map_err(|_| "Invalid thread history cursor".to_string())?;
+    if value.get("version").and_then(Value::as_u64) != Some(2) {
+        return Ok(None);
+    }
+    if value.get("source").and_then(Value::as_str) != Some("threadItemsList") {
+        return Err("Unsupported thread history cursor source".to_string());
+    }
+    let snapshot_id = value
+        .get("snapshotId")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "Invalid thread history cursor snapshot".to_string())?
+        .to_string();
+    let upstream_cursor = match value.get("upstreamCursor") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(value)) if !value.is_empty() => Some(value.clone()),
+        _ => return Err("Invalid upstream thread history cursor".to_string()),
+    };
+    let offset = value
+        .get("offset")
+        .and_then(Value::as_u64)
+        .and_then(|value| usize::try_from(value).ok())
+        .ok_or_else(|| "Invalid thread history cursor offset".to_string())?;
+    let page_limit = value
+        .get("pageLimit")
+        .and_then(Value::as_u64)
+        .and_then(|value| usize::try_from(value).ok())
+        .ok_or_else(|| "Invalid thread history cursor page limit".to_string())?
+        .clamp(1, THREAD_HISTORY_PAGE_MAX_ITEMS);
+    let boundary_item_hash = match value.get("boundaryItemHash") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(value)) if !value.is_empty() => Some(value.clone()),
+        _ => return Err("Invalid thread history cursor boundary".to_string()),
+    };
+    Ok(Some(NativeThreadHistoryCursor {
+        snapshot_id,
+        upstream_cursor,
+        offset,
+        page_limit,
+        boundary_item_hash,
+    }))
+}
+
+fn thread_history_entry_hash(entry: &Value) -> Result<String, String> {
+    let bytes = serde_json::to_vec(entry)
+        .map_err(|error| format!("Failed to identify thread history item: {error}"))?;
+    Ok(format!("{:x}", Sha256::digest(bytes)))
+}
+
+fn normalize_thread_history_limits(
+    item_limit: Option<u32>,
+    byte_limit: Option<u32>,
+) -> (usize, usize) {
+    let item_limit = item_limit
+        .and_then(|value| usize::try_from(value).ok())
+        .unwrap_or(THREAD_HISTORY_PAGE_DEFAULT_ITEMS)
+        .clamp(1, THREAD_HISTORY_PAGE_MAX_ITEMS);
+    let byte_limit = byte_limit
+        .and_then(|value| usize::try_from(value).ok())
+        .unwrap_or(THREAD_HISTORY_PAGE_DEFAULT_BYTES)
+        .clamp(1, THREAD_HISTORY_PAGE_MAX_BYTES);
+    (item_limit, byte_limit)
+}
+
+fn build_native_thread_history_turns(
+    entries_descending: &[Value],
+    latest_turn_response: &Value,
+) -> Result<Vec<Value>, String> {
+    let mut turns = Vec::<Value>::new();
+    for entry in entries_descending.iter().rev() {
+        let turn_id = entry
+            .get("turnId")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| "Thread item page entry has no turn id".to_string())?;
+        let item = entry
+            .get("item")
+            .cloned()
+            .ok_or_else(|| "Thread item page entry has no item".to_string())?;
+        let belongs_to_last_turn = turns
+            .last()
+            .and_then(|turn| turn.get("id"))
+            .and_then(Value::as_str)
+            == Some(turn_id);
+        if !belongs_to_last_turn {
+            turns.push(json!({ "id": turn_id, "items": [] }));
+        }
+        turns
+            .last_mut()
+            .and_then(|turn| turn.get_mut("items"))
+            .and_then(Value::as_array_mut)
+            .ok_or_else(|| "Failed to build thread history turn".to_string())?
+            .push(item);
+    }
+
+    let Some(latest_turn) = latest_turn_response
+        .pointer("/result/data")
+        .and_then(Value::as_array)
+        .and_then(|turns| turns.first())
+        .cloned()
+    else {
+        return Ok(turns);
+    };
+    let Some(latest_turn_id) = latest_turn
+        .get("id")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+    else {
+        return Ok(turns);
+    };
+    if let Some(existing) = turns
+        .iter_mut()
+        .find(|turn| turn.get("id").and_then(Value::as_str) == Some(latest_turn_id.as_str()))
+    {
+        let items = existing
+            .get("items")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        *existing = latest_turn;
+        if let Some(object) = existing.as_object_mut() {
+            object.insert("items".to_string(), Value::Array(items));
+        }
+    } else {
+        let mut latest_turn = latest_turn;
+        if let Some(object) = latest_turn.as_object_mut() {
+            object.insert("items".to_string(), Value::Array(Vec::new()));
+        }
+        turns.push(latest_turn);
+    }
+    Ok(turns)
+}
+
+fn paginate_native_thread_history_response(
+    mut metadata_response: Value,
+    items_response: &Value,
+    latest_turn_response: &Value,
+    cursor: Option<&NativeThreadHistoryCursor>,
+    item_limit: usize,
+    byte_limit: usize,
+) -> Result<Value, String> {
+    let snapshot_id = thread_history_snapshot_id(&metadata_response);
+    if cursor.is_some_and(|cursor| cursor.snapshot_id != snapshot_id) {
+        return Err("Thread history cursor snapshot does not match".to_string());
+    }
+    let entries = items_response
+        .pointer("/result/data")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "Thread item page response has no data".to_string())?;
+    let offset = if let Some(boundary_item_hash) =
+        cursor.and_then(|cursor| cursor.boundary_item_hash.as_deref())
+    {
+        let mut anchored_offset = None;
+        for (index, entry) in entries.iter().enumerate() {
+            if thread_history_entry_hash(entry)? == boundary_item_hash {
+                anchored_offset = Some(index + 1);
+                break;
+            }
+        }
+        anchored_offset.ok_or_else(|| "Thread history cursor boundary is stale".to_string())?
+    } else {
+        cursor.map_or(0, |cursor| cursor.offset)
+    };
+    if offset > entries.len() {
+        return Err("Thread history cursor is stale".to_string());
+    }
+    let page_limit = cursor.map_or(item_limit, |cursor| cursor.page_limit);
+    let mut consumed = 0usize;
+    let mut byte_count = 0usize;
+    let mut oversized_item = false;
+    for entry in entries[offset..].iter().take(item_limit) {
+        let item = entry
+            .get("item")
+            .ok_or_else(|| "Thread item page entry has no item".to_string())?;
+        let item_bytes = serde_json::to_vec(item)
+            .map_err(|error| format!("Failed to measure thread history item: {error}"))?
+            .len();
+        if consumed > 0 && byte_count.saturating_add(item_bytes) > byte_limit {
+            break;
+        }
+        if consumed == 0 && item_bytes > byte_limit {
+            oversized_item = true;
+        }
+        consumed += 1;
+        byte_count = byte_count.saturating_add(item_bytes);
+    }
+    let selected = entries[offset..offset + consumed].to_vec();
+    let upstream_request_cursor = cursor.and_then(|cursor| cursor.upstream_cursor.clone());
+    let upstream_next_cursor = items_response
+        .pointer("/result/nextCursor")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let next_position = offset + consumed;
+    let next_cursor_state = if next_position < entries.len() {
+        Some(NativeThreadHistoryCursor {
+            snapshot_id: snapshot_id.clone(),
+            upstream_cursor: upstream_request_cursor,
+            offset: next_position,
+            page_limit,
+            boundary_item_hash: selected.last().map(thread_history_entry_hash).transpose()?,
+        })
+    } else {
+        upstream_next_cursor.map(|upstream_cursor| NativeThreadHistoryCursor {
+            snapshot_id: snapshot_id.clone(),
+            upstream_cursor: Some(upstream_cursor),
+            offset: 0,
+            page_limit,
+            boundary_item_hash: None,
+        })
+    };
+    let turns = build_native_thread_history_turns(&selected, latest_turn_response)?;
+    let thread = metadata_response
+        .pointer_mut("/result/thread")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| "Thread metadata response has no thread".to_string())?;
+    thread.insert("turns".to_string(), Value::Array(turns));
+    let next_cursor = next_cursor_state
+        .as_ref()
+        .map(encode_native_thread_history_cursor);
+    metadata_response
+        .as_object_mut()
+        .ok_or_else(|| "Thread metadata response is not an object".to_string())?
+        .insert(
+            "codexMonitorHistoryPage".to_string(),
+            json!({
+                "version": 2,
+                "source": "threadItemsList",
+                "snapshotId": snapshot_id,
+                "nextCursor": next_cursor,
+                "hasMore": next_cursor_state.is_some(),
+                "itemCount": consumed,
+                "byteCount": byte_count,
+                "oversizedItem": oversized_item,
+                "pageStart": Value::Null,
+                "pageEnd": Value::Null,
+                "totalItems": Value::Null,
+            }),
+        );
+    Ok(metadata_response)
+}
+
+pub(crate) fn paginate_thread_history_response(
+    mut response: Value,
+    cursor: Option<String>,
+    item_limit: Option<u32>,
+    byte_limit: Option<u32>,
+) -> Result<Value, String> {
+    let snapshot_id = thread_history_snapshot_id(&response);
+    let (item_limit, byte_limit) = normalize_thread_history_limits(item_limit, byte_limit);
+
+    let (start, end, total_items, byte_count, oversized_item) = {
+        let turns = response
+            .pointer("/result/thread/turns")
+            .and_then(Value::as_array)
+            .ok_or_else(|| "Thread history response has no turns".to_string())?;
+        let items = turns
+            .iter()
+            .flat_map(|turn| {
+                turn.get("items")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+            })
+            .collect::<Vec<_>>();
+        let total_items = items.len();
+        let end = match cursor.as_deref() {
+            Some(cursor) => {
+                let (cursor_snapshot_id, before) = decode_thread_history_cursor(cursor)?;
+                if cursor_snapshot_id != snapshot_id {
+                    return Err("Thread history cursor snapshot does not match".to_string());
+                }
+                if before > total_items {
+                    return Err("Thread history cursor is stale".to_string());
+                }
+                before
+            }
+            None => total_items,
+        };
+        let mut start = end;
+        let mut byte_count = 0usize;
+        let mut oversized_item = false;
+        for item in items[..end].iter().rev().take(item_limit) {
+            let item_bytes = serde_json::to_vec(item)
+                .map_err(|error| format!("Failed to measure thread history item: {error}"))?
+                .len();
+            if start < end && byte_count.saturating_add(item_bytes) > byte_limit {
+                break;
+            }
+            if start == end && item_bytes > byte_limit {
+                oversized_item = true;
+            }
+            byte_count = byte_count.saturating_add(item_bytes);
+            start -= 1;
+        }
+        (start, end, total_items, byte_count, oversized_item)
+    };
+
+    let turns = response
+        .pointer_mut("/result/thread/turns")
+        .and_then(Value::as_array_mut)
+        .ok_or_else(|| "Thread history response has no turns".to_string())?;
+    let latest_turn_index = cursor
+        .is_none()
+        .then(|| turns.len().checked_sub(1))
+        .flatten();
+    let mut global_index = 0usize;
+    for turn in turns.iter_mut() {
+        let Some(items) = turn.get_mut("items").and_then(Value::as_array_mut) else {
+            continue;
+        };
+        let turn_start = global_index;
+        let turn_end = turn_start + items.len();
+        global_index = turn_end;
+        let keep_start = start.saturating_sub(turn_start).min(items.len());
+        let keep_end = end.saturating_sub(turn_start).min(items.len());
+        *items = if keep_start < keep_end {
+            items[keep_start..keep_end].to_vec()
+        } else {
+            Vec::new()
+        };
+    }
+    let mut turn_index = 0usize;
+    turns.retain(|turn| {
+        let keep = turn_index == latest_turn_index.unwrap_or(usize::MAX)
+            || turn
+                .get("items")
+                .and_then(Value::as_array)
+                .is_some_and(|items| !items.is_empty());
+        turn_index += 1;
+        keep
+    });
+
+    let has_more = start > 0;
+    let next_cursor = has_more.then(|| encode_thread_history_cursor(&snapshot_id, start));
+    let page = json!({
+        "version": 1,
+        "snapshotId": snapshot_id,
+        "nextCursor": next_cursor,
+        "hasMore": has_more,
+        "itemCount": end.saturating_sub(start),
+        "byteCount": byte_count,
+        "oversizedItem": oversized_item,
+        "pageStart": start,
+        "pageEnd": end,
+        "totalItems": total_items
+    });
+    response
+        .as_object_mut()
+        .ok_or_else(|| "Thread history response is not an object".to_string())?
+        .insert("codexMonitorHistoryPage".to_string(), page);
+    Ok(response)
+}
+
+async fn try_read_native_thread_history_page(
+    session: &WorkspaceSession,
+    workspace_id: &str,
+    thread_id: &str,
+    cursor: Option<&NativeThreadHistoryCursor>,
+    item_limit: usize,
+    byte_limit: usize,
+) -> Result<Option<Value>, String> {
+    let page_limit = cursor.map_or(item_limit, |cursor| cursor.page_limit);
+    let items_response = session
+        .send_request_for_workspace(
+            workspace_id,
+            "thread/items/list",
+            json!({
+                "threadId": thread_id,
+                "cursor": cursor.and_then(|cursor| cursor.upstream_cursor.clone()),
+                "limit": page_limit,
+                "sortDirection": "desc",
+            }),
+        )
+        .await?;
+    if let Some(message) = rpc_error_message(&items_response) {
+        if cursor.is_some() {
+            return Err(format!(
+                "Native thread history pagination failed: {message}"
+            ));
+        }
+        return Ok(None);
+    }
+
+    let metadata_response = session
+        .send_request_for_workspace(
+            workspace_id,
+            "thread/read",
+            build_read_thread_metadata_params(thread_id),
+        )
+        .await?;
+    if let Some(message) = rpc_error_message(&metadata_response) {
+        return Err(message.to_string());
+    }
+
+    let latest_turn_response = session
+        .send_request_for_workspace(
+            workspace_id,
+            "thread/turns/list",
+            json!({
+                "threadId": thread_id,
+                "cursor": Value::Null,
+                "limit": 1,
+                "sortDirection": "desc",
+            }),
+        )
+        .await?;
+    if let Some(message) = rpc_error_message(&latest_turn_response) {
+        if cursor.is_some() {
+            return Err(format!("Native thread turn pagination failed: {message}"));
+        }
+        return Ok(None);
+    }
+
+    paginate_native_thread_history_response(
+        metadata_response,
+        &items_response,
+        &latest_turn_response,
+        cursor,
+        item_limit,
+        byte_limit,
+    )
+    .map(Some)
+}
+
+pub(crate) async fn read_thread_page_with_session_core(
+    session: &WorkspaceSession,
+    workspace_id: String,
+    thread_id: String,
+    cursor: Option<String>,
+    item_limit: Option<u32>,
+    byte_limit: Option<u32>,
+) -> Result<Value, String> {
+    let (normalized_item_limit, normalized_byte_limit) =
+        normalize_thread_history_limits(item_limit, byte_limit);
+    let native_cursor = cursor
+        .as_deref()
+        .map(decode_native_thread_history_cursor)
+        .transpose()?
+        .flatten();
+    if cursor.is_none() || native_cursor.is_some() {
+        if let Some(response) = try_read_native_thread_history_page(
+            session,
+            &workspace_id,
+            &thread_id,
+            native_cursor.as_ref(),
+            normalized_item_limit,
+            normalized_byte_limit,
+        )
+        .await?
+        {
+            return Ok(response);
+        }
+    }
+    let response = read_thread_with_session_core(session, workspace_id, thread_id).await?;
+    paginate_thread_history_response(response, cursor, item_limit, byte_limit)
 }
 
 async fn send_enriched_thread_history_request(
@@ -2303,6 +2842,310 @@ base_url = "{base_url}"
 
         assert_eq!(params["threadId"], json!("thread-1"));
         assert_eq!(params["includeTurns"], json!(true));
+        assert_eq!(
+            build_read_thread_metadata_params("thread-1"),
+            json!({ "threadId": "thread-1", "includeTurns": false })
+        );
+    }
+
+    #[test]
+    fn thread_history_pages_walk_backward_without_overlap() {
+        let response = json!({
+            "result": {
+                "thread": {
+                    "id": "thread-1",
+                    "path": "D:/sessions/rollout-thread-1.jsonl",
+                    "turns": [
+                        { "id": "turn-1", "items": [
+                            { "id": "item-1" },
+                            { "id": "item-2" },
+                            { "id": "item-3" }
+                        ] },
+                        { "id": "turn-2", "items": [
+                            { "id": "item-4" },
+                            { "id": "item-5" }
+                        ] }
+                    ]
+                }
+            }
+        });
+
+        let latest = paginate_thread_history_response(response.clone(), None, Some(2), None)
+            .expect("latest page");
+        let latest_ids = latest["result"]["thread"]["turns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|turn| turn["items"].as_array().unwrap())
+            .map(|item| item["id"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(latest_ids, vec!["item-4", "item-5"]);
+        assert_eq!(latest["codexMonitorHistoryPage"]["hasMore"], json!(true));
+
+        let cursor = latest["codexMonitorHistoryPage"]["nextCursor"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let older = paginate_thread_history_response(response, Some(cursor), Some(2), None)
+            .expect("older page");
+        let older_ids = older["result"]["thread"]["turns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|turn| turn["items"].as_array().unwrap())
+            .map(|item| item["id"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(older_ids, vec!["item-2", "item-3"]);
+    }
+
+    #[test]
+    fn thread_history_page_enforces_byte_budget_after_one_item() {
+        let response = json!({
+            "result": { "thread": {
+                "id": "thread-1",
+                "turns": [{ "id": "turn-1", "items": [
+                    { "id": "item-1", "text": "a".repeat(80) },
+                    { "id": "item-2", "text": "b".repeat(80) }
+                ] }]
+            } }
+        });
+
+        let page = paginate_thread_history_response(response, None, Some(10), Some(100))
+            .expect("bounded page");
+
+        assert_eq!(page["codexMonitorHistoryPage"]["itemCount"], json!(1));
+        assert_eq!(page["codexMonitorHistoryPage"]["hasMore"], json!(true));
+    }
+
+    #[test]
+    fn initial_thread_history_page_preserves_latest_empty_turn_metadata() {
+        let response = json!({
+            "result": { "thread": {
+                "id": "thread-1",
+                "turns": [
+                    { "id": "turn-1", "status": "completed", "items": [
+                        { "id": "item-1" }
+                    ] },
+                    { "id": "turn-2", "status": "inProgress", "items": [] }
+                ]
+            } }
+        });
+
+        let page =
+            paginate_thread_history_response(response, None, Some(1), None).expect("initial page");
+        let turns = page["result"]["thread"]["turns"].as_array().unwrap();
+
+        assert_eq!(turns.len(), 2);
+        assert_eq!(turns[1]["id"], json!("turn-2"));
+        assert_eq!(turns[1]["status"], json!("inProgress"));
+        assert_eq!(turns[1]["items"], json!([]));
+    }
+
+    #[test]
+    fn native_thread_history_page_resumes_inside_an_upstream_page() {
+        let metadata = json!({
+            "result": { "thread": {
+                "id": "thread-1",
+                "path": "D:/sessions/rollout-thread-1.jsonl"
+            } }
+        });
+        let first_item = json!({ "type": "agentMessage", "id": "item-4", "text": "x".repeat(80) });
+        let first_item_bytes = serde_json::to_vec(&first_item).unwrap().len();
+        let items = json!({
+            "result": {
+                "data": [
+                    { "turnId": "turn-2", "item": first_item },
+                    { "turnId": "turn-2", "item": {
+                        "type": "agentMessage", "id": "item-3", "text": "y".repeat(80)
+                    } },
+                    { "turnId": "turn-1", "item": {
+                        "type": "userMessage", "id": "item-2", "content": []
+                    } }
+                ],
+                "nextCursor": "upstream-older"
+            }
+        });
+        let latest_turn = json!({
+            "result": { "data": [{
+                "id": "turn-2", "status": "completed", "items": []
+            }] }
+        });
+
+        let first = paginate_native_thread_history_response(
+            metadata.clone(),
+            &items,
+            &latest_turn,
+            None,
+            3,
+            first_item_bytes,
+        )
+        .expect("first native page");
+        let first_ids = first["result"]["thread"]["turns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|turn| turn["items"].as_array().unwrap())
+            .map(|item| item["id"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(first_ids, vec!["item-4"]);
+        let cursor = first["codexMonitorHistoryPage"]["nextCursor"]
+            .as_str()
+            .unwrap();
+        let cursor = decode_native_thread_history_cursor(cursor)
+            .unwrap()
+            .expect("native cursor");
+        assert_eq!(cursor.upstream_cursor, None);
+        assert_eq!(cursor.offset, 1);
+        assert_eq!(cursor.page_limit, 3);
+        assert!(cursor.boundary_item_hash.is_some());
+
+        let shifted_items = json!({
+            "result": {
+                "data": [
+                    { "turnId": "turn-3", "item": {
+                        "type": "agentMessage", "id": "item-5", "text": "new"
+                    } },
+                    { "turnId": "turn-2", "item": {
+                        "type": "agentMessage", "id": "item-4", "text": "x".repeat(80)
+                    } },
+                    { "turnId": "turn-2", "item": {
+                        "type": "agentMessage", "id": "item-3", "text": "y".repeat(80)
+                    } },
+                    { "turnId": "turn-1", "item": {
+                        "type": "userMessage", "id": "item-2", "content": []
+                    } }
+                ],
+                "nextCursor": "upstream-older"
+            }
+        });
+
+        let second = paginate_native_thread_history_response(
+            metadata,
+            &shifted_items,
+            &latest_turn,
+            Some(&cursor),
+            1,
+            THREAD_HISTORY_PAGE_MAX_BYTES,
+        )
+        .expect("second native page");
+        let second_ids = second["result"]["thread"]["turns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|turn| turn["items"].as_array().unwrap())
+            .map(|item| item["id"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(second_ids, vec!["item-3"]);
+    }
+
+    #[test]
+    fn native_thread_history_page_carries_the_upstream_cursor_forward() {
+        let metadata = json!({
+            "result": { "thread": { "id": "thread-1" } }
+        });
+        let items = json!({
+            "result": {
+                "data": [{ "turnId": "turn-1", "item": {
+                    "type": "agentMessage", "id": "item-1", "text": "done"
+                } }],
+                "nextCursor": "upstream-older"
+            }
+        });
+
+        let page = paginate_native_thread_history_response(
+            metadata,
+            &items,
+            &json!({ "result": { "data": [] } }),
+            None,
+            1,
+            THREAD_HISTORY_PAGE_MAX_BYTES,
+        )
+        .expect("native page");
+        let cursor = page["codexMonitorHistoryPage"]["nextCursor"]
+            .as_str()
+            .unwrap();
+        let cursor = decode_native_thread_history_cursor(cursor)
+            .unwrap()
+            .expect("native cursor");
+
+        assert_eq!(cursor.upstream_cursor.as_deref(), Some("upstream-older"));
+        assert_eq!(cursor.offset, 0);
+        assert_eq!(cursor.boundary_item_hash, None);
+    }
+
+    #[test]
+    fn native_thread_history_page_preserves_latest_empty_turn_metadata() {
+        let page = paginate_native_thread_history_response(
+            json!({ "result": { "thread": { "id": "thread-1" } } }),
+            &json!({ "result": { "data": [{
+                "turnId": "turn-1",
+                "item": { "type": "agentMessage", "id": "item-1", "text": "done" }
+            }], "nextCursor": null } }),
+            &json!({ "result": { "data": [{
+                "id": "turn-2", "status": "inProgress", "items": []
+            }] } }),
+            None,
+            10,
+            THREAD_HISTORY_PAGE_MAX_BYTES,
+        )
+        .expect("native page");
+        let turns = page["result"]["thread"]["turns"].as_array().unwrap();
+
+        assert_eq!(turns.len(), 2);
+        assert_eq!(turns[1]["id"], json!("turn-2"));
+        assert_eq!(turns[1]["status"], json!("inProgress"));
+        assert_eq!(turns[1]["items"], json!([]));
+    }
+
+    #[test]
+    fn native_thread_history_page_rejects_a_cursor_from_another_thread() {
+        let first = json!({ "result": { "thread": { "id": "thread-1" } } });
+        let second = json!({ "result": { "thread": { "id": "thread-2" } } });
+        let cursor = NativeThreadHistoryCursor {
+            snapshot_id: thread_history_snapshot_id(&first),
+            upstream_cursor: None,
+            offset: 0,
+            page_limit: 10,
+            boundary_item_hash: None,
+        };
+
+        let error = paginate_native_thread_history_response(
+            second,
+            &json!({ "result": { "data": [] } }),
+            &json!({ "result": { "data": [] } }),
+            Some(&cursor),
+            10,
+            THREAD_HISTORY_PAGE_MAX_BYTES,
+        )
+        .expect_err("cross-thread native cursor must fail");
+
+        assert!(error.contains("snapshot does not match"));
+    }
+
+    #[test]
+    fn thread_history_page_rejects_a_cursor_from_another_thread() {
+        let first = json!({
+            "result": { "thread": {
+                "id": "thread-1",
+                "turns": [{ "items": [{ "id": "item-1" }, { "id": "item-2" }] }]
+            } }
+        });
+        let second = json!({
+            "result": { "thread": {
+                "id": "thread-2",
+                "turns": [{ "items": [{ "id": "item-1" }, { "id": "item-2" }] }]
+            } }
+        });
+        let page = paginate_thread_history_response(first, None, Some(1), None).unwrap();
+        let cursor = page["codexMonitorHistoryPage"]["nextCursor"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let error = paginate_thread_history_response(second, Some(cursor), Some(1), None)
+            .expect_err("cross-thread cursor must fail");
+
+        assert!(error.contains("snapshot does not match"));
     }
 
     #[test]

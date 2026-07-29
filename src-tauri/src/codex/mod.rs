@@ -293,6 +293,79 @@ pub(crate) async fn read_thread(
 }
 
 #[tauri::command]
+pub(crate) async fn read_thread_page(
+    workspace_id: String,
+    thread_id: String,
+    cursor: Option<String>,
+    item_limit: Option<u32>,
+    byte_limit: Option<u32>,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<Value, String> {
+    if remote_backend::is_remote_mode(&*state).await {
+        return remote_backend::call_remote(
+            &*state,
+            app,
+            "read_thread_page",
+            json!({
+                "workspaceId": workspace_id,
+                "threadId": thread_id,
+                "cursor": cursor,
+                "itemLimit": item_limit,
+                "byteLimit": byte_limit
+            }),
+        )
+        .await;
+    }
+
+    let active_session =
+        crate::shared::session_manager_core::runtime::active_execution_runtime_for_thread(
+            &state.sessions,
+            &state.session_source_runtimes,
+            &state.source_thread_runtimes,
+            &workspace_id,
+            &thread_id,
+        )
+        .await;
+    if let Some(session) = active_session {
+        let response = codex_core::read_thread_page_with_session_core(
+            &session,
+            workspace_id,
+            thread_id,
+            cursor,
+            item_limit,
+            byte_limit,
+        )
+        .await?;
+        return Ok(codex_core::annotate_thread_read_authority(
+            response,
+            "execution",
+        ));
+    }
+
+    let session = crate::session_manager::history_runtime_for_thread(
+        &workspace_id,
+        &thread_id,
+        &state,
+        app.clone(),
+    )
+    .await?;
+    let response = codex_core::read_thread_page_with_session_core(
+        &session,
+        workspace_id,
+        thread_id,
+        cursor,
+        item_limit,
+        byte_limit,
+    )
+    .await?;
+    Ok(codex_core::annotate_thread_read_authority(
+        response,
+        "history-no-active-execution",
+    ))
+}
+
+#[tauri::command]
 pub(crate) async fn turn_execution_summary_get(
     mut input: TurnExecutionSummaryQuery,
     state: State<'_, AppState>,
