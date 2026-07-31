@@ -1,4 +1,5 @@
 use chrono::{DateTime, Datelike, Duration, Local, TimeZone, Utc};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
@@ -13,7 +14,7 @@ use crate::types::{
     WorkspaceEntry,
 };
 
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone, Copy, Serialize, Deserialize)]
 struct DailyTotals {
     input: i64,
     cached: i64,
@@ -29,11 +30,41 @@ struct UsageTotals {
     output: i64,
 }
 
+#[derive(Default, Serialize, Deserialize)]
+struct LocalUsageIndex {
+    version: u32,
+    files: HashMap<String, CachedUsageFile>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct CachedUsageFile {
+    modified_ms: i64,
+    len: u64,
+    cwd: Option<String>,
+    daily: HashMap<String, DailyTotals>,
+    model_totals: HashMap<String, i64>,
+    source_totals: HashMap<String, i64>,
+}
+
+struct UsageFileScan {
+    cache: CachedUsageFile,
+    rolling_hour_tokens: i64,
+}
+
+#[derive(Clone, Copy)]
+struct UsageFileMetadata {
+    modified_ms: i64,
+    len: u64,
+}
+
 const MAX_ACTIVITY_GAP_MS: i64 = 2 * 60 * 1000;
 const ONE_HOUR_MS: i64 = 60 * 60 * 1000;
+const LOCAL_USAGE_INDEX_VERSION: u32 = 1;
+const LOCAL_USAGE_INDEX_FILE: &str = "local-usage-index-v1.json";
 
 pub(crate) async fn local_usage_snapshot_core(
     workspaces: &Mutex<HashMap<String, WorkspaceEntry>>,
+    data_dir: Option<PathBuf>,
     days: Option<u32>,
     workspace_path: Option<String>,
 ) -> Result<LocalUsageSnapshot, String> {
@@ -53,7 +84,16 @@ pub(crate) async fn local_usage_snapshot_core(
         resolve_sessions_roots(&workspaces, workspace_path.as_deref())
     };
     let snapshot = tokio::task::spawn_blocking(move || {
-        scan_local_usage(days, workspace_path.as_deref(), &sessions_roots)
+        if let Some(data_dir) = data_dir {
+            scan_local_usage_with_index(
+                days,
+                workspace_path.as_deref(),
+                &sessions_roots,
+                &data_dir.join(LOCAL_USAGE_INDEX_FILE),
+            )
+        } else {
+            scan_local_usage(days, workspace_path.as_deref(), &sessions_roots)
+        }
     })
     .await
     .map_err(|err| err.to_string())??;
@@ -147,6 +187,255 @@ fn scan_local_usage(
         source_totals,
         rolling_hour_tokens,
     ))
+}
+
+fn scan_local_usage_with_index(
+    days: u32,
+    workspace_path: Option<&Path>,
+    sessions_roots: &[PathBuf],
+    index_path: &Path,
+) -> Result<LocalUsageSnapshot, String> {
+    let updated_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+    scan_local_usage_with_index_at(days, workspace_path, sessions_roots, index_path, updated_at)
+}
+
+fn scan_local_usage_with_index_at(
+    days: u32,
+    workspace_path: Option<&Path>,
+    sessions_roots: &[PathBuf],
+    index_path: &Path,
+    updated_at: i64,
+) -> Result<LocalUsageSnapshot, String> {
+    let day_keys = make_day_keys(days);
+    let mut daily: HashMap<String, DailyTotals> = day_keys
+        .iter()
+        .map(|key| (key.clone(), DailyTotals::default()))
+        .collect();
+    let mut model_totals: HashMap<String, i64> = HashMap::new();
+    let mut source_totals: HashMap<String, i64> = HashMap::new();
+    let mut rolling_hour_tokens = 0;
+    let rolling_hour_start_ms = updated_at - ONE_HOUR_MS;
+
+    if sessions_roots.is_empty() {
+        return Ok(build_snapshot(
+            updated_at,
+            day_keys,
+            daily,
+            HashMap::new(),
+            HashMap::new(),
+            rolling_hour_tokens,
+        ));
+    }
+
+    let cached_index = read_local_usage_index(index_path);
+    let mut next_index = LocalUsageIndex {
+        version: LOCAL_USAGE_INDEX_VERSION,
+        files: HashMap::new(),
+    };
+
+    for path in collect_usage_files(days, sessions_roots) {
+        let Some(metadata) = usage_file_metadata(&path) else {
+            continue;
+        };
+        let cache_key = usage_file_cache_key(&path);
+        let cached = cached_index.files.get(&cache_key);
+        let use_cached = cached.is_some_and(|entry| {
+            entry.modified_ms == metadata.modified_ms
+                && entry.len == metadata.len
+                && metadata.modified_ms < rolling_hour_start_ms
+        });
+
+        if use_cached {
+            let entry = cached.expect("checked cached entry").clone();
+            if cached_file_matches_workspace(&entry, workspace_path) {
+                apply_cached_usage_file(&entry, &mut daily, &mut model_totals, &mut source_totals);
+            }
+            next_index.files.insert(cache_key, entry);
+            continue;
+        }
+
+        let scan = scan_file_for_index(&path, rolling_hour_start_ms, metadata)?;
+        if cached_file_matches_workspace(&scan.cache, workspace_path) {
+            apply_cached_usage_file(
+                &scan.cache,
+                &mut daily,
+                &mut model_totals,
+                &mut source_totals,
+            );
+            rolling_hour_tokens += scan.rolling_hour_tokens;
+        }
+        next_index.files.insert(cache_key, scan.cache);
+    }
+
+    write_local_usage_index(index_path, &next_index);
+
+    Ok(build_snapshot(
+        updated_at,
+        day_keys,
+        daily,
+        model_totals,
+        source_totals,
+        rolling_hour_tokens,
+    ))
+}
+
+fn collect_usage_files(days: u32, sessions_roots: &[PathBuf]) -> Vec<PathBuf> {
+    let day_keys = make_day_keys(days);
+    let mut files = Vec::new();
+    let mut seen = HashSet::new();
+
+    for root in sessions_roots {
+        collect_usage_files_in_directory(root, &mut files, &mut seen);
+        for day_key in &day_keys {
+            collect_usage_files_in_directory(
+                &day_dir_for_key(root, day_key),
+                &mut files,
+                &mut seen,
+            );
+        }
+    }
+
+    files
+}
+
+fn collect_usage_files_in_directory(
+    directory: &Path,
+    files: &mut Vec<PathBuf>,
+    seen: &mut HashSet<PathBuf>,
+) {
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("jsonl") {
+            continue;
+        }
+        if seen.insert(path.clone()) {
+            files.push(path);
+        }
+    }
+}
+
+fn usage_file_metadata(path: &Path) -> Option<UsageFileMetadata> {
+    let metadata = std::fs::metadata(path).ok()?;
+    let modified_ms = metadata
+        .modified()
+        .ok()
+        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_millis() as i64)
+        .unwrap_or_default();
+    Some(UsageFileMetadata {
+        modified_ms,
+        len: metadata.len(),
+    })
+}
+
+fn usage_file_cache_key(path: &Path) -> String {
+    path.to_string_lossy().to_string()
+}
+
+fn read_local_usage_index(path: &Path) -> LocalUsageIndex {
+    let Ok(data) = std::fs::read_to_string(path) else {
+        return LocalUsageIndex::default();
+    };
+    let Ok(index) = serde_json::from_str::<LocalUsageIndex>(&data) else {
+        return LocalUsageIndex::default();
+    };
+    if index.version == LOCAL_USAGE_INDEX_VERSION {
+        index
+    } else {
+        LocalUsageIndex::default()
+    }
+}
+
+fn write_local_usage_index(path: &Path, index: &LocalUsageIndex) {
+    let Some(parent) = path.parent() else {
+        return;
+    };
+    if std::fs::create_dir_all(parent).is_err() {
+        return;
+    }
+    let Ok(data) = serde_json::to_string(index) else {
+        return;
+    };
+    let _ = std::fs::write(path, data);
+}
+
+fn cached_file_matches_workspace(entry: &CachedUsageFile, workspace_path: Option<&Path>) -> bool {
+    match workspace_path {
+        Some(workspace_path) => entry
+            .cwd
+            .as_deref()
+            .is_some_and(|cwd| path_matches_workspace(cwd, workspace_path)),
+        None => true,
+    }
+}
+
+fn apply_cached_usage_file(
+    entry: &CachedUsageFile,
+    daily: &mut HashMap<String, DailyTotals>,
+    model_totals: &mut HashMap<String, i64>,
+    source_totals: &mut HashMap<String, i64>,
+) {
+    for (day_key, totals) in &entry.daily {
+        let Some(target) = daily.get_mut(day_key) else {
+            continue;
+        };
+        target.input += totals.input;
+        target.cached += totals.cached;
+        target.output += totals.output;
+        target.agent_ms += totals.agent_ms;
+        target.agent_runs += totals.agent_runs;
+    }
+    for (model, tokens) in &entry.model_totals {
+        *model_totals.entry(model.clone()).or_insert(0) += tokens;
+    }
+    for (source, tokens) in &entry.source_totals {
+        *source_totals.entry(source.clone()).or_insert(0) += tokens;
+    }
+}
+
+fn scan_file_for_index(
+    path: &Path,
+    rolling_hour_start_ms: i64,
+    metadata: UsageFileMetadata,
+) -> Result<UsageFileScan, String> {
+    let day_keys = make_day_keys(90);
+    let mut daily: HashMap<String, DailyTotals> = day_keys
+        .iter()
+        .map(|key| (key.clone(), DailyTotals::default()))
+        .collect();
+    let mut model_totals = HashMap::new();
+    let mut source_totals = HashMap::new();
+    let mut rolling_hour_tokens = 0;
+    let mut cwd = None;
+
+    scan_file_with_sources(
+        path,
+        &mut daily,
+        &mut model_totals,
+        &mut source_totals,
+        &mut rolling_hour_tokens,
+        rolling_hour_start_ms,
+        None,
+        Some(&mut cwd),
+    )?;
+
+    Ok(UsageFileScan {
+        cache: CachedUsageFile {
+            modified_ms: metadata.modified_ms,
+            len: metadata.len,
+            cwd,
+            daily,
+            model_totals,
+            source_totals,
+        },
+        rolling_hour_tokens,
+    })
 }
 
 fn build_snapshot(
@@ -283,6 +572,7 @@ fn scan_usage_directory(
             rolling_hour_tokens,
             rolling_hour_start_ms,
             workspace_path,
+            None,
         )?;
     }
     Ok(())
@@ -305,6 +595,7 @@ fn scan_file(
         rolling_hour_tokens,
         rolling_hour_start_ms,
         workspace_path,
+        None,
     )
 }
 
@@ -316,6 +607,7 @@ fn scan_file_with_sources(
     rolling_hour_tokens: &mut i64,
     rolling_hour_start_ms: i64,
     workspace_path: Option<&Path>,
+    mut observed_cwd: Option<&mut Option<String>>,
 ) -> Result<(), String> {
     let file = match File::open(path) {
         Ok(file) => file,
@@ -352,6 +644,11 @@ fn scan_file_with_sources(
 
         if entry_type == "session_meta" || entry_type == "turn_context" {
             if let Some(cwd) = extract_cwd(&value) {
+                if let Some(cwd_slot) = observed_cwd.as_deref_mut() {
+                    if cwd_slot.is_none() {
+                        *cwd_slot = Some(cwd.clone());
+                    }
+                }
                 if let Some(filter) = workspace_path {
                     matches_workspace = path_matches_workspace(&cwd, filter);
                     match_known = true;
@@ -1334,6 +1631,91 @@ mod tests {
         assert_eq!(day.input_tokens, 8);
         assert_eq!(day.output_tokens, 3);
         assert_eq!(snapshot.totals.last30_days_tokens, 11);
+    }
+
+    #[test]
+    fn indexed_scan_uses_unchanged_old_file_cache_and_workspace_filter() {
+        let root = make_temp_sessions_root();
+        let day_key = make_day_keys(1)
+            .pop()
+            .unwrap_or_else(|| Local::now().format("%Y-%m-%d").to_string());
+        let path = root.join("rollout-cached.jsonl");
+        let mut file = File::create(&path).expect("create session");
+        writeln!(
+            file,
+            "{}",
+            r#"{"type":"session_meta","payload":{"id":"thread-cached","cwd":"/repo","model_provider":"provider-live"}}"#
+        )
+        .expect("write metadata");
+        writeln!(
+            file,
+            "{}",
+            format!(
+                r#"{{"timestamp":"{}","type":"event_msg","payload":{{"type":"token_count","info":{{"last_token_usage":{{"input_tokens":10,"output_tokens":5}}}}}}}}"#,
+                Utc::now().to_rfc3339()
+            )
+        )
+        .expect("write usage");
+        drop(file);
+
+        let metadata = usage_file_metadata(&path).expect("metadata");
+        let index_path = root.join("index.json");
+        let mut daily = HashMap::new();
+        daily.insert(
+            day_key,
+            DailyTotals {
+                input: 90,
+                output: 9,
+                ..DailyTotals::default()
+            },
+        );
+        let mut files = HashMap::new();
+        files.insert(
+            usage_file_cache_key(&path),
+            CachedUsageFile {
+                modified_ms: metadata.modified_ms,
+                len: metadata.len,
+                cwd: Some("/repo".to_string()),
+                daily,
+                model_totals: HashMap::new(),
+                source_totals: HashMap::new(),
+            },
+        );
+        write_local_usage_index(
+            &index_path,
+            &LocalUsageIndex {
+                version: LOCAL_USAGE_INDEX_VERSION,
+                files,
+            },
+        );
+
+        let updated_at = metadata.modified_ms + ONE_HOUR_MS + 1;
+        let all_snapshot =
+            scan_local_usage_with_index_at(1, None, &[root.clone()], &index_path, updated_at)
+                .expect("scan all");
+        assert_eq!(all_snapshot.totals.last30_days_tokens, 99);
+
+        let workspace_snapshot = scan_local_usage_with_index_at(
+            1,
+            Some(Path::new("/repo")),
+            &[root.clone()],
+            &index_path,
+            updated_at,
+        )
+        .expect("scan workspace");
+        assert_eq!(workspace_snapshot.totals.last30_days_tokens, 99);
+
+        let other_workspace_snapshot = scan_local_usage_with_index_at(
+            1,
+            Some(Path::new("/other")),
+            &[root.clone()],
+            &index_path,
+            updated_at,
+        )
+        .expect("scan other workspace");
+        assert_eq!(other_workspace_snapshot.totals.last30_days_tokens, 0);
+
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

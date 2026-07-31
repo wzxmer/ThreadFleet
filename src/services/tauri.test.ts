@@ -4,6 +4,8 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import * as notification from "@tauri-apps/plugin-notification";
 import {
   exportMarkdownFile,
+  pickConversationExportPath,
+  writeBinaryFile,
   addWorkspace,
   archiveManagedSessions,
   cleanupManagedSessionsNow,
@@ -92,6 +94,10 @@ import {
   applyWindowsInstallerRepair,
   rollbackWindowsInstallerRepair,
   recoverWindowsInstallerRepair,
+  executeWindowsInstallerMigration,
+  prepareWindowsInstallerMigration,
+  getWindowsInstallerMigrationCapability,
+  getWindowsInstallerMigrationRecoveryStatus,
   saveComposerImages,
   promoteComposerImages,
   generateAgentDescription,
@@ -489,6 +495,49 @@ describe("tauri invoke wrappers", () => {
     expect(invokeMock).toHaveBeenCalledWith("recover_windows_installer_repair");
   });
 
+  it("executes Windows installer migration without frontend authority", async () => {
+    const invokeMock = vi.mocked(invoke);
+    await executeWindowsInstallerMigration();
+
+    expect(invokeMock).toHaveBeenCalledWith("execute_windows_installer_migration");
+  });
+
+  it("prepares installer migration with artifact metadata only", async () => {
+    const invokeMock = vi.mocked(invoke);
+    const input = {
+      version: "1.2.3",
+      artifactPath: "C:\\staging\\ThreadFleet.msi",
+      artifactSize: 10,
+      artifactSha256: "a".repeat(64),
+    };
+
+    await prepareWindowsInstallerMigration(input);
+
+    expect(invokeMock).toHaveBeenCalledWith("prepare_windows_installer_migration", {
+      input,
+    });
+  });
+
+  it("reads the local Windows installer migration capability without arguments", async () => {
+    const invokeMock = vi.mocked(invoke);
+
+    await getWindowsInstallerMigrationCapability();
+
+    expect(invokeMock).toHaveBeenCalledWith(
+      "windows_installer_migration_capability",
+    );
+  });
+
+  it("reads backend-bound installer migration recovery status without arguments", async () => {
+    const invokeMock = vi.mocked(invoke);
+
+    await getWindowsInstallerMigrationRecoveryStatus();
+
+    expect(invokeMock).toHaveBeenCalledWith(
+      "windows_installer_migration_recovery_status",
+    );
+  });
+
   it("returns an empty list when workspace picker is cancelled", async () => {
     const openMock = vi.mocked(open);
     openMock.mockResolvedValueOnce(null);
@@ -814,6 +863,29 @@ describe("tauri invoke wrappers", () => {
     });
   });
 
+  it("maps binary conversation export save and write", async () => {
+    const saveMock = vi.mocked(save);
+    const invokeMock = vi.mocked(invoke);
+    saveMock.mockResolvedValueOnce("/tmp/export.pdf");
+
+    await expect(
+      pickConversationExportPath("pdf", "ThreadFleet-20260729-010203.pdf", "Export"),
+    ).resolves.toBe("/tmp/export.pdf");
+    await writeBinaryFile("/tmp/export.pdf", new Uint8Array([1, 2, 3]));
+
+    expect(saveMock).toHaveBeenCalledWith({
+      title: "Export",
+      defaultPath: "ThreadFleet-20260729-010203.pdf",
+      filters: [{ name: "PDF", extensions: ["pdf"] }],
+    });
+    expect(invokeMock).toHaveBeenCalledWith("write_binary_file_chunk", {
+      path: "/tmp/export.pdf",
+      content: [1, 2, 3],
+      offset: 0,
+      totalLength: 3,
+    });
+  });
+
   it("maps pagination limits for read_thread_page", async () => {
     const invokeMock = vi.mocked(invoke);
     invokeMock.mockResolvedValueOnce({});
@@ -826,6 +898,59 @@ describe("tauri invoke wrappers", () => {
       cursor: "cursor-1",
       itemLimit: 100,
       byteLimit: 4_194_304,
+    });
+  });
+
+  it("writes large binary exports in ordered chunks and reports progress", async () => {
+    const invokeMock = vi.mocked(invoke);
+    const content = new Uint8Array((1024 * 1024) + 2);
+    content[0] = 1;
+    content[1024 * 1024] = 2;
+    content[content.length - 1] = 3;
+    const progress: Array<[number, number]> = [];
+
+    await writeBinaryFile("/tmp/export.pdf", content, {
+      onProgress: (completed, total) => progress.push([completed, total]),
+    });
+
+    expect(invokeMock).toHaveBeenCalledTimes(2);
+    const firstChunk = invokeMock.mock.calls[0]?.[1] as {
+      content: number[];
+      offset: number;
+      totalLength: number;
+    };
+    const secondChunk = invokeMock.mock.calls[1]?.[1] as {
+      content: number[];
+      offset: number;
+      totalLength: number;
+    };
+    expect(firstChunk.content).toHaveLength(1024 * 1024);
+    expect(firstChunk.offset).toBe(0);
+    expect(firstChunk.totalLength).toBe(content.length);
+    expect(secondChunk).toMatchObject({
+      content: [2, 3],
+      offset: 1024 * 1024,
+      totalLength: content.length,
+    });
+    expect(progress).toEqual([[0, 2], [1, 2], [2, 2]]);
+  });
+
+  it("cleans up a partial binary export when cancelled between chunks", async () => {
+    const invokeMock = vi.mocked(invoke);
+    const controller = new AbortController();
+    const content = new Uint8Array((1024 * 1024) + 1);
+
+    await expect(writeBinaryFile("/tmp/export.pdf", content, {
+      signal: controller.signal,
+      onProgress: (completed) => {
+        if (completed === 1) controller.abort();
+      },
+    })).rejects.toMatchObject({ name: "AbortError" });
+
+    expect(invokeMock).toHaveBeenCalledTimes(2);
+    expect(invokeMock.mock.calls[0]?.[0]).toBe("write_binary_file_chunk");
+    expect(invokeMock).toHaveBeenLastCalledWith("cancel_binary_file_write", {
+      path: "/tmp/export.pdf",
     });
   });
 

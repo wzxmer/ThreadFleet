@@ -174,6 +174,80 @@ export async function exportMarkdownFile(
   return selection;
 }
 
+export async function exportJsonFile(
+  content: string,
+  defaultFileName: string,
+  title: string,
+): Promise<string | null> {
+  const selection = await save({
+    title,
+    defaultPath: defaultFileName,
+    filters: [{ name: "JSON", extensions: ["json"] }],
+  });
+  if (!selection) return null;
+  await invoke("write_text_file", { path: selection, content });
+  return selection;
+}
+
+export async function pickConversationExportPath(
+  format: "pdf" | "png",
+  defaultFileName: string,
+  title: string,
+): Promise<string | null> {
+  const selection = await save({
+    title,
+    defaultPath: defaultFileName,
+    filters: [{ name: format === "pdf" ? "PDF" : "PNG", extensions: [format] }],
+  });
+  return selection || null;
+}
+
+const BINARY_WRITE_CHUNK_BYTES = 1024 * 1024;
+
+type WriteBinaryFileOptions = {
+  signal?: AbortSignal;
+  onProgress?: (completed: number, total: number) => void;
+};
+
+function binaryWriteCancelledError() {
+  const error = new Error("Binary file write cancelled");
+  error.name = "AbortError";
+  return error;
+}
+
+export async function writeBinaryFile(
+  path: string,
+  content: Uint8Array,
+  options: WriteBinaryFileOptions = {},
+): Promise<void> {
+  if (content.length === 0) {
+    throw new Error("Export content is empty");
+  }
+  const total = Math.ceil(content.length / BINARY_WRITE_CHUNK_BYTES);
+  options.onProgress?.(0, total);
+  try {
+    for (let index = 0; index < total; index += 1) {
+      if (options.signal?.aborted) throw binaryWriteCancelledError();
+      const offset = index * BINARY_WRITE_CHUNK_BYTES;
+      const chunk = content.subarray(offset, offset + BINARY_WRITE_CHUNK_BYTES);
+      await invoke("write_binary_file_chunk", {
+        path,
+        content: Array.from(chunk),
+        offset,
+        totalLength: content.length,
+      });
+      options.onProgress?.(index + 1, total);
+    }
+  } catch (error) {
+    try {
+      await invoke("cancel_binary_file_write", { path });
+    } catch {
+      // Preserve the write or cancellation error; cleanup is best-effort.
+    }
+    throw error;
+  }
+}
+
 export async function listWorkspaces(): Promise<WorkspaceInfo[]> {
   try {
     return await invoke<WorkspaceInfo[]>("list_workspaces");
@@ -1389,6 +1463,85 @@ export async function recoverWindowsInstallerRepair(): Promise<WindowsInstallerR
   return invoke<WindowsInstallerRepairResult>("recover_windows_installer_repair");
 }
 
+export type InstallerMigrationPreparationInput = {
+  version: string;
+  artifactPath: string;
+  artifactSize: number;
+  artifactSha256: string;
+};
+
+export type InstallerMigrationPreparationResult = {
+  targetVersion: string;
+  expiresAtUnixMs: number;
+  sourceMetadataItems: number;
+};
+
+export type InstallerMigrationRecoveryStatus = {
+  recoveryRequired: boolean;
+  targetVersion?: string | null;
+};
+
+export type InstallerMigrationDiagnosticCode =
+  | "completed"
+  | "rolledBack"
+  | "contractRejected"
+  | "manifestRejected"
+  | "ownershipBlocked"
+  | "backendFailure"
+  | "interrupted"
+  | "migrationFailed"
+  | "rollbackFailed"
+  | "runtimeDisabled"
+  | "unsupportedPlatform";
+
+export type InstallerMigrationExecutionResult = {
+  status:
+    | "completed"
+    | "rolledBack"
+    | "blocked"
+    | "interrupted"
+    | "invalid"
+    | "failed"
+    | "rollbackFailed"
+    | "unsupported";
+  diagnosticCode: InstallerMigrationDiagnosticCode;
+  transactionId?: string | null;
+  rebootRequired: boolean;
+  message?: string | null;
+};
+
+export type InstallerMigrationCapability = {
+  platformSupported: boolean;
+  runtimeEnabled: boolean;
+  remoteExecutionAllowed: false;
+  reason?: string | null;
+};
+
+export async function getWindowsInstallerMigrationCapability(): Promise<InstallerMigrationCapability> {
+  return invoke<InstallerMigrationCapability>(
+    "windows_installer_migration_capability",
+  );
+}
+
+export async function getWindowsInstallerMigrationRecoveryStatus(): Promise<InstallerMigrationRecoveryStatus> {
+  return invoke<InstallerMigrationRecoveryStatus>(
+    "windows_installer_migration_recovery_status",
+  );
+}
+
+export async function prepareWindowsInstallerMigration(
+  input: InstallerMigrationPreparationInput,
+): Promise<InstallerMigrationPreparationResult> {
+  return invoke<InstallerMigrationPreparationResult>(
+    "prepare_windows_installer_migration",
+    { input },
+  );
+}
+
+export async function executeWindowsInstallerMigration(): Promise<InstallerMigrationExecutionResult> {
+  return invoke<InstallerMigrationExecutionResult>("execute_windows_installer_migration");
+}
+
 export async function downloadAndOpenReleaseAsset(
   urls: string[],
   fileName: string,
@@ -1442,6 +1595,22 @@ export async function setMenuAccelerators(
   updates: MenuAcceleratorUpdate[],
 ): Promise<void> {
   return invoke("menu_set_accelerators", { updates });
+}
+
+export async function downloadReleaseAsset(
+  urls: string[],
+  fileName: string,
+  requestId: string,
+  expectedSize?: number,
+  expectedSha256?: string,
+): Promise<{ path: string }> {
+  return invoke<{ path: string }>("download_release_asset", {
+    urls,
+    fileName,
+    requestId,
+    expectedSize,
+    expectedSha256,
+  });
 }
 
 export async function setNativeMenuLabels(labels: NativeMenuLabels): Promise<void> {

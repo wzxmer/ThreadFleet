@@ -27,6 +27,8 @@ pub struct TurnExecutionSummary {
     pub thread_id: String,
     pub turn_id: String,
     pub turn_chain: Vec<String>,
+    #[serde(default)]
+    pub model_id: Option<String>,
     pub status: TurnExecutionStatus,
     pub started_at_ms: u64,
     pub ended_at_ms: Option<u64>,
@@ -429,6 +431,7 @@ mod tests {
             thread_id: thread.into(),
             turn_id: turn.into(),
             turn_chain: vec![turn.into()],
+            model_id: None,
             status: TurnExecutionStatus::Completed,
             started_at_ms: updated.saturating_sub(10),
             ended_at_ms: Some(updated),

@@ -37,10 +37,7 @@ import {
   parseReasoningEffortOptions,
 } from "@utils/reasoningEfforts";
 
-const allowedThemes = new Set(["system", "light", "dark", "dim"]);
 const allowedAppLanguages = new Set(["system", "zh", "en"]);
-const allowedThemeAccents = new Set(["codex", "blue", "green", "pink", "orange"]);
-const allowedMessageReadingStyles = new Set(["bubble", "native", "cli"]);
 const allowedPersonality = new Set(["friendly", "pragmatic"]);
 const allowedFollowUpMessageBehavior = new Set(["queue", "steer"]);
 const allowedSubagentCheckpointSyncMode = new Set([
@@ -75,12 +72,12 @@ const allowedProviderUsageProtocols = new Set<NonNullable<CodexKeyProfile["usage
   "new-api",
   "disabled",
 ]);
-const DEFAULT_MESSAGE_USER_BUBBLE_COLOR = "#d9ebff";
-const DEFAULT_MESSAGE_USER_TEXT_COLOR = "#102033";
-const DEFAULT_MESSAGE_CANVAS_COLOR = "#eef1f6";
-const DEFAULT_MESSAGE_ASSISTANT_BUBBLE_COLOR = "#f7f9fc";
-const DEFAULT_MESSAGE_ASSISTANT_ACCENT_COLOR = "#8aa8d8";
-const DEFAULT_MESSAGE_ASSISTANT_TEXT_COLOR = "#263040";
+const DEFAULT_MESSAGE_USER_BUBBLE_COLOR = "#ffffff";
+const DEFAULT_MESSAGE_USER_TEXT_COLOR = "#0f1720";
+const DEFAULT_MESSAGE_CANVAS_COLOR = "#f6f8fa";
+const DEFAULT_MESSAGE_ASSISTANT_BUBBLE_COLOR = "#ffffff";
+const DEFAULT_MESSAGE_ASSISTANT_ACCENT_COLOR = "#127e66";
+const DEFAULT_MESSAGE_ASSISTANT_TEXT_COLOR = "#233141";
 
 function normalizeCssColor(value: string | null | undefined, fallback: string) {
   const trimmed = value?.trim();
@@ -94,13 +91,18 @@ function normalizeCssColor(value: string | null | undefined, fallback: string) {
 }
 
 function normalizeMessageReadingStyle(value: unknown): AppSettings["messageReadingStyle"] {
-  if (value === "comfortable") {
-    return "native";
+  void value;
+  return "native";
+}
+
+function normalizeThemePreference(value: unknown): AppSettings["theme"] {
+  if (value === "dark" || value === "dim") {
+    return "dark";
   }
-  if (typeof value === "string" && allowedMessageReadingStyles.has(value)) {
-    return value as AppSettings["messageReadingStyle"];
+  if (value === "light") {
+    return "light";
   }
-  return "bubble";
+  return "light";
 }
 
 type RemoteBackendTarget = AppSettings["remoteBackends"][number];
@@ -332,13 +334,12 @@ function buildDefaultSettings(): AppSettings {
     computerControlRoutingEnabled: true,
     uiScale: UI_SCALE_DEFAULT,
     appLanguage: "system",
-    theme: "system",
-    themeAccent: "codex",
+    theme: "light",
     showCodexUsage: true,
     usageShowRemaining: false,
     showMessageFilePath: true,
     messageToolGroupsCollapsedByDefault: false,
-    messageReadingStyle: "bubble",
+    messageReadingStyle: "native",
     messageCanvasColor: DEFAULT_MESSAGE_CANVAS_COLOR,
     messageUserBubbleColor: DEFAULT_MESSAGE_USER_BUBBLE_COLOR,
     messageUserTextColor: DEFAULT_MESSAGE_USER_TEXT_COLOR,
@@ -353,6 +354,7 @@ function buildDefaultSettings(): AppSettings {
     autoDeleteArchivedThreadsEnabled: false,
     autoDeleteArchivedThreadsDays: 30,
     automaticAppUpdateChecksEnabled: true,
+    experimentalWindowsInstallerMigrationEnabled: false,
     uiFontFamily: DEFAULT_UI_FONT_FAMILY,
     uiLatinFontFamily: DEFAULT_UI_LATIN_FONT_FAMILY,
     uiCjkFontFamily: DEFAULT_UI_CJK_FONT_FAMILY,
@@ -479,10 +481,7 @@ function normalizeAppSettings(settings: AppSettings): AppSettings {
     appLanguage: allowedAppLanguages.has(settings.appLanguage)
       ? settings.appLanguage
       : "system",
-    theme: allowedThemes.has(settings.theme) ? settings.theme : "system",
-    themeAccent: allowedThemeAccents.has(settings.themeAccent)
-      ? settings.themeAccent
-      : "codex",
+    theme: normalizeThemePreference(settings.theme),
     showCodexUsage:
       typeof settings.showCodexUsage === "boolean" ? settings.showCodexUsage : true,
     composerLargePasteBehavior:
@@ -555,6 +554,8 @@ function normalizeAppSettings(settings: AppSettings): AppSettings {
     )
       ? settings.autoDeleteArchivedThreadsDays
       : 30,
+    experimentalWindowsInstallerMigrationEnabled:
+      settings.experimentalWindowsInstallerMigrationEnabled === true,
     personality: allowedPersonality.has(settings.personality)
       ? settings.personality
       : "friendly",

@@ -1024,8 +1024,6 @@ pub(crate) struct AppSettings {
     pub(crate) app_language: String,
     #[serde(default = "default_theme", rename = "theme")]
     pub(crate) theme: String,
-    #[serde(default = "default_theme_accent", rename = "themeAccent")]
-    pub(crate) theme_accent: String,
     #[serde(default = "default_show_codex_usage", rename = "showCodexUsage")]
     pub(crate) show_codex_usage: bool,
     #[serde(
@@ -1107,6 +1105,8 @@ pub(crate) struct AppSettings {
         rename = "automaticAppUpdateChecksEnabled"
     )]
     pub(crate) automatic_app_update_checks_enabled: bool,
+    #[serde(default, rename = "experimentalWindowsInstallerMigrationEnabled")]
+    pub(crate) experimental_windows_installer_migration_enabled: bool,
     #[serde(default = "default_ui_font_family", rename = "uiFontFamily")]
     pub(crate) ui_font_family: String,
     #[serde(default = "default_ui_latin_font_family", rename = "uiLatinFontFamily")]
@@ -1349,11 +1349,7 @@ fn default_app_language() -> String {
 }
 
 fn default_theme() -> String {
-    "system".to_string()
-}
-
-fn default_theme_accent() -> String {
-    "codex".to_string()
+    "light".to_string()
 }
 
 fn default_show_codex_usage() -> bool {
@@ -1373,7 +1369,7 @@ fn default_message_tool_groups_collapsed_by_default() -> bool {
 }
 
 fn default_message_reading_style() -> String {
-    "bubble".to_string()
+    "native".to_string()
 }
 
 fn default_message_canvas_color() -> String {
@@ -1950,7 +1946,6 @@ impl Default for AppSettings {
             ui_scale: 1.0,
             app_language: default_app_language(),
             theme: default_theme(),
-            theme_accent: default_theme_accent(),
             show_codex_usage: default_show_codex_usage(),
             usage_show_remaining: default_usage_show_remaining(),
             show_message_file_path: default_show_message_file_path(),
@@ -1970,6 +1965,7 @@ impl Default for AppSettings {
             auto_delete_archived_threads_enabled: false,
             auto_delete_archived_threads_days: default_auto_delete_archived_threads_days(),
             automatic_app_update_checks_enabled: true,
+            experimental_windows_installer_migration_enabled: false,
             ui_font_family: default_ui_font_family(),
             ui_latin_font_family: default_ui_latin_font_family(),
             ui_cjk_font_family: default_ui_cjk_font_family(),
@@ -2160,12 +2156,13 @@ mod tests {
         assert_eq!(settings.workflow_runtime_mode, "shadow");
         assert!((settings.ui_scale - 1.0).abs() < f64::EPSILON);
         assert_eq!(settings.app_language, "system");
-        assert_eq!(settings.theme, "system");
+        assert_eq!(settings.theme, "light");
         assert!(!settings.usage_show_remaining);
         assert!(settings.show_message_file_path);
         assert_eq!(settings.chat_history_scrollback_items, Some(200));
         assert!(settings.thread_title_autogeneration_enabled);
         assert!(settings.automatic_app_update_checks_enabled);
+        assert!(!settings.experimental_windows_installer_migration_enabled);
         assert!(settings.ui_font_family.contains("system-ui"));
         assert!(settings.ui_cjk_font_family.contains("PingFang SC"));
         assert!(settings

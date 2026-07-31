@@ -14,6 +14,7 @@ import {
 } from "../../design-system/components/toast/ToastPrimitives";
 import { useI18n } from "@/features/i18n/I18nProvider";
 import { WindowsInstallerRepairDialog } from "./WindowsInstallerRepairDialog";
+import { WindowsInstallerMigrationDialog } from "./WindowsInstallerMigrationDialog";
 
 type UpdateToastProps = {
   state: UpdateState;
@@ -183,6 +184,11 @@ export function UpdateToast({
             </div>
           </>
         )}
+        {state.stage === "migrationReady" && (
+          <ToastBody className="update-toast-body">
+            {t("installerMigration.ready")}
+          </ToastBody>
+        )}
         {state.stage === "installing" && (
           <>
             <ToastBody className="update-toast-body">
@@ -230,6 +236,12 @@ export function UpdateToast({
       open={repairOpen}
       onClose={() => setRepairOpen(false)}
       onRecheck={onUpdate}
+    />
+    <WindowsInstallerMigrationDialog
+      open={state.stage === "migrationReady"}
+      targetVersion={state.migrationPreparation?.targetVersion ?? state.version ?? null}
+      recoveryMode={state.migrationRecovery === true}
+      onClose={onDismiss}
     />
     </>
   );

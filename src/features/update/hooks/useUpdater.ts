@@ -4,7 +4,12 @@ import type { DebugEntry } from "../../../types";
 import {
   cleanupDownloadedReleaseAssets,
   downloadAndOpenReleaseAsset,
+  downloadReleaseAsset,
+  getWindowsInstallerMigrationCapability,
+  getWindowsInstallerMigrationRecoveryStatus,
   getReleasePlatform,
+  prepareWindowsInstallerMigration,
+  type InstallerMigrationPreparationResult,
   windowsInstallerKind,
 } from "../../../services/tauri";
 import { subscribeReleaseAssetDownloadProgress } from "../../../services/events";
@@ -22,6 +27,7 @@ type UpdateStage =
   | "upToDate"
   | "available"
   | "downloading"
+  | "migrationReady"
   | "installing"
   | "restarting"
   | "error";
@@ -37,6 +43,8 @@ export type UpdateState = {
   progress?: UpdateProgress;
   error?: string;
   errorCode?: "mixedInstaller";
+  migrationPreparation?: InstallerMigrationPreparationResult;
+  migrationRecovery?: boolean;
 };
 
 type PostUpdateNotice =
@@ -63,22 +71,26 @@ type UseUpdaterOptions = {
   enabled?: boolean;
   autoCheckOnMount?: boolean;
   onDebug?: (entry: DebugEntry) => void;
+  experimentalWindowsInstallerMigrationEnabled?: boolean;
 };
 
 export function useUpdater({
   enabled = true,
   autoCheckOnMount = true,
   onDebug,
+  experimentalWindowsInstallerMigrationEnabled = false,
 }: UseUpdaterOptions) {
   const [state, setState] = useState<UpdateState>({ stage: "idle" });
   const updateRef = useRef<ReleaseUpdateInfo | null>(null);
   const activeDownloadIdRef = useRef<string | null>(null);
+  const migrationDownloadRef = useRef(false);
   const cleanupPromiseRef = useRef<Promise<void> | null>(null);
   const hasAttemptedAutoCheckRef = useRef(false);
 
   const resetToIdle = useCallback(async () => {
     updateRef.current = null;
     activeDownloadIdRef.current = null;
+    migrationDownloadRef.current = false;
     setState({ stage: "idle" });
   }, []);
 
@@ -88,6 +100,16 @@ export function useUpdater({
     }
     try {
       setState({ stage: "checking" });
+      const recovery = await getWindowsInstallerMigrationRecoveryStatus().catch(() => null);
+      if (recovery?.recoveryRequired) {
+        const nextState: UpdateState = {
+          stage: "migrationReady",
+          version: recovery.targetVersion ?? undefined,
+          migrationRecovery: true,
+        };
+        setState(nextState);
+        return nextState;
+      }
       const installerKind = await windowsInstallerKind();
       if (installerKind === "mixed") {
         updateRef.current = null;
@@ -107,21 +129,29 @@ export function useUpdater({
       }
       const nativePlatform = await getReleasePlatform().catch(() => "");
       const architecture = releaseArchitectureFromPlatform(nativePlatform);
+      const migrationCapability =
+        installerKind === "nsis" && experimentalWindowsInstallerMigrationEnabled
+          ? await getWindowsInstallerMigrationCapability().catch(() => null)
+          : null;
+      const migrateNsisToMsi = migrationCapability?.runtimeEnabled === true;
       const update = await fetchLatestReleaseUpdate(
         __APP_VERSION__,
         undefined,
         undefined,
         installerKind,
         architecture,
+        migrateNsisToMsi,
       );
       if (!update) {
         updateRef.current = null;
+        migrationDownloadRef.current = false;
         const nextState: UpdateState = { stage: "upToDate" };
         setState(nextState);
         return nextState;
       }
 
       updateRef.current = update;
+      migrationDownloadRef.current = migrateNsisToMsi;
       const nextState: UpdateState = {
         stage: "available",
         version: update.version,
@@ -142,7 +172,7 @@ export function useUpdater({
       setState(nextState);
       return nextState;
     }
-  }, [enabled, onDebug]);
+  }, [enabled, experimentalWindowsInstallerMigrationEnabled, onDebug]);
 
   const startUpdate = useCallback(async () => {
     if (!enabled) {
@@ -168,6 +198,33 @@ export function useUpdater({
     }));
 
     try {
+      if (migrationDownloadRef.current) {
+        if (!update.asset.size || !update.asset.sha256) {
+          throw new Error("Installer migration requires signed size and SHA-256 metadata.");
+        }
+        const downloaded = await downloadReleaseAsset(
+          update.asset.urls,
+          update.asset.name,
+          requestId,
+          update.asset.size,
+          update.asset.sha256,
+        );
+        const preparation = await prepareWindowsInstallerMigration({
+          version: update.version,
+          artifactPath: downloaded.path,
+          artifactSize: update.asset.size,
+          artifactSha256: update.asset.sha256,
+        });
+        activeDownloadIdRef.current = null;
+        setState((prev) => ({
+          ...prev,
+          stage: "migrationReady",
+          migrationPreparation: preparation,
+          migrationRecovery: false,
+          progress: undefined,
+        }));
+        return;
+      }
       await downloadAndOpenReleaseAsset(
         update.asset.urls,
         update.asset.name,
@@ -189,8 +246,11 @@ export function useUpdater({
         },
       }));
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : JSON.stringify(error);
+      const message = migrationDownloadRef.current
+        ? "Installer migration preparation failed."
+        : error instanceof Error
+          ? error.message
+          : JSON.stringify(error);
       onDebug?.({
         id: `${Date.now()}-client-updater-error`,
         timestamp: Date.now(),
@@ -240,6 +300,26 @@ export function useUpdater({
       },
     });
   }, [enabled, onDebug]);
+
+  useEffect(() => {
+    if (!enabled || !isTauri()) {
+      return;
+    }
+    let active = true;
+    void getWindowsInstallerMigrationRecoveryStatus()
+      .then((recovery) => {
+        if (!active || !recovery.recoveryRequired) return;
+        setState({
+          stage: "migrationReady",
+          version: recovery.targetVersion ?? undefined,
+          migrationRecovery: true,
+        });
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [enabled]);
 
   useEffect(() => {
     if (!enabled || !isTauri()) {

@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::fmt;
 use std::fs::{self, File, OpenOptions};
-use std::io::{ErrorKind, Write};
+use std::io::{ErrorKind, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex as StdMutex, OnceLock};
 use std::time::{Duration, SystemTime};
@@ -15,6 +15,7 @@ const CLAIM_READ_ATTEMPTS: usize = 32;
 const MAX_ATOMIC_DIRECTORY_ENTRIES: usize = 65_536;
 const MAX_ORPHAN_TEMPS_PER_CREATE: usize = 64;
 const ORPHAN_TEMP_STALE_AFTER: Duration = Duration::from_secs(10 * 60);
+const TRANSACTION_LOCK_SCHEMA_VERSION: u32 = 1;
 
 static ATOMIC_CREATE_MUTEX: OnceLock<StdMutex<()>> = OnceLock::new();
 static MANIFEST_PUBLISH_MUTEX: OnceLock<StdMutex<()>> = OnceLock::new();
@@ -64,14 +65,45 @@ struct GrantClaim {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct TransactionLockRecord {
+    #[serde(default)]
+    pub(crate) schema_version: u32,
     pub(crate) transaction_id: String,
     pub(crate) owner_pid: u32,
+    #[serde(default)]
+    pub(crate) owner_process_started_at: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
+pub(crate) struct TransactionLockGuard {
+    record: TransactionLockRecord,
+    path: PathBuf,
+    file: File,
+}
+
+impl TransactionLockGuard {
+    pub(crate) fn record(&self) -> &TransactionLockRecord {
+        &self.record
+    }
+}
+
+#[derive(Debug)]
 pub(crate) enum TransactionLockOutcome {
-    Acquired(TransactionLockRecord),
+    Acquired(TransactionLockGuard),
     Existing(TransactionLockRecord),
+    Busy,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ProcessIdentity {
+    pid: u32,
+    started_at: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProcessOwnerState {
+    MatchingAlive,
+    MissingOrReused,
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -120,13 +152,17 @@ impl MigrationStore {
     }
 
     pub(crate) fn transaction_dir(&self, transaction_id: &str) -> StoreResult<PathBuf> {
+        let path = self.transaction_path(transaction_id)?;
+        create_derived_directory(&path)?;
+        Ok(path)
+    }
+
+    pub(crate) fn transaction_path(&self, transaction_id: &str) -> StoreResult<PathBuf> {
         validate_uuid(transaction_id, "transaction ID")?;
         self.validate_store_root()?;
         let transactions_root = self.transactions_root();
         validate_directory(&transactions_root)?;
-        let path = transactions_root.join(transaction_id);
-        create_derived_directory(&path)?;
-        Ok(path)
+        Ok(transactions_root.join(transaction_id))
     }
 
     pub(crate) fn load_manifest(&self, intent_id: &str) -> StoreResult<Option<MigrationManifest>> {
@@ -135,13 +171,17 @@ impl MigrationStore {
             .map(|candidate| candidate.manifest))
     }
 
-    pub(crate) fn persist_manifest(&self, manifest: &MigrationManifest) -> StoreResult<()> {
+    pub(crate) fn persist_manifest(
+        &self,
+        manifest: &MigrationManifest,
+        lock: &TransactionLockGuard,
+    ) -> StoreResult<()> {
         let _guard = MANIFEST_PUBLISH_MUTEX
             .get_or_init(|| StdMutex::new(()))
             .lock()
             .map_err(|_| MigrationStoreError::Io("manifest publish mutex is poisoned".into()))?;
         validate_manifest(manifest)?;
-        self.require_current_process_lock(&manifest.transaction_id)?;
+        self.require_current_process_lock(&manifest.transaction_id, lock)?;
         let intent_dir = self.intent_dir(&manifest.intent_id, true)?;
         let mut current = self.load_manifest_candidate(&manifest.intent_id)?;
 
@@ -229,62 +269,120 @@ impl MigrationStore {
         }
     }
 
-    pub(crate) fn create_transaction_lock(
+    pub(crate) fn acquire_transaction_lock(
         &self,
         transaction_id: &str,
-        owner_pid: u32,
     ) -> StoreResult<TransactionLockOutcome> {
         validate_uuid(transaction_id, "transaction ID")?;
-        if owner_pid == 0 {
-            return Err(MigrationStoreError::Invalid(
-                "transaction lock owner PID is zero".into(),
-            ));
-        }
+        let owner = current_process_identity()?;
         let record = TransactionLockRecord {
+            schema_version: TRANSACTION_LOCK_SCHEMA_VERSION,
             transaction_id: transaction_id.into(),
-            owner_pid,
+            owner_pid: owner.pid,
+            owner_process_started_at: owner.started_at,
         };
         self.validate_store_root()?;
         let locks_root = self.locks_root();
         validate_directory(&locks_root)?;
         let path = locks_root.join(format!("{transaction_id}.lock"));
         let bytes = serialize_json_with_limit(&record, MAX_CLAIM_BYTES, "transaction lock")?;
-        match atomic_create_record(&path, &bytes)? {
-            AtomicCreateOutcome::Created => Ok(TransactionLockOutcome::Acquired(record)),
-            AtomicCreateOutcome::Existing => {
-                let existing =
-                    read_json_with_retry::<TransactionLockRecord>(&path, MAX_CLAIM_BYTES)?;
+        let _ = atomic_create_record(&path, &bytes)?;
+        validate_transaction_lock_path(&path)?;
+
+        match try_open_transaction_lock(&path)? {
+            Some(mut file) => {
+                validate_transaction_lock_path(&path)?;
+                let backup = path.with_extension("lock.bak");
+                let (existing, existing_bytes, recovered_from_backup) =
+                    match read_transaction_lock_from_handle(&mut file, &path) {
+                        Ok((record, bytes)) => (record, bytes, false),
+                        Err(primary_error) => match read_transaction_lock_from_path(&backup) {
+                            Ok((record, bytes)) => (record, bytes, true),
+                            Err(_) => return Err(primary_error),
+                        },
+                    };
                 validate_transaction_lock(&existing)?;
                 if existing.transaction_id != transaction_id {
                     return Err(MigrationStoreError::Invalid(
                         "transaction lock identity does not match its file name".into(),
                     ));
                 }
-                Ok(TransactionLockOutcome::Existing(existing))
+
+                if record_matches_process(&existing, owner) {
+                    if recovered_from_backup {
+                        write_transaction_lock_to_handle(&mut file, &existing)?;
+                        remove_derived_file_if_exists(&backup)?;
+                    }
+                    return Ok(TransactionLockOutcome::Acquired(TransactionLockGuard {
+                        record: existing,
+                        path,
+                        file,
+                    }));
+                }
+
+                match observe_process_owner(&existing)? {
+                    ProcessOwnerState::MatchingAlive | ProcessOwnerState::Unknown => {
+                        if recovered_from_backup {
+                            Err(MigrationStoreError::Conflict(
+                                "transaction lock primary is corrupt while its recorded owner may still be alive"
+                                    .into(),
+                            ))
+                        } else {
+                            Ok(TransactionLockOutcome::Existing(existing))
+                        }
+                    }
+                    ProcessOwnerState::MissingOrReused => {
+                        remove_derived_file_if_exists(&backup)?;
+                        match atomic_create_record(&backup, &existing_bytes)? {
+                            AtomicCreateOutcome::Created => {}
+                            AtomicCreateOutcome::Existing => {
+                                return Err(MigrationStoreError::Conflict(
+                                    "transaction lock backup could not be created exclusively"
+                                        .into(),
+                                ));
+                            }
+                        }
+                        if let Err(error) = write_transaction_lock_to_handle(&mut file, &record) {
+                            let _ = restore_transaction_lock_from_backup(&mut file, &path, &backup);
+                            return Err(error);
+                        }
+                        remove_derived_file_if_exists(&backup)?;
+                        Ok(TransactionLockOutcome::Acquired(TransactionLockGuard {
+                            record,
+                            path,
+                            file,
+                        }))
+                    }
+                }
             }
+            None => Ok(TransactionLockOutcome::Busy),
         }
     }
 
-    fn require_current_process_lock(&self, transaction_id: &str) -> StoreResult<()> {
+    fn require_current_process_lock(
+        &self,
+        transaction_id: &str,
+        lock: &TransactionLockGuard,
+    ) -> StoreResult<()> {
         validate_uuid(transaction_id, "transaction ID")?;
         self.validate_store_root()?;
         let locks_root = self.locks_root();
         validate_directory(&locks_root)?;
         let path = locks_root.join(format!("{transaction_id}.lock"));
-        match fs::symlink_metadata(&path) {
-            Ok(_) => {}
-            Err(error) if error.kind() == ErrorKind::NotFound => {
-                return Err(MigrationStoreError::Conflict(
-                    "transaction lock is missing".into(),
-                ));
-            }
-            Err(error) => return Err(io_error(error)),
-        }
-        let record = read_json_with_retry::<TransactionLockRecord>(&path, MAX_CLAIM_BYTES)?;
-        validate_transaction_lock(&record)?;
-        if record.transaction_id != transaction_id || record.owner_pid != std::process::id() {
+        let current = current_process_identity()?;
+        if lock.path != path
+            || lock.record.transaction_id != transaction_id
+            || !record_matches_process(&lock.record, current)
+        {
             return Err(MigrationStoreError::Conflict(
-                "transaction lock is not owned by the current process".into(),
+                "transaction lock guard is not owned by the current process".into(),
+            ));
+        }
+        let record = read_transaction_lock_from_guard(&lock.file, &path)?;
+        validate_transaction_lock(&record)?;
+        if record != lock.record {
+            return Err(MigrationStoreError::Conflict(
+                "transaction lock record changed while its guard was held".into(),
             ));
         }
         Ok(())
@@ -532,7 +630,271 @@ fn validate_transaction_lock(record: &TransactionLockRecord) -> StoreResult<()> 
             "transaction lock owner PID is zero".into(),
         ));
     }
+    match (record.schema_version, record.owner_process_started_at) {
+        (0, 0) => {}
+        (TRANSACTION_LOCK_SCHEMA_VERSION, started_at) if started_at > 0 => {}
+        _ => {
+            return Err(MigrationStoreError::Invalid(
+                "transaction lock process identity is invalid".into(),
+            ))
+        }
+    }
     Ok(())
+}
+
+fn record_matches_process(record: &TransactionLockRecord, process: ProcessIdentity) -> bool {
+    record.schema_version == TRANSACTION_LOCK_SCHEMA_VERSION
+        && record.owner_pid == process.pid
+        && record.owner_process_started_at == process.started_at
+}
+
+fn try_open_transaction_lock(path: &Path) -> StoreResult<Option<File>> {
+    let mut options = OpenOptions::new();
+    options.read(true).write(true);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ;
+        options.share_mode(FILE_SHARE_READ);
+    }
+    let file = match options.open(path) {
+        Ok(file) => file,
+        Err(error) if is_transaction_lock_busy_error(&error) => return Ok(None),
+        Err(error) => return Err(io_error(error)),
+    };
+    match file.try_lock() {
+        Ok(()) => Ok(Some(file)),
+        Err(std::fs::TryLockError::WouldBlock) => Ok(None),
+        Err(std::fs::TryLockError::Error(error)) => Err(io_error(error)),
+    }
+}
+
+fn validate_transaction_lock_path(path: &Path) -> StoreResult<()> {
+    let metadata = fs::symlink_metadata(path).map_err(io_error)?;
+    validate_file_metadata(path, &metadata, MAX_CLAIM_BYTES)
+}
+
+fn is_transaction_lock_busy_error(error: &std::io::Error) -> bool {
+    if matches!(
+        error.kind(),
+        ErrorKind::PermissionDenied | ErrorKind::WouldBlock
+    ) {
+        return true;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        return matches!(error.raw_os_error(), Some(32) | Some(33));
+    }
+    #[cfg(not(target_os = "windows"))]
+    false
+}
+
+fn read_transaction_lock_from_handle(
+    file: &mut File,
+    path: &Path,
+) -> StoreResult<(TransactionLockRecord, Vec<u8>)> {
+    validate_transaction_lock_path(path)?;
+    let metadata = file.metadata().map_err(io_error)?;
+    validate_file_metadata(path, &metadata, MAX_CLAIM_BYTES)?;
+    file.seek(SeekFrom::Start(0)).map_err(io_error)?;
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    file.take(MAX_CLAIM_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(io_error)?;
+    if bytes.len() as u64 != metadata.len() || bytes.len() as u64 > MAX_CLAIM_BYTES {
+        return Err(MigrationStoreError::Invalid(
+            "transaction lock changed while its lease was acquired".into(),
+        ));
+    }
+    let record = serde_json::from_slice(&bytes).map_err(json_error)?;
+    Ok((record, bytes))
+}
+
+fn read_transaction_lock_from_path(path: &Path) -> StoreResult<(TransactionLockRecord, Vec<u8>)> {
+    let bytes = read_regular_file(path, MAX_CLAIM_BYTES)?;
+    let record = serde_json::from_slice(&bytes).map_err(json_error)?;
+    validate_transaction_lock(&record)?;
+    Ok((record, bytes))
+}
+
+fn read_transaction_lock_from_guard(
+    file: &File,
+    path: &Path,
+) -> StoreResult<TransactionLockRecord> {
+    validate_transaction_lock_path(path)?;
+    let metadata = file.metadata().map_err(io_error)?;
+    validate_file_metadata(path, &metadata, MAX_CLAIM_BYTES)?;
+    let mut bytes = vec![0; metadata.len() as usize];
+    let mut offset = 0usize;
+    while offset < bytes.len() {
+        let read = read_file_at(file, &mut bytes[offset..], offset as u64)?;
+        if read == 0 {
+            return Err(MigrationStoreError::Invalid(
+                "transaction lock ended before its recorded size".into(),
+            ));
+        }
+        offset += read;
+    }
+    let record = serde_json::from_slice(&bytes).map_err(json_error)?;
+    validate_transaction_lock(&record)?;
+    Ok(record)
+}
+
+#[cfg(target_os = "windows")]
+fn read_file_at(file: &File, bytes: &mut [u8], offset: u64) -> StoreResult<usize> {
+    use std::os::windows::fs::FileExt;
+    file.seek_read(bytes, offset).map_err(io_error)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn read_file_at(file: &File, bytes: &mut [u8], offset: u64) -> StoreResult<usize> {
+    use std::os::unix::fs::FileExt;
+    file.read_at(bytes, offset).map_err(io_error)
+}
+
+fn write_transaction_lock_to_handle(
+    file: &mut File,
+    record: &TransactionLockRecord,
+) -> StoreResult<()> {
+    validate_transaction_lock(record)?;
+    let bytes = serialize_json_with_limit(record, MAX_CLAIM_BYTES, "transaction lock")?;
+    file.seek(SeekFrom::Start(0)).map_err(io_error)?;
+    file.set_len(0).map_err(io_error)?;
+    file.write_all(&bytes).map_err(io_error)?;
+    file.flush().map_err(io_error)?;
+    file.sync_all().map_err(io_error)
+}
+
+fn restore_transaction_lock_from_backup(
+    file: &mut File,
+    lock_path: &Path,
+    backup_path: &Path,
+) -> StoreResult<()> {
+    let bytes = read_regular_file(backup_path, MAX_CLAIM_BYTES)?;
+    let record: TransactionLockRecord = serde_json::from_slice(&bytes).map_err(json_error)?;
+    validate_transaction_lock(&record)?;
+    file.seek(SeekFrom::Start(0)).map_err(io_error)?;
+    file.set_len(0).map_err(io_error)?;
+    file.write_all(&bytes).map_err(io_error)?;
+    file.flush().map_err(io_error)?;
+    file.sync_all().map_err(io_error)?;
+    remove_derived_file_if_exists(backup_path)?;
+    sync_directory_if_supported(
+        lock_path
+            .parent()
+            .ok_or_else(|| MigrationStoreError::Invalid("lock has no parent directory".into()))?,
+    )
+}
+
+#[cfg(target_os = "windows")]
+fn current_process_identity() -> StoreResult<ProcessIdentity> {
+    use windows_sys::Win32::System::Threading::GetCurrentProcess;
+
+    let pid = std::process::id();
+    let started_at = process_start_time(unsafe { GetCurrentProcess() })?;
+    Ok(ProcessIdentity { pid, started_at })
+}
+
+#[cfg(target_os = "windows")]
+fn observe_process_owner(record: &TransactionLockRecord) -> StoreResult<ProcessOwnerState> {
+    use windows_sys::Win32::Foundation::{
+        CloseHandle, ERROR_ACCESS_DENIED, ERROR_INVALID_PARAMETER, WAIT_OBJECT_0, WAIT_TIMEOUT,
+    };
+    use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, WaitForSingleObject, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+
+    let handle = unsafe {
+        OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
+            0,
+            record.owner_pid,
+        )
+    };
+    if handle.is_null() {
+        let code = std::io::Error::last_os_error().raw_os_error().unwrap_or(0) as u32;
+        return Ok(match code {
+            ERROR_INVALID_PARAMETER => ProcessOwnerState::MissingOrReused,
+            ERROR_ACCESS_DENIED => ProcessOwnerState::Unknown,
+            _ => ProcessOwnerState::Unknown,
+        });
+    }
+
+    let wait = unsafe { WaitForSingleObject(handle, 0) };
+    let started_at = process_start_time(handle);
+    unsafe { CloseHandle(handle) };
+    match wait {
+        WAIT_OBJECT_0 => Ok(ProcessOwnerState::MissingOrReused),
+        WAIT_TIMEOUT => {
+            let started_at = started_at?;
+            if record.schema_version == TRANSACTION_LOCK_SCHEMA_VERSION
+                && record.owner_process_started_at != started_at
+            {
+                Ok(ProcessOwnerState::MissingOrReused)
+            } else if record.schema_version == TRANSACTION_LOCK_SCHEMA_VERSION {
+                Ok(ProcessOwnerState::MatchingAlive)
+            } else {
+                Ok(ProcessOwnerState::Unknown)
+            }
+        }
+        _ => Ok(ProcessOwnerState::Unknown),
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn process_start_time(handle: windows_sys::Win32::Foundation::HANDLE) -> StoreResult<u64> {
+    use windows_sys::Win32::Foundation::FILETIME;
+    use windows_sys::Win32::System::Threading::GetProcessTimes;
+
+    let mut created = FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    };
+    let mut exited = created;
+    let mut kernel = created;
+    let mut user = created;
+    if unsafe { GetProcessTimes(handle, &mut created, &mut exited, &mut kernel, &mut user) } == 0 {
+        return Err(io_error(std::io::Error::last_os_error()));
+    }
+    let value = ((created.dwHighDateTime as u64) << 32) | created.dwLowDateTime as u64;
+    if value == 0 {
+        return Err(MigrationStoreError::Invalid(
+            "process creation time is zero".into(),
+        ));
+    }
+    Ok(value)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn current_process_identity() -> StoreResult<ProcessIdentity> {
+    static PROCESS_STARTED_AT: OnceLock<u64> = OnceLock::new();
+    let started_at = *PROCESS_STARTED_AT.get_or_init(|| {
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|duration| duration.as_nanos() as u64)
+            .unwrap_or(1)
+            .max(1)
+    });
+    Ok(ProcessIdentity {
+        pid: std::process::id(),
+        started_at,
+    })
+}
+
+#[cfg(not(target_os = "windows"))]
+fn observe_process_owner(record: &TransactionLockRecord) -> StoreResult<ProcessOwnerState> {
+    if record.owner_pid > i32::MAX as u32 {
+        return Ok(ProcessOwnerState::MissingOrReused);
+    }
+    let result = unsafe { libc::kill(record.owner_pid as i32, 0) };
+    if result == 0 {
+        Ok(ProcessOwnerState::Unknown)
+    } else if std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH) {
+        Ok(ProcessOwnerState::MissingOrReused)
+    } else {
+        Ok(ProcessOwnerState::Unknown)
+    }
 }
 
 fn manifest_file_identity(path: &Path) -> StoreResult<(String, CandidateKind)> {
@@ -889,16 +1251,18 @@ mod tests {
         MigrationStore::new(temp_root(label)).unwrap()
     }
 
-    fn acquire_current_process_lock(store: &MigrationStore) {
-        let outcome = store
-            .create_transaction_lock(TRANSACTION_ID, std::process::id())
-            .unwrap();
-        let record = match outcome {
-            TransactionLockOutcome::Acquired(record) | TransactionLockOutcome::Existing(record) => {
-                record
+    fn acquire_current_process_lock(store: &MigrationStore) -> TransactionLockGuard {
+        let outcome = store.acquire_transaction_lock(TRANSACTION_ID).unwrap();
+        let guard = match outcome {
+            TransactionLockOutcome::Acquired(guard) => guard,
+            TransactionLockOutcome::Existing(record) => {
+                panic!("fresh transaction lock unexpectedly exists: {record:?}")
             }
+            TransactionLockOutcome::Busy => panic!("fresh transaction lock is busy"),
         };
-        assert_eq!(record.owner_pid, std::process::id());
+        assert_eq!(guard.record().owner_pid, std::process::id());
+        assert!(guard.record().owner_process_started_at > 0);
+        guard
     }
 
     fn manifest(revision: u64) -> MigrationManifest {
@@ -974,24 +1338,24 @@ mod tests {
     #[test]
     fn persists_contiguous_revisions_and_rejects_stale_or_skipped_updates() {
         let store = store("revision");
-        acquire_current_process_lock(&store);
+        let lock = acquire_current_process_lock(&store);
         let first = manifest(1);
-        store.persist_manifest(&first).unwrap();
+        store.persist_manifest(&first, &lock).unwrap();
         assert_eq!(store.load_manifest(INTENT_ID).unwrap(), Some(first.clone()));
-        store.persist_manifest(&first).unwrap();
+        store.persist_manifest(&first, &lock).unwrap();
 
-        assert!(store.persist_manifest(&manifest(3)).is_err());
+        assert!(store.persist_manifest(&manifest(3), &lock).is_err());
         let second = manifest(2);
-        store.persist_manifest(&second).unwrap();
+        store.persist_manifest(&second, &lock).unwrap();
         assert_eq!(store.load_manifest(INTENT_ID).unwrap(), Some(second));
-        assert!(store.persist_manifest(&first).is_err());
+        assert!(store.persist_manifest(&first, &lock).is_err());
     }
 
     #[test]
     fn rejects_isolated_temp_when_primary_is_torn() {
         let store = store("torn-primary");
-        acquire_current_process_lock(&store);
-        store.persist_manifest(&manifest(1)).unwrap();
+        let lock = acquire_current_process_lock(&store);
+        store.persist_manifest(&manifest(1), &lock).unwrap();
         let primary = store
             .intent_dir(INTENT_ID, false)
             .unwrap()
@@ -1031,44 +1395,32 @@ mod tests {
 
     #[test]
     fn manifest_persist_requires_current_process_transaction_lock() {
-        let missing_lock = store("missing-lock");
+        let owning_store = store("owning-lock");
+        let lock = acquire_current_process_lock(&owning_store);
+        let different_store = store("different-lock-root");
         assert!(matches!(
-            missing_lock.persist_manifest(&manifest(1)),
+            different_store.persist_manifest(&manifest(1), &lock),
             Err(MigrationStoreError::Conflict(message))
-                if message.contains("transaction lock")
-        ));
-
-        let other_owner = store("other-owner-lock");
-        let other_pid = if std::process::id() == u32::MAX {
-            1
-        } else {
-            std::process::id() + 1
-        };
-        other_owner
-            .create_transaction_lock(TRANSACTION_ID, other_pid)
-            .unwrap();
-        assert!(matches!(
-            other_owner.persist_manifest(&manifest(1)),
-            Err(MigrationStoreError::Conflict(message))
-                if message.contains("transaction lock")
+                if message.contains("transaction lock guard")
         ));
     }
 
     #[test]
     fn concurrent_manifest_persist_allows_one_revision_writer() {
         let store = Arc::new(store("manifest-race"));
-        acquire_current_process_lock(&store);
-        store.persist_manifest(&manifest(1)).unwrap();
+        let lock = Arc::new(acquire_current_process_lock(&store));
+        store.persist_manifest(&manifest(1), &lock).unwrap();
 
         let barrier = Arc::new(Barrier::new(3));
         let handles = ["first", "second"].map(|message| {
             let store = Arc::clone(&store);
+            let lock = Arc::clone(&lock);
             let barrier = Arc::clone(&barrier);
             std::thread::spawn(move || {
                 let mut next = manifest(2);
                 next.last_error = Some(message.into());
                 barrier.wait();
-                store.persist_manifest(&next)
+                store.persist_manifest(&next, &lock)
             })
         });
         barrier.wait();
@@ -1276,19 +1628,104 @@ mod tests {
     }
 
     #[test]
-    fn transaction_lock_records_owner_without_judging_liveness() {
+    fn transaction_lock_holds_lease_and_reacquires_after_drop() {
         let store = store("lock");
+        let guard = match store.acquire_transaction_lock(TRANSACTION_ID).unwrap() {
+            TransactionLockOutcome::Acquired(guard) => guard,
+            TransactionLockOutcome::Existing(record) => {
+                panic!("fresh transaction lock unexpectedly exists: {record:?}")
+            }
+            TransactionLockOutcome::Busy => panic!("fresh transaction lock is busy"),
+        };
         assert!(matches!(
-            store.create_transaction_lock(TRANSACTION_ID, 41).unwrap(),
+            store.acquire_transaction_lock(TRANSACTION_ID).unwrap(),
+            TransactionLockOutcome::Busy
+        ));
+        drop(guard);
+        assert!(matches!(
+            store.acquire_transaction_lock(TRANSACTION_ID).unwrap(),
             TransactionLockOutcome::Acquired(_)
         ));
-        assert_eq!(
-            store.create_transaction_lock(TRANSACTION_ID, 42).unwrap(),
-            TransactionLockOutcome::Existing(TransactionLockRecord {
+    }
+
+    #[test]
+    fn legacy_live_owner_without_creation_time_fails_closed() {
+        let store = store("legacy-live-lock");
+        let path = store.locks_root().join(format!("{TRANSACTION_ID}.lock"));
+        fs::write(
+            path,
+            serde_json::to_vec(&TransactionLockRecord {
+                schema_version: 0,
                 transaction_id: TRANSACTION_ID.into(),
-                owner_pid: 41,
+                owner_pid: std::process::id(),
+                owner_process_started_at: 0,
             })
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert!(matches!(
+            store.acquire_transaction_lock(TRANSACTION_ID).unwrap(),
+            TransactionLockOutcome::Existing(record)
+                if record.schema_version == 0
+        ));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn reused_pid_creation_time_is_safely_taken_over() {
+        let store = store("reused-pid-lock");
+        let path = store.locks_root().join(format!("{TRANSACTION_ID}.lock"));
+        let current = current_process_identity().unwrap();
+        fs::write(
+            &path,
+            serde_json::to_vec(&TransactionLockRecord {
+                schema_version: TRANSACTION_LOCK_SCHEMA_VERSION,
+                transaction_id: TRANSACTION_ID.into(),
+                owner_pid: current.pid,
+                owner_process_started_at: current.started_at + 1,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+
+        let guard = match store.acquire_transaction_lock(TRANSACTION_ID).unwrap() {
+            TransactionLockOutcome::Acquired(guard) => guard,
+            TransactionLockOutcome::Existing(record) => {
+                panic!("reused PID was not taken over: {record:?}")
+            }
+            TransactionLockOutcome::Busy => panic!("reused PID lock is unexpectedly busy"),
+        };
+        assert!(record_matches_process(guard.record(), current));
+        assert!(!path.with_extension("lock.bak").exists());
+    }
+
+    #[test]
+    fn torn_stale_lock_recovers_from_backup_before_takeover() {
+        let store = store("torn-stale-lock");
+        let path = store.locks_root().join(format!("{TRANSACTION_ID}.lock"));
+        let backup = path.with_extension("lock.bak");
+        let stale = TransactionLockRecord {
+            schema_version: 0,
+            transaction_id: TRANSACTION_ID.into(),
+            owner_pid: u32::MAX,
+            owner_process_started_at: 0,
+        };
+        fs::write(&path, b"{").unwrap();
+        fs::write(&backup, serde_json::to_vec(&stale).unwrap()).unwrap();
+
+        let guard = match store.acquire_transaction_lock(TRANSACTION_ID).unwrap() {
+            TransactionLockOutcome::Acquired(guard) => guard,
+            TransactionLockOutcome::Existing(record) => {
+                panic!("stale backup owner was not taken over: {record:?}")
+            }
+            TransactionLockOutcome::Busy => panic!("stale backup lock is unexpectedly busy"),
+        };
+        assert_eq!(
+            guard.record().schema_version,
+            TRANSACTION_LOCK_SCHEMA_VERSION
         );
+        assert!(!backup.exists());
     }
 
     #[test]
@@ -1298,15 +1735,17 @@ mod tests {
         fs::write(
             path,
             serde_json::to_vec(&TransactionLockRecord {
+                schema_version: 0,
                 transaction_id: OTHER_TRANSACTION_ID.into(),
                 owner_pid: 41,
+                owner_process_started_at: 0,
             })
             .unwrap(),
         )
         .unwrap();
 
         assert!(matches!(
-            store.create_transaction_lock(TRANSACTION_ID, 42),
+            store.acquire_transaction_lock(TRANSACTION_ID),
             Err(MigrationStoreError::Invalid(_))
         ));
     }
@@ -1320,6 +1759,25 @@ mod tests {
             .transaction_dir(TRANSACTION_ID)
             .unwrap()
             .starts_with(store.root()));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn rejects_reparse_transaction_lock_without_touching_target() {
+        use std::os::windows::fs::symlink_file;
+
+        let store = store("lock-reparse");
+        let target = temp_root("lock-reparse-target");
+        let original = b"external target";
+        fs::write(&target, original).unwrap();
+        let lock = store.locks_root().join(format!("{TRANSACTION_ID}.lock"));
+        if symlink_file(&target, &lock).is_ok() {
+            assert!(matches!(
+                store.acquire_transaction_lock(TRANSACTION_ID),
+                Err(MigrationStoreError::Invalid(_))
+            ));
+            assert_eq!(fs::read(target).unwrap(), original);
+        }
     }
 
     #[cfg(target_os = "windows")]

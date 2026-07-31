@@ -26,6 +26,10 @@ pub(super) async fn dispatch_rpc_request(
         return result;
     }
 
+    if let Some(result) = installer_migration::try_handle(state, method, params).await {
+        return result;
+    }
+
     if let Some(result) = prompts::try_handle(state, method, params).await {
         return result;
     }

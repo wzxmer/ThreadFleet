@@ -8,6 +8,7 @@ use tokio::sync::Mutex;
 use crate::dictation::DictationState;
 use crate::shared::agents_config_core;
 use crate::shared::codex_core::CodexLoginCancelState;
+use crate::shared::installer_migration_service::InstallerMigrationAuthorizationState;
 use crate::shared::session_manager_core::runtime::{
     SessionSourceRuntimePool, SourceThreadRuntimeBindings,
 };
@@ -57,6 +58,9 @@ pub(crate) struct AppState {
     pub(crate) execution_bindings:
         tokio::sync::Mutex<crate::shared::execution_binding_core::ExecutionBindingSidecar>,
     pub(crate) windows_installer_repair: Mutex<()>,
+    pub(crate) windows_installer_migration: Mutex<()>,
+    pub(crate) windows_installer_migration_authorization:
+        Mutex<InstallerMigrationAuthorizationState>,
 }
 
 impl AppState {
@@ -98,6 +102,9 @@ impl AppState {
                 crate::shared::execution_binding_core::ExecutionBindingSidecar::for_data_dir(&data_dir),
             ),
             windows_installer_repair: Mutex::new(()),
+            windows_installer_migration: Mutex::new(()),
+            windows_installer_migration_authorization:
+                Mutex::new(InstallerMigrationAuthorizationState::default()),
         }
     }
 }

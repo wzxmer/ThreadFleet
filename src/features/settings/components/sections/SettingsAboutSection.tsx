@@ -3,11 +3,13 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import type { AppSettings } from "@/types";
 import {
   getAppBuildType,
-  isMobileRuntime,
+  getWindowsInstallerMigrationCapability,
   type AppBuildType,
+  type InstallerMigrationCapability,
 } from "@services/tauri";
-import { useUpdater } from "@/features/update/hooks/useUpdater";
 import { WindowsInstallerRepairDialog } from "@/features/update/components/WindowsInstallerRepairDialog";
+import { WindowsInstallerMigrationDialog } from "@/features/update/components/WindowsInstallerMigrationDialog";
+import type { SettingsUpdaterControls } from "@settings/components/SettingsView";
 import { FeatureIntroPrompt } from "@app/components/FeatureIntroPrompt";
 import {
   SettingsSection,
@@ -21,7 +23,17 @@ const UPSTREAM_REPOSITORY_URL = "https://github.com/Dimillian/CodexMonitor";
 
 type SettingsAboutSectionProps = {
   appSettings: AppSettings;
+  onUpdateAppSettings: (next: AppSettings) => Promise<void>;
   onToggleAutomaticAppUpdateChecks?: () => void;
+  updater?: SettingsUpdaterControls;
+};
+
+const DISABLED_UPDATER: SettingsUpdaterControls = {
+  enabled: false,
+  state: { stage: "idle" },
+  checkForUpdates: () => undefined,
+  startUpdate: () => undefined,
+  dismiss: () => undefined,
 };
 
 function formatBytes(value: number) {
@@ -40,17 +52,37 @@ function formatBytes(value: number) {
 
 export function SettingsAboutSection({
   appSettings,
+  onUpdateAppSettings,
   onToggleAutomaticAppUpdateChecks,
+  updater = DISABLED_UPDATER,
 }: SettingsAboutSectionProps) {
   const { t } = useI18n();
   const [appBuildType, setAppBuildType] = useState<AppBuildType | "unknown">("unknown");
-  const [updaterEnabled, setUpdaterEnabled] = useState(false);
   const [featureIntroOpen, setFeatureIntroOpen] = useState(false);
   const [repairOpen, setRepairOpen] = useState(false);
-  const { state: updaterState, checkForUpdates, startUpdate } = useUpdater({
+  const [migrationCapability, setMigrationCapability] =
+    useState<InstallerMigrationCapability | null>(null);
+  const {
     enabled: updaterEnabled,
-    autoCheckOnMount: false,
-  });
+    state: updaterState,
+    checkForUpdates,
+    startUpdate,
+    dismiss: dismissUpdate,
+  } = updater;
+
+  useEffect(() => {
+    let active = true;
+    void getWindowsInstallerMigrationCapability()
+      .then((capability) => {
+        if (active) setMigrationCapability(capability);
+      })
+      .catch(() => {
+        if (active) setMigrationCapability(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -67,27 +99,6 @@ export function SettingsAboutSection({
       }
     };
     void loadBuildType();
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-    const detectRuntime = async () => {
-      try {
-        const mobileRuntime = await isMobileRuntime();
-        if (active) {
-          setUpdaterEnabled(!mobileRuntime);
-        }
-      } catch {
-        if (active) {
-          // In non-Tauri previews we still want local desktop-like behavior.
-          setUpdaterEnabled(true);
-        }
-      }
-    };
-    void detectRuntime();
     return () => {
       active = false;
     };
@@ -158,6 +169,26 @@ export function SettingsAboutSection({
             }}
           />
         </SettingsToggleRow>
+        <SettingsToggleRow
+          title={t("installerMigration.settingTitle")}
+          subtitle={t("installerMigration.settingSubtitle")}
+        >
+          <SettingsToggleSwitch
+            pressed={appSettings.experimentalWindowsInstallerMigrationEnabled}
+            onClick={() => {
+              void onUpdateAppSettings({
+                ...appSettings,
+                experimentalWindowsInstallerMigrationEnabled:
+                  !appSettings.experimentalWindowsInstallerMigrationEnabled,
+              });
+            }}
+          />
+        </SettingsToggleRow>
+        {migrationCapability && !migrationCapability.runtimeEnabled ? (
+          <div className="settings-help">
+            {t("installerMigration.runtimeUnavailable")}
+          </div>
+        ) : null}
         <div className="settings-help">
           {t("about.currentVersion")} <code>{__APP_VERSION__}</code>
         </div>
@@ -242,6 +273,14 @@ export function SettingsAboutSection({
         open={repairOpen}
         onClose={() => setRepairOpen(false)}
         onRecheck={checkForUpdates}
+      />
+      <WindowsInstallerMigrationDialog
+        open={updaterState.stage === "migrationReady"}
+        targetVersion={
+          updaterState.migrationPreparation?.targetVersion ?? updaterState.version ?? null
+        }
+        recoveryMode={updaterState.migrationRecovery === true}
+        onClose={dismissUpdate}
       />
     </SettingsSection>
   );

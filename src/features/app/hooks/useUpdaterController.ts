@@ -15,6 +15,7 @@ import type { DebugEntry } from "../../../types";
 type Params = {
   enabled?: boolean;
   autoCheckOnMount?: boolean;
+  experimentalWindowsInstallerMigrationEnabled?: boolean;
   notificationSoundsEnabled: boolean;
   systemNotificationsEnabled: boolean;
   subagentSystemNotificationsEnabled: boolean;
@@ -32,6 +33,7 @@ type Params = {
 export function useUpdaterController({
   enabled = true,
   autoCheckOnMount = true,
+  experimentalWindowsInstallerMigrationEnabled = false,
   notificationSoundsEnabled,
   systemNotificationsEnabled,
   subagentCompletionNotificationsEnabled = false,
@@ -55,6 +57,7 @@ export function useUpdaterController({
     enabled,
     autoCheckOnMount,
     onDebug,
+    experimentalWindowsInstallerMigrationEnabled,
   });
   const isWindowFocused = useWindowFocusState();
   const nextTestSoundIsError = useRef(false);

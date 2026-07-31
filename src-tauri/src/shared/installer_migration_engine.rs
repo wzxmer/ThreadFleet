@@ -383,6 +383,9 @@ impl MigrationBackendError {
 /// launching a second installer or duplicating ownership metadata.
 pub(crate) trait MigrationBackend {
     fn now_unix_ms(&self) -> u64;
+    /// Acquire and retain the exact transaction lease before any snapshot is
+    /// allowed to derive a backup path or any journal revision is published.
+    fn begin_transaction(&mut self, transaction_id: &str) -> Result<(), MigrationBackendError>;
     fn load_manifest(
         &mut self,
         intent_id: &str,
@@ -400,6 +403,7 @@ pub(crate) trait MigrationBackend {
     fn observe_nsis_source(
         &mut self,
         intent: &MigrationIntent,
+        transaction_id: &str,
     ) -> Result<NsisSourceSnapshot, MigrationBackendError>;
     fn inspect_target_installer(
         &mut self,
@@ -512,6 +516,9 @@ impl<B: MigrationBackend> MigrationEngine<B> {
                     ));
                 }
                 self.backend
+                    .begin_transaction(&manifest.transaction_id)
+                    .map_err(map_backend_read_error)?;
+                self.backend
                     .validate_manifest_scope(&manifest)
                     .map_err(map_backend_read_error)?;
                 self.backend
@@ -540,9 +547,13 @@ impl<B: MigrationBackend> MigrationEngine<B> {
         intent_digest: &str,
         grant_digest: &str,
     ) -> Result<MigrationManifest, MigrationEngineError> {
+        let transaction_id = uuid::Uuid::new_v4().hyphenated().to_string();
+        self.backend
+            .begin_transaction(&transaction_id)
+            .map_err(map_backend_read_error)?;
         let source = self
             .backend
-            .observe_nsis_source(intent)
+            .observe_nsis_source(intent, &transaction_id)
             .map_err(map_backend_read_error)?;
         validate_source_snapshot(&source)?;
         if source.ownership != ObservedOwnership::PureNsis {
@@ -560,7 +571,7 @@ impl<B: MigrationBackend> MigrationEngine<B> {
         let mut manifest = MigrationManifest {
             schema_version: INSTALLER_MIGRATION_ENGINE_SCHEMA_VERSION,
             journal_revision: 0,
-            transaction_id: uuid::Uuid::new_v4().hyphenated().to_string(),
+            transaction_id,
             intent_id: intent.intent_id.clone(),
             intent_digest: intent_digest.into(),
             grant_digest: grant_digest.into(),
@@ -915,13 +926,9 @@ impl<B: MigrationBackend> MigrationEngine<B> {
             MigrationEngineError::InvalidManifest("journal revision overflow".into())
         })?;
         manifest.validate()?;
-        self.backend.persist_manifest(manifest).map_err(|error| {
-            if error.interrupted {
-                MigrationEngineError::Interrupted(error.message)
-            } else {
-                MigrationEngineError::Backend(error.message)
-            }
-        })
+        self.backend
+            .persist_manifest(manifest)
+            .map_err(|error| MigrationEngineError::Interrupted(error.message))
     }
 }
 
@@ -1231,6 +1238,11 @@ mod tests {
             self.now
         }
 
+        fn begin_transaction(&mut self, transaction_id: &str) -> Result<(), MigrationBackendError> {
+            validate_uuid(transaction_id, "transactionId")
+                .map_err(|error| MigrationBackendError::failure(format!("{error:?}")))
+        }
+
         fn load_manifest(
             &mut self,
             intent_id: &str,
@@ -1273,6 +1285,7 @@ mod tests {
         fn observe_nsis_source(
             &mut self,
             _intent: &MigrationIntent,
+            _transaction_id: &str,
         ) -> Result<NsisSourceSnapshot, MigrationBackendError> {
             Ok(self.source.clone())
         }
@@ -1622,9 +1635,30 @@ mod tests {
     #[test]
     fn wal_persist_failure_prevents_the_following_mutation() {
         let (result, backend) = run(FakeBackend::healthy().fail("persist", 2));
-        assert!(matches!(result, Err(MigrationEngineError::Backend(_))));
+        assert!(matches!(result, Err(MigrationEngineError::Interrupted(_))));
         assert!(backend.claims.is_empty());
         assert!(backend.fully_restored());
+    }
+
+    #[test]
+    fn persist_failure_after_a_mutation_keeps_the_transaction_resumable() {
+        let intent = intent_with_id(INTENT_ID);
+        let continuation = continuation(&intent, GRANT);
+
+        for persist_call in [3, 5, 7, 14] {
+            let mut engine =
+                MigrationEngine::new(FakeBackend::healthy().fail("persist", persist_call));
+            assert!(matches!(
+                engine.execute(&intent, &continuation, GRANT),
+                Err(MigrationEngineError::Interrupted(_))
+            ));
+
+            let mut resumed = MigrationEngine::new(engine.into_backend());
+            assert!(matches!(
+                resumed.execute(&intent, &continuation, GRANT),
+                Ok(MigrationOutcome::Completed { .. })
+            ));
+        }
     }
 
     #[test]

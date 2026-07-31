@@ -16,6 +16,7 @@ mod files;
 mod fonts;
 mod git;
 mod git_utils;
+mod installer_migration;
 mod local_usage;
 #[cfg(desktop)]
 mod menu;
@@ -244,6 +245,8 @@ pub fn run() {
             files::create_message_reference,
             files::create_content_reference,
             files::write_text_file,
+            files::write_binary_file_chunk,
+            files::cancel_binary_file_write,
             fonts::list_system_fonts,
             codex::get_config_model,
             codex::get_provider_status,
@@ -390,6 +393,7 @@ pub fn run() {
             local_usage::local_usage_snapshot,
             updater::cleanup_downloaded_release_assets,
             updater::download_and_open_release_asset,
+            updater::download_release_asset,
             updater::install_managed_codex,
             updater::managed_codex_platform,
             updater::release_platform,
@@ -398,6 +402,10 @@ pub fn run() {
             windows_installer::recover_windows_installer_repair,
             windows_installer::apply_windows_installer_repair,
             windows_installer::rollback_windows_installer_repair,
+            installer_migration::windows_installer_migration_capability,
+            installer_migration::windows_installer_migration_recovery_status,
+            installer_migration::prepare_windows_installer_migration,
+            installer_migration::execute_windows_installer_migration,
             notifications::is_macos_debug_build,
             notifications::app_build_type,
             notifications::send_notification_fallback,

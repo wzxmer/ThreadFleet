@@ -100,6 +100,13 @@ describe("selectReleaseAsset", () => {
     expect(selectReleaseAsset(assets, "windows", "msi")?.name).toContain(".msi");
   });
 
+  it("selects MSI only for an explicitly enabled pure NSIS migration", () => {
+    expect(selectReleaseAsset(assets, "windows", "nsis", "x64", true)?.name).toContain(
+      ".msi",
+    );
+    expect(selectReleaseAsset(assets, "windows", "mixed", "x64", true)).toBeNull();
+  });
+
   it("does not select an installer for mixed or unknown Windows ownership", () => {
     expect(selectReleaseAsset(assets, "windows", "mixed")).toBeNull();
     expect(selectReleaseAsset(assets, "windows", "unknown")).toBeNull();

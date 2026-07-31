@@ -49,7 +49,7 @@ describe("useAppSettings", () => {
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     expect(result.current.settings.uiScale).toBe(UI_SCALE_MAX);
-    expect(result.current.settings.theme).toBe("system");
+    expect(result.current.settings.theme).toBe("light");
     expect(result.current.settings.uiFontFamily).toContain("system-ui");
     expect(result.current.settings.codeFontFamily).toContain("ui-monospace");
     expect(result.current.settings.codeFontSize).toBe(18);
@@ -131,6 +131,7 @@ describe("useAppSettings", () => {
     expect(result.current.settings.uiFontWeight).toBe(450);
     expect(result.current.settings.autoDeleteArchivedThreadsEnabled).toBe(false);
     expect(result.current.settings.autoDeleteArchivedThreadsDays).toBe(30);
+    expect(result.current.settings.experimentalWindowsInstallerMigrationEnabled).toBe(false);
     expect(result.current.settings.preserveSessionLibraryOnProviderSwitch).toBe(true);
     expect(result.current.settings.syncProviderProfileToLocalConfig).toBe(false);
   });
@@ -188,15 +189,15 @@ describe("useAppSettings", () => {
 
     expect(updateAppSettingsMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        messageReadingStyle: "bubble",
+        messageReadingStyle: "native",
       }),
     );
   });
 
-  it("keeps native message reading style", async () => {
+  it("normalizes retired bubble and cli reading styles to native", async () => {
     getAppSettingsMock.mockResolvedValue(
       ({
-        messageReadingStyle: "native",
+        messageReadingStyle: "cli",
       } as unknown) as AppSettings,
     );
 
@@ -326,7 +327,7 @@ describe("useAppSettings", () => {
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     expect(result.current.settings.uiScale).toBe(UI_SCALE_DEFAULT);
-    expect(result.current.settings.theme).toBe("system");
+    expect(result.current.settings.theme).toBe("light");
     expect(result.current.settings.uiFontFamily).toContain("system-ui");
     expect(result.current.settings.codeFontFamily).toContain("ui-monospace");
     expect(result.current.settings.backendMode).toBe("local");
@@ -369,7 +370,7 @@ describe("useAppSettings", () => {
 
     expect(updateAppSettingsMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        theme: "system",
+        theme: "light",
         uiScale: 0.1,
         uiFontFamily: expect.stringContaining("system-ui"),
         codeFontFamily: expect.stringContaining("ui-monospace"),

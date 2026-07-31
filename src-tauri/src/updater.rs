@@ -114,6 +114,47 @@ pub async fn download_and_open_release_asset(
     expected_size: Option<u64>,
     expected_sha256: Option<String>,
 ) -> Result<DownloadedReleaseAsset, String> {
+    let downloaded = download_release_asset_impl(
+        app_handle,
+        urls,
+        file_name,
+        request_id,
+        expected_size,
+        expected_sha256,
+    )
+    .await?;
+    open_installer(Path::new(&downloaded.path))?;
+    Ok(downloaded)
+}
+
+#[tauri::command]
+pub async fn download_release_asset(
+    app_handle: tauri::AppHandle,
+    urls: Vec<String>,
+    file_name: String,
+    request_id: String,
+    expected_size: Option<u64>,
+    expected_sha256: Option<String>,
+) -> Result<DownloadedReleaseAsset, String> {
+    download_release_asset_impl(
+        app_handle,
+        urls,
+        file_name,
+        request_id,
+        expected_size,
+        expected_sha256,
+    )
+    .await
+}
+
+async fn download_release_asset_impl(
+    app_handle: tauri::AppHandle,
+    urls: Vec<String>,
+    file_name: String,
+    request_id: String,
+    expected_size: Option<u64>,
+    expected_sha256: Option<String>,
+) -> Result<DownloadedReleaseAsset, String> {
     if urls.is_empty() {
         return Err("No release asset download URL was provided.".to_string());
     }
@@ -173,8 +214,6 @@ pub async fn download_and_open_release_asset(
                 target_path.to_string_lossy()
             )
         })?;
-
-    open_installer(&target_path)?;
 
     Ok(DownloadedReleaseAsset {
         path: target_path.to_string_lossy().into_owned(),
@@ -383,11 +422,33 @@ fn installer_dir(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
 }
 
 async fn cleanup_installer_dir(app_handle: &tauri::AppHandle) -> Result<(), String> {
+    let data_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|_| "Failed to resolve migration recovery storage.".to_string())?;
+    let preserve_downloads = should_preserve_installer_downloads(
+        crate::shared::installer_migration_service::installer_migration_recovery_status(&data_dir),
+    );
+    if preserve_downloads {
+        return Ok(());
+    }
     let dir = installer_dir(app_handle)?;
     match tokio::fs::remove_dir_all(&dir).await {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(format!("Failed to clean downloaded installers: {error}")),
+    }
+}
+
+fn should_preserve_installer_downloads(
+    recovery_status: Result<
+        crate::shared::installer_migration_service::InstallerMigrationRecoveryStatus,
+        String,
+    >,
+) -> bool {
+    match recovery_status {
+        Ok(status) => status.recovery_required,
+        Err(_) => true,
     }
 }
 
@@ -550,7 +611,8 @@ fn open_installer(path: &Path) -> Result<(), String> {
 mod tests {
     use super::{
         extract_managed_codex_archive, resolve_release_architecture,
-        sanitize_release_asset_file_name, validate_release_asset_url,
+        sanitize_release_asset_file_name, should_preserve_installer_downloads,
+        validate_release_asset_url,
     };
     use crate::windows_installer::{
         classify_windows_installer_registration, select_windows_installer_kind,
@@ -658,6 +720,27 @@ mod tests {
             None
         );
         assert_eq!(classify_windows_installer_registration(None, None), None);
+    }
+
+    #[test]
+    fn updater_cleanup_preserves_downloads_for_recovery_or_uncertain_status() {
+        use crate::shared::installer_migration_service::InstallerMigrationRecoveryStatus;
+
+        assert!(should_preserve_installer_downloads(Ok(
+            InstallerMigrationRecoveryStatus {
+                recovery_required: true,
+                target_version: Some("1.2.3".into()),
+            }
+        )));
+        assert!(should_preserve_installer_downloads(Err(
+            "recovery state is unreadable".into()
+        )));
+        assert!(!should_preserve_installer_downloads(Ok(
+            InstallerMigrationRecoveryStatus {
+                recovery_required: false,
+                target_version: None,
+            }
+        )));
     }
 
     #[test]

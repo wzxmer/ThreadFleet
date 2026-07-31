@@ -108,6 +108,7 @@ type UseMainAppModalsArgs = {
     openAppIconById: Record<string, string>;
     queueSaveSettings: (next: AppSettings) => Promise<unknown>;
     handleToggleAutomaticAppUpdateChecks: () => void;
+    updater: NonNullable<SettingsViewProps["updater"]>;
     doctor: (
       codexBin: string | null,
       codexArgs: string | null,
@@ -186,6 +187,7 @@ function buildSettingsViewProps({
     },
     onToggleAutomaticAppUpdateChecks:
       settings.handleToggleAutomaticAppUpdateChecks,
+    updater: settings.updater,
     onRunDoctor: settings.doctor,
     onRunCodexUpdate: settings.codexUpdate,
     onUpdateWorkspaceSettings: async (id, nextSettings) => {

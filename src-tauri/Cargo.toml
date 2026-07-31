@@ -10,6 +10,7 @@ default-run = "threadfleet"
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
+installer-migration-runtime = []
 
 [lib]
 # The `_lib` suffix may seem redundant but it is necessary
@@ -45,6 +46,8 @@ shell-words = "1.1"
 toml_edit = "0.20.2"
 sha2 = "0.10"
 zip = "4"
+cab = "0.6"
+msi = "0.10"
 
 [target."cfg(not(any(target_os = \"android\", target_os = \"ios\")))".dependencies]
 tauri-plugin-autostart = "2.5.1"
@@ -66,7 +69,8 @@ block2 = "0.6"
 [target."cfg(target_os = \"windows\")".dependencies]
 fontdb = "0.23"
 winreg = "0.52"
-windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem"] }
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_UI_Shell"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_Security_WinTrust", "Win32_Storage_FileSystem", "Win32_System_RemoteDesktop", "Win32_System_Threading"] }
 
 [target."cfg(target_os = \"ios\")".dependencies]
 objc2 = "0.6"

@@ -10,6 +10,8 @@ mod dispatcher;
 mod files;
 #[path = "rpc/git.rs"]
 mod git;
+#[path = "rpc/installer_migration.rs"]
+mod installer_migration;
 #[path = "rpc/prompts.rs"]
 mod prompts;
 #[path = "rpc/session_manager.rs"]

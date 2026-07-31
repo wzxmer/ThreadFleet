@@ -1,4 +1,7 @@
 use serde_json::json;
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::path::Path;
 use std::path::PathBuf;
 use tauri::{AppHandle, State};
 
@@ -213,4 +216,173 @@ pub(crate) fn write_text_file(path: String, content: String) -> Result<(), Strin
         }
     }
     std::fs::write(&target, content).map_err(|err| format!("Failed to write export file: {err}"))
+}
+
+const MAX_EXPORT_BYTES: u64 = 128 * 1024 * 1024;
+
+fn binary_export_temp_path(target: &Path) -> PathBuf {
+    let mut path = target.as_os_str().to_os_string();
+    path.push(".threadfleet-part");
+    PathBuf::from(path)
+}
+
+#[cfg(target_os = "windows")]
+fn finalize_binary_export(temp: &Path, target: &Path) -> Result<(), String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+
+    let temp_wide = temp
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let target_wide = target
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let moved = unsafe {
+        MoveFileExW(
+            temp_wide.as_ptr(),
+            target_wide.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if moved == 0 {
+        return Err(format!(
+            "Failed to finalize export file: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn finalize_binary_export(temp: &Path, target: &Path) -> Result<(), String> {
+    std::fs::rename(temp, target).map_err(|err| format!("Failed to finalize export file: {err}"))
+}
+
+#[tauri::command]
+pub(crate) fn write_binary_file_chunk(
+    path: String,
+    content: Vec<u8>,
+    offset: u64,
+    total_length: u64,
+) -> Result<bool, String> {
+    let target = PathBuf::from(path.trim());
+    if target.as_os_str().is_empty() {
+        return Err("Path is required".to_string());
+    }
+    if total_length == 0 {
+        return Err("Export content is empty".to_string());
+    }
+    if total_length > MAX_EXPORT_BYTES {
+        return Err("Export file exceeds the 128 MB safety limit".to_string());
+    }
+    if content.is_empty() || offset.saturating_add(content.len() as u64) > total_length {
+        return Err("Invalid export chunk bounds".to_string());
+    }
+    if let Some(parent) = target.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)
+                .map_err(|err| format!("Failed to create export directory: {err}"))?;
+        }
+    }
+
+    let temp = binary_export_temp_path(&target);
+    let mut options = OpenOptions::new();
+    options.create(true).write(true);
+    if offset == 0 {
+        options.truncate(true);
+    } else {
+        let current_length = std::fs::metadata(&temp)
+            .map_err(|err| format!("Failed to inspect partial export file: {err}"))?
+            .len();
+        if current_length != offset {
+            return Err("Export chunk offset does not match partial file".to_string());
+        }
+        options.append(true);
+    }
+    let mut file = options
+        .open(&temp)
+        .map_err(|err| format!("Failed to open partial export file: {err}"))?;
+    file.write_all(&content)
+        .map_err(|err| format!("Failed to write export chunk: {err}"))?;
+    let written = offset + content.len() as u64;
+    if written < total_length {
+        return Ok(false);
+    }
+
+    file.sync_all()
+        .map_err(|err| format!("Failed to flush export file: {err}"))?;
+    drop(file);
+    finalize_binary_export(&temp, &target)?;
+    Ok(true)
+}
+
+#[tauri::command]
+pub(crate) fn cancel_binary_file_write(path: String) -> Result<(), String> {
+    let target = PathBuf::from(path.trim());
+    if target.as_os_str().is_empty() {
+        return Err("Path is required".to_string());
+    }
+    let temp = binary_export_temp_path(&target);
+    if temp.exists() {
+        std::fs::remove_file(temp)
+            .map_err(|err| format!("Failed to remove partial export file: {err}"))?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod binary_export_tests {
+    use super::*;
+    use uuid::Uuid;
+
+    #[test]
+    fn writes_binary_export_chunks_atomically_and_cleans_cancelled_parts() {
+        let root = std::env::temp_dir().join(format!("threadfleet-export-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).expect("create temp export directory");
+        let target = root.join("conversation.pdf");
+        let target_string = target.to_string_lossy().to_string();
+
+        assert!(
+            !write_binary_file_chunk(target_string.clone(), vec![1, 2], 0, 4)
+                .expect("write first chunk")
+        );
+        assert!(!target.exists());
+        assert!(binary_export_temp_path(&target).exists());
+        assert!(
+            write_binary_file_chunk(target_string.clone(), vec![3, 4], 2, 4)
+                .expect("write final chunk")
+        );
+        assert_eq!(
+            std::fs::read(&target).expect("read completed export"),
+            vec![1, 2, 3, 4]
+        );
+
+        assert!(
+            write_binary_file_chunk(target_string.clone(), vec![7, 8], 0, 2)
+                .expect("replace completed export")
+        );
+        assert_eq!(
+            std::fs::read(&target).expect("read replaced export"),
+            vec![7, 8]
+        );
+
+        assert!(
+            !write_binary_file_chunk(target_string.clone(), vec![5], 0, 2)
+                .expect("start replacement")
+        );
+        cancel_binary_file_write(target_string).expect("cancel partial export");
+        assert!(!binary_export_temp_path(&target).exists());
+        assert_eq!(
+            std::fs::read(&target).expect("keep completed export"),
+            vec![7, 8]
+        );
+
+        std::fs::remove_dir_all(root).expect("remove temp export directory");
+    }
 }

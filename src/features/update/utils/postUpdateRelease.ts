@@ -160,6 +160,7 @@ export function selectReleaseAsset(
   platform: ReleasePlatform,
   windowsInstallerKind: WindowsInstallerKind = "unknown",
   architecture: ReleaseArchitecture = detectReleaseArchitecture(),
+  migrateNsisToMsi = false,
 ): ReleaseAsset | null {
   const usableAssets = assets.filter((asset) => {
     const name = asset.name.toLowerCase();
@@ -174,9 +175,10 @@ export function selectReleaseAsset(
   });
   const preferredExtensions =
     platform === "windows"
-      ? windowsInstallerKind === "nsis"
+      ? windowsInstallerKind === "nsis" && !migrateNsisToMsi
         ? [".exe"]
-        : windowsInstallerKind === "msi"
+        : windowsInstallerKind === "msi" ||
+            (windowsInstallerKind === "nsis" && migrateNsisToMsi)
           ? [".msi"]
           : []
       : platform === "macos"
@@ -215,12 +217,14 @@ function selectMirrorReleaseAsset(
   platform: ReleasePlatform,
   windowsInstallerKind: WindowsInstallerKind,
   architecture: ReleaseArchitecture,
+  migrateNsisToMsi: boolean,
 ): ReleaseAsset | null {
   const preferredExtensions =
     platform === "windows"
-      ? windowsInstallerKind === "nsis"
+      ? windowsInstallerKind === "nsis" && !migrateNsisToMsi
         ? [".exe"]
-        : windowsInstallerKind === "msi"
+        : windowsInstallerKind === "msi" ||
+            (windowsInstallerKind === "nsis" && migrateNsisToMsi)
           ? [".msi"]
           : []
       : platform === "macos"
@@ -256,6 +260,7 @@ function parseMirrorUpdate(
   platform: ReleasePlatform,
   windowsInstallerKind: WindowsInstallerKind,
   architecture: ReleaseArchitecture,
+  migrateNsisToMsi: boolean,
 ): ReleaseUpdateInfo | null {
   const version = normalizeStoredVersion(payload.version ?? "");
   if (!version || !isReleaseVersionNewer(version, currentVersion)) return null;
@@ -273,6 +278,7 @@ function parseMirrorUpdate(
     platform,
     windowsInstallerKind,
     architecture,
+    migrateNsisToMsi,
   );
   if (!selectedAsset) {
     throw new Error("No compatible installer asset found in the update mirror.");
@@ -291,6 +297,7 @@ async function fetchMirrorUpdate(
   platform: ReleasePlatform,
   windowsInstallerKind: WindowsInstallerKind,
   architecture: ReleaseArchitecture,
+  migrateNsisToMsi: boolean,
 ): Promise<ReleaseUpdateInfo | null> {
   const response = await fetch(manifestUrl, {
     cache: "no-store",
@@ -305,6 +312,7 @@ async function fetchMirrorUpdate(
     platform,
     windowsInstallerKind,
     architecture,
+    migrateNsisToMsi,
   );
 }
 
@@ -314,6 +322,7 @@ export async function fetchLatestReleaseUpdate(
   mirrorManifestUrls: string[] = MIRROR_MANIFEST_URLS,
   windowsInstallerKind: WindowsInstallerKind = "unknown",
   architecture: ReleaseArchitecture = detectReleaseArchitecture(),
+  migrateNsisToMsi = false,
 ): Promise<ReleaseUpdateInfo | null> {
   let githubError: unknown;
   try {
@@ -347,6 +356,7 @@ export async function fetchLatestReleaseUpdate(
       platform,
       windowsInstallerKind,
       architecture,
+      migrateNsisToMsi,
     );
     if (!selectedAsset) {
       throw new Error("No compatible installer asset found in the latest release.");
@@ -360,6 +370,7 @@ export async function fetchLatestReleaseUpdate(
           platform,
           windowsInstallerKind,
           architecture,
+          migrateNsisToMsi,
         );
         if (mirrorUpdate?.version === releaseVersion && mirrorUpdate.asset.name === selectedAsset.name) {
           selectedAsset.urls.push(...mirrorUpdate.asset.urls);
@@ -389,6 +400,7 @@ export async function fetchLatestReleaseUpdate(
         platform,
         windowsInstallerKind,
         architecture,
+        migrateNsisToMsi,
       );
       if (!candidate) continue;
       if (!mirrorUpdate) {

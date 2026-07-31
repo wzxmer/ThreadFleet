@@ -5,7 +5,11 @@ import type { DebugEntry } from "../../../types";
 import {
   cleanupDownloadedReleaseAssets,
   downloadAndOpenReleaseAsset,
+  downloadReleaseAsset,
+  getWindowsInstallerMigrationCapability,
+  getWindowsInstallerMigrationRecoveryStatus,
   getReleasePlatform,
+  prepareWindowsInstallerMigration,
   windowsInstallerKind,
 } from "../../../services/tauri";
 import { subscribeReleaseAssetDownloadProgress } from "../../../services/events";
@@ -20,7 +24,22 @@ vi.mock("@tauri-apps/api/core", () => ({
 vi.mock("../../../services/tauri", () => ({
   cleanupDownloadedReleaseAssets: vi.fn(() => Promise.resolve()),
   downloadAndOpenReleaseAsset: vi.fn(() => Promise.resolve({ path: "installer.msi" })),
+  downloadReleaseAsset: vi.fn(() => Promise.resolve({ path: "C:\\staging\\installer.msi" })),
+  getWindowsInstallerMigrationCapability: vi.fn(() => Promise.resolve({
+    platformSupported: true,
+    runtimeEnabled: false,
+    remoteExecutionAllowed: false,
+  })),
+  getWindowsInstallerMigrationRecoveryStatus: vi.fn(() => Promise.resolve({
+    recoveryRequired: false,
+    targetVersion: null,
+  })),
   getReleasePlatform: vi.fn(() => Promise.resolve("windows-x86_64")),
+  prepareWindowsInstallerMigration: vi.fn(() => Promise.resolve({
+    targetVersion: "9.9.9",
+    expiresAtUnixMs: 123,
+    sourceMetadataItems: 2,
+  })),
   windowsInstallerKind: vi.fn(() => Promise.resolve("msi")),
 }));
 
@@ -30,7 +49,13 @@ vi.mock("../../../services/events", () => ({
 
 const cleanupDownloadedReleaseAssetsMock = vi.mocked(cleanupDownloadedReleaseAssets);
 const downloadAndOpenReleaseAssetMock = vi.mocked(downloadAndOpenReleaseAsset);
+const downloadReleaseAssetMock = vi.mocked(downloadReleaseAsset);
+const migrationCapabilityMock = vi.mocked(getWindowsInstallerMigrationCapability);
+const migrationRecoveryStatusMock = vi.mocked(
+  getWindowsInstallerMigrationRecoveryStatus,
+);
 const getReleasePlatformMock = vi.mocked(getReleasePlatform);
+const prepareMigrationMock = vi.mocked(prepareWindowsInstallerMigration);
 const windowsInstallerKindMock = vi.mocked(windowsInstallerKind);
 const subscribeReleaseAssetDownloadProgressMock = vi.mocked(
   subscribeReleaseAssetDownloadProgress,
@@ -38,7 +63,15 @@ const subscribeReleaseAssetDownloadProgressMock = vi.mocked(
 const fetchMock = vi.fn();
 let progressListener: ((event: ReleaseAssetDownloadProgress) => void) | null = null;
 
-function latestReleaseResponse(version: string, assets = releaseAssets()) {
+function latestReleaseResponse(
+  version: string,
+  assets: Array<{
+    name: string;
+    browser_download_url: string;
+    size: number;
+    digest?: string;
+  }> = releaseAssets(),
+) {
   return {
     ok: true,
     status: 200,
@@ -79,7 +112,22 @@ describe("useUpdater", () => {
     vi.clearAllMocks();
     cleanupDownloadedReleaseAssetsMock.mockResolvedValue(undefined);
     downloadAndOpenReleaseAssetMock.mockResolvedValue({ path: "installer.msi" });
+    downloadReleaseAssetMock.mockResolvedValue({ path: "C:\\staging\\installer.msi" });
+    migrationCapabilityMock.mockResolvedValue({
+      platformSupported: true,
+      runtimeEnabled: false,
+      remoteExecutionAllowed: false,
+    });
+    migrationRecoveryStatusMock.mockResolvedValue({
+      recoveryRequired: false,
+      targetVersion: null,
+    });
     getReleasePlatformMock.mockResolvedValue("windows-x86_64");
+    prepareMigrationMock.mockResolvedValue({
+      targetVersion: "9.9.9",
+      expiresAtUnixMs: 123,
+      sourceMetadataItems: 2,
+    });
     windowsInstallerKindMock.mockResolvedValue("msi");
     progressListener = null;
     subscribeReleaseAssetDownloadProgressMock.mockImplementation((listener) => {
@@ -212,6 +260,23 @@ describe("useUpdater", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("surfaces backend-bound migration recovery before checking releases", async () => {
+    migrationRecoveryStatusMock.mockResolvedValue({
+      recoveryRequired: true,
+      targetVersion: "9.9.9",
+    });
+    const { result } = renderHook(() => useUpdater({}));
+
+    await waitFor(() => expect(result.current.state.stage).toBe("migrationReady"));
+    expect(result.current.state).toEqual({
+      stage: "migrationReady",
+      version: "9.9.9",
+      migrationRecovery: true,
+    });
+    expect(windowsInstallerKindMock).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("downloads and opens the installer when update is available", async () => {
     fetchMock.mockResolvedValue(latestReleaseResponse("9.9.9"));
 
@@ -241,6 +306,95 @@ describe("useUpdater", () => {
     expect(
       window.localStorage.getItem(STORAGE_KEY_PENDING_POST_UPDATE_VERSION),
     ).toBeNull();
+  });
+
+  it("downloads without opening and prepares a backend-authorized NSIS migration", async () => {
+    windowsInstallerKindMock.mockResolvedValue("nsis");
+    migrationCapabilityMock.mockResolvedValue({
+      platformSupported: true,
+      runtimeEnabled: true,
+      remoteExecutionAllowed: false,
+    });
+    fetchMock.mockResolvedValue(latestReleaseResponse("9.9.9", [
+      {
+        name: "ThreadFleet_9.9.9_x64-setup.exe",
+        browser_download_url:
+          "https://github.com/wzxmer/ThreadFleet/releases/download/v9.9.9/ThreadFleet_9.9.9_x64-setup.exe",
+        size: 100,
+        digest: `sha256:${"b".repeat(64)}`,
+      },
+      {
+        name: "ThreadFleet_9.9.9_x64.msi",
+        browser_download_url:
+          "https://github.com/wzxmer/ThreadFleet/releases/download/v9.9.9/ThreadFleet_9.9.9_x64.msi",
+        size: 200,
+        digest: `sha256:${"a".repeat(64)}`,
+      },
+    ]));
+    const { result } = renderHook(() =>
+      useUpdater({ experimentalWindowsInstallerMigrationEnabled: true }),
+    );
+
+    await act(async () => {
+      await result.current.startUpdate();
+    });
+    await act(async () => {
+      await result.current.startUpdate();
+    });
+
+    await waitFor(() => expect(result.current.state.stage).toBe("migrationReady"));
+    expect(downloadAndOpenReleaseAssetMock).not.toHaveBeenCalled();
+    expect(downloadReleaseAssetMock).toHaveBeenCalledWith(
+      [expect.stringContaining(".msi")],
+      expect.stringMatching(/\.msi$/),
+      expect.any(String),
+      200,
+      "a".repeat(64),
+    );
+    expect(prepareMigrationMock).toHaveBeenCalledWith({
+      version: "9.9.9",
+      artifactPath: "C:\\staging\\installer.msi",
+      artifactSize: 200,
+      artifactSha256: "a".repeat(64),
+    });
+  });
+
+  it("keeps NSIS updates on EXE while the migration runtime gate is closed", async () => {
+    windowsInstallerKindMock.mockResolvedValue("nsis");
+    fetchMock.mockResolvedValue(latestReleaseResponse("9.9.9", [
+      {
+        name: "ThreadFleet_9.9.9_x64-setup.exe",
+        browser_download_url:
+          "https://github.com/wzxmer/ThreadFleet/releases/download/v9.9.9/ThreadFleet_9.9.9_x64-setup.exe",
+        size: 100,
+      },
+      {
+        name: "ThreadFleet_9.9.9_x64.msi",
+        browser_download_url:
+          "https://github.com/wzxmer/ThreadFleet/releases/download/v9.9.9/ThreadFleet_9.9.9_x64.msi",
+        size: 200,
+      },
+    ]));
+    const { result } = renderHook(() =>
+      useUpdater({ experimentalWindowsInstallerMigrationEnabled: true }),
+    );
+
+    await act(async () => {
+      await result.current.startUpdate();
+    });
+    await act(async () => {
+      await result.current.startUpdate();
+    });
+
+    await waitFor(() => expect(result.current.state.stage).toBe("installing"));
+    expect(downloadAndOpenReleaseAssetMock).toHaveBeenCalledWith(
+      [expect.stringContaining(".exe")],
+      expect.stringMatching(/\.exe$/),
+      expect.any(String),
+      100,
+      undefined,
+    );
+    expect(downloadReleaseAssetMock).not.toHaveBeenCalled();
   });
 
   it("updates download progress from backend progress events", async () => {

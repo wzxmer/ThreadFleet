@@ -18,7 +18,12 @@ pub(crate) mod installer_migration_core;
 #[allow(dead_code)]
 pub(crate) mod installer_migration_engine;
 #[allow(dead_code)]
+pub(crate) mod installer_migration_service;
+#[allow(dead_code)]
 pub(crate) mod installer_migration_store;
+#[cfg(target_os = "windows")]
+#[allow(dead_code)]
+pub(crate) mod installer_migration_windows;
 pub(crate) mod knowledge_adapter_core;
 pub(crate) mod local_usage_core;
 pub(crate) mod message_reference_core;

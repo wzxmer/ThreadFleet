@@ -185,11 +185,6 @@ export const AppModals = memo(function AppModals({
   currentBranch,
   onBranchSwitcherSelect,
   onBranchSwitcherCancel,
-  settingsOpen,
-  settingsSection,
-  onCloseSettings,
-  SettingsViewComponent,
-  settingsProps,
 }: AppModalsProps) {
   const { branches: worktreeBranches } = useGitBranches({
     activeWorkspace: worktreePrompt?.workspace ?? null,
@@ -321,15 +316,6 @@ export const AppModals = memo(function AppModals({
             currentBranch={currentBranch}
             onSelect={onBranchSwitcherSelect}
             onCancel={onBranchSwitcherCancel}
-          />
-        </Suspense>
-      )}
-      {settingsOpen && (
-        <Suspense fallback={null}>
-          <SettingsViewComponent
-            {...settingsProps}
-            onClose={onCloseSettings}
-            initialSection={settingsSection ?? undefined}
           />
         </Suspense>
       )}

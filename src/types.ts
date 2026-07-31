@@ -605,8 +605,7 @@ export type RemoteBackendTarget = {
   token: string | null;
   lastConnectedAtMs?: number | null;
 };
-export type ThemePreference = "system" | "light" | "dark" | "dim";
-export type ThemeAccentPreference = "codex" | "blue" | "green" | "pink" | "orange";
+export type ThemePreference = "light" | "dark";
 export type MessageReadingStyle = "bubble" | "native" | "cli";
 export type AppLanguagePreference = "system" | "zh" | "en";
 export type PersonalityPreference = "friendly" | "pragmatic";
@@ -775,7 +774,6 @@ export type AppSettings = {
   uiScale: number;
   appLanguage: AppLanguagePreference;
   theme: ThemePreference;
-  themeAccent: ThemeAccentPreference;
   showCodexUsage: boolean;
   usageShowRemaining: boolean;
   showMessageFilePath: boolean;
@@ -795,6 +793,7 @@ export type AppSettings = {
   autoDeleteArchivedThreadsEnabled: boolean;
   autoDeleteArchivedThreadsDays: 30 | 60 | 90 | 180;
   automaticAppUpdateChecksEnabled: boolean;
+  experimentalWindowsInstallerMigrationEnabled: boolean;
   uiFontFamily: string;
   uiLatinFontFamily: string;
   uiCjkFontFamily: string;
@@ -1173,6 +1172,7 @@ export type TurnExecutionSummary = {
   threadId: string;
   turnId: string;
   turnChain: string[];
+  modelId?: string | null;
   status: TurnExecutionStatus;
   startedAtMs: number;
   endedAtMs: number | null;

@@ -10,17 +10,6 @@ type WindowsInstallerRepairDialogProps = {
   onRecheck: () => unknown | Promise<unknown>;
 };
 
-const CARD_STYLE = {
-  width: "min(560px, calc(100vw - 40px))",
-  maxHeight: "min(680px, calc(100vh - 40px))",
-  overflowY: "auto" as const,
-  padding: 16,
-  boxSizing: "border-box" as const,
-  display: "flex",
-  flexDirection: "column" as const,
-  gap: 12,
-};
-
 export function WindowsInstallerRepairDialog({
   open,
   onClose,
@@ -76,10 +65,12 @@ export function WindowsInstallerRepairDialog({
 
   return (
     <ModalShell
+      className="update-dialog-modal"
+      cardClassName="update-dialog-card"
       onBackdropClick={busy ? undefined : onClose}
       ariaLabelledBy="windows-installer-repair-title"
     >
-      <div style={CARD_STYLE}>
+      <div className="update-dialog-content update-repair-dialog-content">
         <div id="windows-installer-repair-title" className="ds-modal-title">
           {t("installerRepair.title")}
         </div>
