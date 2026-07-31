@@ -20,6 +20,7 @@ type SetupOverrides = {
   onUserMessageCreated?: (workspaceId: string, threadId: string, text: string) => void;
   onReviewExited?: (workspaceId: string, threadId: string) => void;
   onExecutionBindingObserved?: ReturnType<typeof vi.fn>;
+  onThreadActivity?: ReturnType<typeof vi.fn>;
 };
 
 const makeOptions = (overrides: SetupOverrides = {}) => {
@@ -45,6 +46,7 @@ const makeOptions = (overrides: SetupOverrides = {}) => {
       onUserMessageCreated: overrides.onUserMessageCreated,
       onReviewExited: overrides.onReviewExited,
       onExecutionBindingObserved: overrides.onExecutionBindingObserved,
+      onThreadActivity: overrides.onThreadActivity,
     }),
   );
 
@@ -299,6 +301,17 @@ describe("useThreadItemEvents", () => {
       delta: "Hello",
       hasCustomName: false,
     });
+  });
+
+  it("reports thread activity for output deltas", () => {
+    const onThreadActivity = vi.fn();
+    const { result } = makeOptions({ onThreadActivity });
+
+    act(() => {
+      result.current.onCommandOutputDelta("ws-1", "thread-1", "cmd-1", "output");
+    });
+
+    expect(onThreadActivity).toHaveBeenCalledWith("ws-1", "thread-1", "active");
   });
 
   it("completes agent messages and updates thread activity", () => {

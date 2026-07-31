@@ -20,6 +20,7 @@ type HarnessProps = {
   disabled?: boolean;
   contextUsagePercent?: number | null;
   contextCompactionCount?: number;
+  contextCompactionInProgress?: boolean;
 };
 
 function ComposerHarness({
@@ -28,6 +29,7 @@ function ComposerHarness({
   disabled = false,
   contextUsagePercent,
   contextCompactionCount,
+  contextCompactionInProgress,
 }: HarnessProps) {
   const { activeImages, attachImages, removeImage, clearActiveImages } =
     useComposerImages({ activeThreadId, activeWorkspaceId });
@@ -59,6 +61,7 @@ function ComposerHarness({
         textareaRef={textareaRef}
         contextUsagePercent={contextUsagePercent}
         contextCompactionCount={contextCompactionCount}
+        contextCompactionInProgress={contextCompactionInProgress}
         suggestionsOpen={false}
         suggestions={[]}
         highlightIndex={0}
@@ -131,6 +134,14 @@ function getContextProgress(container: HTMLElement) {
   return progress;
 }
 
+function getContextCycleTrack(container: HTMLElement) {
+  const track = container.querySelector(".composer-context-cycle-track");
+  if (!track) {
+    throw new Error("Context cycle track not found");
+  }
+  return track;
+}
+
 function dispatchDrop(
   element: HTMLElement,
   files: File[],
@@ -185,9 +196,12 @@ describe("Composer attachments integration", () => {
     });
 
     expect(harness.container.querySelector(".is-context-unknown")).toBeTruthy();
-    const progressRect = getContextProgress(harness.container).querySelector("rect");
-    expect(progressRect).toBeTruthy();
-    expect(progressRect?.hasAttribute("pathLength")).toBe(false);
+    const progressValue = getContextProgress(harness.container).querySelector(
+      ".composer-context-progress-value",
+    );
+    expect(progressValue).toBeTruthy();
+    expect(progressValue?.hasAttribute("pathLength")).toBe(false);
+    expect(getContextCycleTrack(harness.container).querySelector("span")).toBeTruthy();
     const contextCountLabel = harness.container
       .querySelector(".composer-context-count")
       ?.getAttribute("aria-label");
@@ -204,8 +218,20 @@ describe("Composer attachments integration", () => {
       contextUsagePercent: 42,
     });
 
-    const progressRect = getContextProgress(harness.container).querySelector("rect");
-    expect(progressRect?.getAttribute("pathLength")).toBe("100");
+    const progressValue = getContextProgress(harness.container).querySelector(
+      ".composer-context-progress-value",
+    );
+    expect(progressValue?.getAttribute("pathLength")).toBe("100");
+    expect(
+      harness.container
+        .querySelector<HTMLElement>(".composer-input-area")
+        ?.style.getPropertyValue("--composer-context-used"),
+    ).toBe("42");
+    expect(
+      harness.container
+        .querySelector(".composer-context-count")
+        ?.getAttribute("aria-valuenow"),
+    ).toBe("42");
 
     harness.unmount();
   });
@@ -225,6 +251,31 @@ describe("Composer attachments integration", () => {
         .querySelector(".composer-context-count")
         ?.getAttribute("aria-label"),
     ).toContain("上下文已压缩 3 次");
+
+    harness.unmount();
+  });
+
+  it("shows indeterminate cycle feedback while context compaction is running", () => {
+    const harness = renderComposerHarness({
+      activeThreadId: "thread-1",
+      activeWorkspaceId: "ws-1",
+      contextUsagePercent: 0,
+      contextCompactionCount: 3,
+      contextCompactionInProgress: true,
+    });
+
+    expect(harness.container.querySelector(".is-context-compacting")).toBeTruthy();
+    expect(
+      getContextCycleTrack(harness.container).querySelector("span.is-compacting"),
+    ).toBeTruthy();
+    expect(
+      harness.container.querySelector(".composer-context-count.is-compacting"),
+    ).toBeTruthy();
+    expect(
+      harness.container
+        .querySelector(".composer-context-count")
+        ?.getAttribute("aria-valuenow"),
+    ).toBeNull();
 
     harness.unmount();
   });

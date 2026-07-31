@@ -63,6 +63,7 @@ export function reduceThreadExecutionSummaries(
             turnChain: current.turnChain.includes(action.turnId)
               ? current.turnChain
               : [...current.turnChain, action.turnId],
+            modelId: current.modelId ?? action.modelId ?? null,
             recordRevision: current.recordRevision + 1,
             updatedAtMs: action.timestamp,
           });
@@ -75,6 +76,7 @@ export function reduceThreadExecutionSummaries(
         threadId: action.threadId,
         turnId: action.turnId,
         turnChain: [action.turnId],
+        modelId: action.modelId ?? null,
         status: "active",
         startedAtMs: action.timestamp,
         endedAtMs: null,

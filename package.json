@@ -49,6 +49,8 @@
     "@tauri-apps/plugin-updater": "^2.10.0",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",
+    "html2canvas": "^1.4.1",
+    "jspdf": "^3.0.3",
     "lucide-react": "^0.562.0",
     "prismjs": "^1.30.0",
     "react": "^19.1.0",

@@ -77,9 +77,46 @@ describe("useWorkspaceRestore", () => {
 
     await waitFor(() => expect(listThreadsForWorkspaces).toHaveBeenCalledWith(
       [localWorkspace],
-      { maxPages: 6, refreshReason: "initial_restore" },
+      {
+        maxPages: 1,
+        refreshReason: "initial_restore",
+        knownWorkspaces: [localWorkspace],
+      },
     ));
     await waitFor(() => expect(result.current).toBe(true));
     expect(connectWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("connects pending workspaces with bounded concurrency and preserves input order", async () => {
+    const pending = Array.from({ length: 5 }, (_, index) => ({
+      ...workspace,
+      id: `workspace-${index}`,
+      name: `Workspace ${index}`,
+      connected: false,
+    }));
+    let activeConnections = 0;
+    let maxActiveConnections = 0;
+    const connectWorkspace = vi.fn(async (entry: WorkspaceInfo) => {
+      activeConnections += 1;
+      maxActiveConnections = Math.max(maxActiveConnections, activeConnections);
+      await new Promise((resolve) => setTimeout(resolve, entry.id === "workspace-0" ? 20 : 1));
+      activeConnections -= 1;
+    });
+    const listThreadsForWorkspaces = vi.fn().mockResolvedValue(undefined);
+
+    renderHook(() =>
+      useWorkspaceRestore({
+        workspaces: pending,
+        hasLoaded: true,
+        connectWorkspace,
+        listThreadsForWorkspaces,
+      }),
+    );
+
+    await waitFor(() => expect(listThreadsForWorkspaces).toHaveBeenCalledTimes(1));
+    expect(maxActiveConnections).toBeLessThanOrEqual(3);
+    expect(listThreadsForWorkspaces.mock.calls[0]?.[0]).toEqual(
+      pending.map((entry) => ({ ...entry, connected: true })),
+    );
   });
 });

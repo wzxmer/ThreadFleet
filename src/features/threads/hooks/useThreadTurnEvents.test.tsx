@@ -897,6 +897,87 @@ describe("useThreadTurnEvents", () => {
     });
   });
 
+  it("restores an unfinished terminal plan to live when thread activity continues", async () => {
+    const { result, dispatch } = makeOptions({
+      planByThread: {
+        "thread-1": {
+          turnId: "turn-1",
+          explanation: "Still working",
+          steps: [{ step: "Verify output", status: "inProgress" }],
+        },
+      },
+    });
+
+    act(() => {
+      result.current.onTurnCompleted("ws-1", "thread-1", "turn-1");
+    });
+
+    await waitFor(() => {
+      expect(dispatch).toHaveBeenCalledWith({
+        type: "setThreadPlan",
+        threadId: "thread-1",
+        plan: expect.objectContaining({ syncState: "stale" }),
+      });
+    });
+
+    act(() => {
+      result.current.onThreadActivity("ws-1", "thread-1");
+    });
+
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "setThreadPlan",
+      threadId: "thread-1",
+      plan: expect.objectContaining({ syncState: "live" }),
+    });
+  });
+
+  it("does not mark an unfinished terminal plan stale while an item remains active", async () => {
+    vi.useFakeTimers();
+    try {
+      const { result, dispatch } = makeOptions({
+        planByThread: {
+          "thread-1": {
+            turnId: "turn-1",
+            explanation: "Still working",
+            steps: [{ step: "Verify output", status: "inProgress" }],
+          },
+        },
+      });
+
+      act(() => {
+        result.current.onThreadActivity("ws-1", "thread-1", "started");
+        result.current.onTurnCompleted("ws-1", "thread-1", "turn-1");
+      });
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      act(() => {
+        vi.advanceTimersByTime(600);
+      });
+
+      expect(dispatch).not.toHaveBeenCalledWith({
+        type: "setThreadPlan",
+        threadId: "thread-1",
+        plan: expect.objectContaining({ syncState: "stale" }),
+      });
+
+      act(() => {
+        result.current.onThreadActivity("ws-1", "thread-1", "completed");
+        vi.advanceTimersByTime(600);
+      });
+
+      expect(dispatch).toHaveBeenCalledWith({
+        type: "setThreadPlan",
+        threadId: "thread-1",
+        plan: expect.objectContaining({ syncState: "stale" }),
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps onTurnCompleted stable while plan content changes", () => {
     const dispatch = vi.fn();
     const getCustomName = vi.fn();
@@ -1000,7 +1081,7 @@ describe("useThreadTurnEvents", () => {
     });
   });
 
-  it("marks an unfinished plan update stale when it arrives after terminal state", () => {
+  it("marks an unfinished plan update stale after terminal quiet", async () => {
     const { result, dispatch } = makeOptions();
     vi.mocked(normalizePlanUpdate).mockReturnValue({
       turnId: "turn-5",
@@ -1020,13 +1101,53 @@ describe("useThreadTurnEvents", () => {
       type: "setThreadPlan",
       threadId: "thread-1",
       plan: expect.objectContaining({
-        syncState: "stale",
+        syncState: "live",
         steps: [{ step: "Verify", status: "inProgress" }],
       }),
+    });
+    await waitFor(() => {
+      expect(dispatch).toHaveBeenCalledWith({
+        type: "setThreadPlan",
+        threadId: "thread-1",
+        plan: expect.objectContaining({
+          syncState: "stale",
+          steps: [{ step: "Verify", status: "inProgress" }],
+        }),
+      });
     });
     expect(dispatch).not.toHaveBeenCalledWith({
       type: "clearThreadPlan",
       threadId: "thread-1",
+    });
+  });
+
+  it("keeps an unfinished terminal plan live while post-terminal activity repeats", () => {
+    const { result, dispatch } = makeOptions();
+    vi.mocked(normalizePlanUpdate).mockReturnValue({
+      turnId: "turn-6",
+      explanation: "Incomplete",
+      steps: [{ step: "Verify", status: "inProgress" }],
+    });
+
+    act(() => {
+      result.current.onTurnCompleted("ws-1", "thread-1", "turn-6");
+      result.current.onTurnPlanUpdated("ws-1", "thread-1", "turn-6", {
+        explanation: "Incomplete",
+        plan: [],
+      });
+    });
+
+    act(() => {
+      result.current.onThreadActivity("ws-1", "thread-1");
+    });
+
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "setThreadPlan",
+      threadId: "thread-1",
+      plan: expect.objectContaining({
+        syncState: "live",
+        steps: [{ step: "Verify", status: "inProgress" }],
+      }),
     });
   });
 

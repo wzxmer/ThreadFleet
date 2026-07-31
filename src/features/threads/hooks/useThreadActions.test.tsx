@@ -2706,6 +2706,25 @@ describe("useThreadActions", () => {
     });
   });
 
+  it("reuses known workspaces during startup thread hydration", async () => {
+    vi.mocked(listThreads).mockResolvedValue({
+      result: {
+        data: [],
+        nextCursor: null,
+      },
+    });
+    const { result } = renderActions();
+
+    await act(async () => {
+      await result.current.listThreadsForWorkspaces([workspace], {
+        knownWorkspaces: [workspace, workspaceTwo],
+      });
+    });
+
+    expect(listWorkspaces).not.toHaveBeenCalled();
+    expect(listThreads).toHaveBeenCalledWith("ws-1", null, 100, "updated_at");
+  });
+
   it("records the refresh reason in thread list debug entries", async () => {
     vi.mocked(listThreads).mockResolvedValue({
       result: { data: [], nextCursor: null },

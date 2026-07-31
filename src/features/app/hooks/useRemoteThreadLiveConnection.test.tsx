@@ -650,4 +650,84 @@ describe("useRemoteThreadLiveConnection", () => {
     expect(threadLiveSubscribeMock).toHaveBeenCalledTimes(2);
     expect(refreshThread).toHaveBeenCalledTimes(0);
   });
+
+  it("does not reconnect a terminal thread on remote recovery events when live updates are no longer needed", async () => {
+    const refreshThread = vi.fn().mockResolvedValue(undefined);
+
+    renderHook(() =>
+      useRemoteThreadLiveConnection({
+        backendMode: "remote",
+        activeWorkspace: {
+          id: "ws-1",
+          name: "Workspace",
+          path: "/tmp/ws-1",
+          connected: true,
+          settings: { sidebarCollapsed: false },
+        },
+        activeThreadId: "thread-1",
+        activeThreadHasLocalSnapshot: true,
+        activeThreadIsProcessing: false,
+        activeThreadNeedsLiveConnection: false,
+        refreshThread,
+      }),
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    threadLiveSubscribeMock.mockClear();
+    threadLiveUnsubscribeMock.mockClear();
+    refreshThread.mockClear();
+
+    await act(async () => {
+      for (const listener of appServerListeners) {
+        listener({
+          workspace_id: "ws-1",
+          method: "thread/live_detached",
+          params: { threadId: "thread-1" },
+        });
+        listener({
+          workspace_id: "ws-1",
+          method: "codex/connected",
+          params: {},
+        });
+      }
+      await Promise.resolve();
+    });
+
+    expect(threadLiveSubscribeMock).not.toHaveBeenCalled();
+    expect(threadLiveUnsubscribeMock).not.toHaveBeenCalled();
+    expect(refreshThread).not.toHaveBeenCalled();
+  });
+
+  it("hydrates a terminal thread without subscribing when it lacks a local snapshot", async () => {
+    const refreshThread = vi.fn().mockResolvedValue(undefined);
+
+    renderHook(() =>
+      useRemoteThreadLiveConnection({
+        backendMode: "remote",
+        activeWorkspace: {
+          id: "ws-1",
+          name: "Workspace",
+          path: "/tmp/ws-1",
+          connected: true,
+          settings: { sidebarCollapsed: false },
+        },
+        activeThreadId: "thread-1",
+        activeThreadHasLocalSnapshot: false,
+        activeThreadIsProcessing: false,
+        activeThreadNeedsLiveConnection: false,
+        refreshThread,
+      }),
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(refreshThread).toHaveBeenCalledWith("ws-1", "thread-1");
+    expect(threadLiveSubscribeMock).not.toHaveBeenCalled();
+    expect(threadLiveUnsubscribeMock).not.toHaveBeenCalled();
+  });
 });

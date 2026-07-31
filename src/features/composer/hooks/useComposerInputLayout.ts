@@ -1,18 +1,28 @@
-import { useEffect, useState, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState, type RefObject } from "react";
 
 type UseComposerInputLayoutArgs = {
   isExpanded: boolean;
   text: string;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
+  manualHeight?: number | null;
 };
 
 export function useComposerInputLayout({
   isExpanded,
   text,
   textareaRef,
+  manualHeight = null,
 }: UseComposerInputLayoutArgs) {
   const [isPhoneLayout, setIsPhoneLayout] = useState(false);
   const [isPhoneTallInput, setIsPhoneTallInput] = useState(false);
+  const [textareaScrollable, setTextareaScrollable] = useState(false);
+  const textareaHeightBounds = useMemo(
+    () => ({
+      min: isExpanded ? (isPhoneLayout ? 112 : 120) : isPhoneLayout ? 36 : 24,
+      max: isExpanded ? (isPhoneLayout ? 280 : 360) : isPhoneLayout ? 168 : 260,
+    }),
+    [isExpanded, isPhoneLayout],
+  );
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -42,22 +52,32 @@ export function useComposerInputLayout({
     };
   }, [textareaRef]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const textarea = textareaRef.current;
     if (!textarea) {
       return;
     }
-    const minTextareaHeight = isExpanded ? (isPhoneLayout ? 152 : 180) : isPhoneLayout ? 52 : 60;
-    const maxTextareaHeight = isExpanded ? (isPhoneLayout ? 280 : 320) : isPhoneLayout ? 168 : 120;
-    textarea.style.height = "auto";
+    const { min: minTextareaHeight, max: maxTextareaHeight } = textareaHeightBounds;
+    textarea.style.setProperty("--composer-textarea-max-height", `${maxTextareaHeight}px`);
     textarea.style.minHeight = `${minTextareaHeight}px`;
     textarea.style.maxHeight = `${maxTextareaHeight}px`;
-    const nextHeight = Math.min(
-      Math.max(textarea.scrollHeight, minTextareaHeight),
-      maxTextareaHeight,
-    );
+    const nextHeight =
+      manualHeight === null
+        ? Math.min(
+            Math.max(textarea.scrollHeight, minTextareaHeight),
+            maxTextareaHeight,
+          )
+        : Math.min(Math.max(manualHeight, minTextareaHeight), maxTextareaHeight);
+    if (manualHeight === null) {
+      textarea.style.height = "auto";
+    }
     textarea.style.height = `${nextHeight}px`;
-    textarea.style.overflowY = textarea.scrollHeight > maxTextareaHeight ? "auto" : "hidden";
+    const nextScrollable =
+      manualHeight === null
+        ? textarea.scrollHeight > maxTextareaHeight + 1
+        : textarea.scrollHeight > nextHeight + 1;
+    textarea.style.overflowY = nextScrollable ? "auto" : "hidden";
+    setTextareaScrollable((prev) => (prev === nextScrollable ? prev : nextScrollable));
 
     if (!isPhoneLayout) {
       setIsPhoneTallInput((prev) => (prev ? false : prev));
@@ -72,7 +92,7 @@ export function useComposerInputLayout({
     const estimatedLineCount = contentHeight / lineHeight;
     const nextIsPhoneTallInput = estimatedLineCount > 2.25;
     setIsPhoneTallInput((prev) => (prev === nextIsPhoneTallInput ? prev : nextIsPhoneTallInput));
-  }, [isExpanded, isPhoneLayout, text, textareaRef]);
+  }, [isPhoneLayout, manualHeight, text, textareaHeightBounds, textareaRef]);
 
-  return { isPhoneLayout, isPhoneTallInput };
+  return { isPhoneLayout, isPhoneTallInput, textareaScrollable, textareaHeightBounds };
 }

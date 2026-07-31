@@ -40,6 +40,11 @@ type UseThreadItemEventsOptions = {
   ) => void | Promise<void>;
   onReviewExited?: (workspaceId: string, threadId: string) => void;
   onExecutionBindingObserved?: (input: ExecutionBindingObserveInput) => void;
+  onThreadActivity?: (
+    workspaceId: string,
+    threadId: string,
+    activityType?: "active" | "started" | "completed",
+  ) => void;
 };
 
 export function useThreadItemEvents({
@@ -56,6 +61,7 @@ export function useThreadItemEvents({
   onUserMessageCreated,
   onReviewExited,
   onExecutionBindingObserved,
+  onThreadActivity,
 }: UseThreadItemEventsOptions) {
   const handleItemUpdate = useCallback(
     (
@@ -65,6 +71,11 @@ export function useThreadItemEvents({
       shouldMarkProcessing: boolean,
     ) => {
       dispatch({ type: "ensureThread", workspaceId, threadId });
+      onThreadActivity?.(
+        workspaceId,
+        threadId,
+        shouldMarkProcessing ? "started" : "completed",
+      );
       if (shouldMarkProcessing) {
         markProcessing(threadId, true);
       }
@@ -127,28 +138,35 @@ export function useThreadItemEvents({
       onReviewExited,
       onExecutionBindingObserved,
       onUserMessageCreated,
+      onThreadActivity,
       hydrateSubagentThreads,
       safeMessageActivity,
     ],
   );
 
   const handleToolOutputDelta = useCallback(
-    (threadId: string, itemId: string, delta: string) => {
+    (workspaceId: string, threadId: string, itemId: string, delta: string) => {
+      onThreadActivity?.(workspaceId, threadId, "active");
       markProcessing(threadId, true);
       dispatch({ type: "appendToolOutput", threadId, itemId, delta });
       safeMessageActivity();
     },
-    [dispatch, markProcessing, safeMessageActivity],
+    [dispatch, markProcessing, onThreadActivity, safeMessageActivity],
   );
 
   const handleTerminalInteraction = useCallback(
-    (threadId: string, itemId: string, stdin: string) => {
+    (workspaceId: string, threadId: string, itemId: string, stdin: string) => {
       if (!stdin) {
         return;
       }
       const normalized = stdin.replace(/\r\n/g, "\n");
       const suffix = normalized.endsWith("\n") ? "" : "\n";
-      handleToolOutputDelta(threadId, itemId, `\n[stdin]\n${normalized}${suffix}`);
+      handleToolOutputDelta(
+        workspaceId,
+        threadId,
+        itemId,
+        `\n[stdin]\n${normalized}${suffix}`,
+      );
     },
     [handleToolOutputDelta],
   );
@@ -166,6 +184,7 @@ export function useThreadItemEvents({
       delta: string;
     }) => {
       dispatch({ type: "ensureThread", workspaceId, threadId });
+      onThreadActivity?.(workspaceId, threadId, "active");
       markProcessing(threadId, true);
       const hasCustomName = Boolean(getCustomName(workspaceId, threadId));
       dispatch({
@@ -177,7 +196,7 @@ export function useThreadItemEvents({
         hasCustomName,
       });
     },
-    [dispatch, getCustomName, markProcessing],
+    [dispatch, getCustomName, markProcessing, onThreadActivity],
   );
 
   const onAgentMessageCompleted = useCallback(
@@ -198,6 +217,7 @@ export function useThreadItemEvents({
     }) => {
       const timestamp = Date.now();
       dispatch({ type: "ensureThread", workspaceId, threadId });
+      onThreadActivity?.(workspaceId, threadId, "active");
       const hasCustomName = Boolean(getCustomName(workspaceId, threadId));
       dispatch({
         type: "completeAgentMessage",
@@ -231,6 +251,7 @@ export function useThreadItemEvents({
       activeThreadId,
       dispatch,
       getCustomName,
+      onThreadActivity,
       recordThreadActivity,
       safeMessageActivity,
     ],
@@ -251,50 +272,54 @@ export function useThreadItemEvents({
   );
 
   const onReasoningSummaryDelta = useCallback(
-    (_workspaceId: string, threadId: string, itemId: string, delta: string) => {
+    (workspaceId: string, threadId: string, itemId: string, delta: string) => {
+      onThreadActivity?.(workspaceId, threadId, "active");
       dispatch({ type: "appendReasoningSummary", threadId, itemId, delta });
     },
-    [dispatch],
+    [dispatch, onThreadActivity],
   );
 
   const onReasoningSummaryBoundary = useCallback(
-    (_workspaceId: string, threadId: string, itemId: string) => {
+    (workspaceId: string, threadId: string, itemId: string) => {
+      onThreadActivity?.(workspaceId, threadId, "active");
       dispatch({ type: "appendReasoningSummaryBoundary", threadId, itemId });
     },
-    [dispatch],
+    [dispatch, onThreadActivity],
   );
 
   const onReasoningTextDelta = useCallback(
-    (_workspaceId: string, threadId: string, itemId: string, delta: string) => {
+    (workspaceId: string, threadId: string, itemId: string, delta: string) => {
+      onThreadActivity?.(workspaceId, threadId, "active");
       dispatch({ type: "appendReasoningContent", threadId, itemId, delta });
     },
-    [dispatch],
+    [dispatch, onThreadActivity],
   );
 
   const onPlanDelta = useCallback(
-    (_workspaceId: string, threadId: string, itemId: string, delta: string) => {
+    (workspaceId: string, threadId: string, itemId: string, delta: string) => {
+      onThreadActivity?.(workspaceId, threadId, "active");
       dispatch({ type: "appendPlanDelta", threadId, itemId, delta });
     },
-    [dispatch],
+    [dispatch, onThreadActivity],
   );
 
   const onCommandOutputDelta = useCallback(
-    (_workspaceId: string, threadId: string, itemId: string, delta: string) => {
-      handleToolOutputDelta(threadId, itemId, delta);
+    (workspaceId: string, threadId: string, itemId: string, delta: string) => {
+      handleToolOutputDelta(workspaceId, threadId, itemId, delta);
     },
     [handleToolOutputDelta],
   );
 
   const onTerminalInteraction = useCallback(
-    (_workspaceId: string, threadId: string, itemId: string, stdin: string) => {
-      handleTerminalInteraction(threadId, itemId, stdin);
+    (workspaceId: string, threadId: string, itemId: string, stdin: string) => {
+      handleTerminalInteraction(workspaceId, threadId, itemId, stdin);
     },
     [handleTerminalInteraction],
   );
 
   const onFileChangeOutputDelta = useCallback(
-    (_workspaceId: string, threadId: string, itemId: string, delta: string) => {
-      handleToolOutputDelta(threadId, itemId, delta);
+    (workspaceId: string, threadId: string, itemId: string, delta: string) => {
+      handleToolOutputDelta(workspaceId, threadId, itemId, delta);
     },
     [handleToolOutputDelta],
   );

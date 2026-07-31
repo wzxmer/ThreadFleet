@@ -339,4 +339,36 @@ describe("useRemoteThreadRefreshOnFocus", () => {
     });
     expect(refreshThread).toHaveBeenCalledTimes(1);
   });
+
+  it("does not reconnect or refresh a terminal thread that no longer needs background updates", async () => {
+    const reconnectWorkspace = vi.fn().mockResolvedValue(undefined);
+    const refreshThread = vi.fn().mockResolvedValue(undefined);
+
+    renderHook(() =>
+      useRemoteThreadRefreshOnFocus({
+        backendMode: "remote",
+        activeWorkspace: {
+          id: "ws-1",
+          name: "Workspace",
+          path: "/tmp/ws-1",
+          connected: false,
+          settings: { sidebarCollapsed: false },
+        },
+        activeThreadId: "thread-1",
+        activeThreadIsProcessing: false,
+        activeThreadNeedsBackgroundRefresh: false,
+        reconnectWorkspace,
+        refreshThread,
+      }),
+    );
+
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      vi.advanceTimersByTime(30_000);
+      await Promise.resolve();
+    });
+
+    expect(reconnectWorkspace).not.toHaveBeenCalled();
+    expect(refreshThread).not.toHaveBeenCalled();
+  });
 });

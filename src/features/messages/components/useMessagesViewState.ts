@@ -54,7 +54,10 @@ export function useMessagesViewState({
   onPlanSubmitChanges,
   onQuoteMessage,
 }: UseMessagesViewStateArgs) {
-  const displayItems = useMemo(() => dedupeSubagentCheckpointItems(items), [items]);
+  const displayItems = useMemo(
+    () => dedupeSubagentCheckpointItems(items),
+    [items],
+  );
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const autoScrollRef = useRef(true);
@@ -68,7 +71,9 @@ export function useMessagesViewState({
   );
 
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
-  const [collapsedToolGroups, setCollapsedToolGroups] = useState<Set<string>>(new Set());
+  const [collapsedToolGroups, setCollapsedToolGroups] = useState<Set<string>>(
+    new Set(),
+  );
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [showScrollToLatest, setShowScrollToLatest] = useState(false);
   const [dismissedPlanFollowupByThread, setDismissedPlanFollowupByThread] =
@@ -94,7 +99,8 @@ export function useMessagesViewState({
 
   const isNearBottom = useCallback(
     (node: HTMLDivElement) =>
-      node.scrollHeight - node.scrollTop - node.clientHeight <= SCROLL_THRESHOLD_PX,
+      node.scrollHeight - node.scrollTop - node.clientHeight <=
+      SCROLL_THRESHOLD_PX,
     [],
   );
 
@@ -248,7 +254,10 @@ export function useMessagesViewState({
   );
 
   const handleQuoteMessage = useCallback(
-    (item: Extract<ConversationItem, { kind: "message" }>, selectedText?: string) => {
+    (
+      item: Extract<ConversationItem, { kind: "message" }>,
+      selectedText?: string,
+    ) => {
       if (!onQuoteMessage) {
         return;
       }
@@ -331,7 +340,10 @@ export function useMessagesViewState({
     }
   }, [visibleItems]);
 
-  const baseGroupedItems = useMemo(() => buildToolGroups(visibleItems), [visibleItems]);
+  const baseGroupedItems = useMemo(
+    () => buildToolGroups(visibleItems),
+    [visibleItems],
+  );
 
   const groupedItems = useMemo<MessageListEntry[]>(() => {
     const buildProcessGroup = (
@@ -343,7 +355,9 @@ export function useMessagesViewState({
       }
       const firstEntry = processEntries[0];
       const firstId =
-        firstEntry.kind === "toolGroup" ? firstEntry.group.id : firstEntry.item.id;
+        firstEntry.kind === "toolGroup"
+          ? firstEntry.group.id
+          : firstEntry.item.id;
       const finalId = finalEntry.kind === "item" ? finalEntry.item.id : "final";
       const toolCount = processEntries.reduce((total, entry) => {
         if (entry.kind === "toolGroup") {
@@ -368,6 +382,26 @@ export function useMessagesViewState({
           messageCount,
         },
       };
+    };
+    const isProcessEntryBeforeFinal = (entry: MessageListBaseEntry) => {
+      if (entry.kind === "toolGroup") {
+        return true;
+      }
+      const { item } = entry;
+      if (item.kind === "message") {
+        return item.role === "assistant" && item.phase !== "final_answer";
+      }
+      return item.kind !== "subagentCheckpoint";
+    };
+    const isProcessEntryAfterFinal = (entry: MessageListBaseEntry) => {
+      if (entry.kind === "toolGroup") {
+        return true;
+      }
+      const { item } = entry;
+      if (item.kind === "message") {
+        return item.role === "assistant" && item.phase === "commentary";
+      }
+      return item.kind !== "subagentCheckpoint";
     };
 
     const result: MessageListEntry[] = [];
@@ -403,7 +437,8 @@ export function useMessagesViewState({
           }
         }
       }
-      finalAssistantIndex = finalAssistantIndex >= 0 ? finalAssistantIndex : fallbackAssistantIndex;
+      finalAssistantIndex =
+        finalAssistantIndex >= 0 ? finalAssistantIndex : fallbackAssistantIndex;
       if (finalAssistantIndex < 0 || turnEntries.length <= 1) {
         result.push(...turnEntries);
         turnEntries = [];
@@ -411,12 +446,31 @@ export function useMessagesViewState({
         return;
       }
       const finalEntry = turnEntries[finalAssistantIndex];
-      const processEntries =
-        finalAssistantIndex === 0
-          ? turnEntries.slice(1)
-          : turnEntries.slice(0, finalAssistantIndex);
-      const trailingEntries =
-        finalAssistantIndex === 0 ? [] : turnEntries.slice(finalAssistantIndex + 1);
+      const finalItem = finalEntry.kind === "item" ? finalEntry.item : null;
+      const canFoldTrailingProcessEntries =
+        finalAssistantIndex === 0 ||
+        (finalItem?.kind === "message" &&
+          (finalItem.phase === "final_answer" ||
+            (turnId !== null && finalItem.turnId === turnId)));
+      const leadingEntries = turnEntries
+        .slice(0, finalAssistantIndex)
+        .filter((entry) => !isProcessEntryBeforeFinal(entry));
+      const processEntries = [
+        ...turnEntries
+          .slice(0, finalAssistantIndex)
+          .filter(isProcessEntryBeforeFinal),
+        ...(canFoldTrailingProcessEntries
+          ? turnEntries
+              .slice(finalAssistantIndex + 1)
+              .filter(isProcessEntryAfterFinal)
+          : []),
+      ];
+      const trailingEntries = turnEntries
+        .slice(finalAssistantIndex + 1)
+        .filter(
+          (entry) =>
+            !canFoldTrailingProcessEntries || !isProcessEntryAfterFinal(entry),
+        );
       const hasStructuredProcessActivity = processEntries.some(
         (entry) =>
           entry.kind === "toolGroup" ||
@@ -447,7 +501,12 @@ export function useMessagesViewState({
       }
       const processGroup = buildProcessGroup(processEntries, finalEntry);
       if (processGroup) {
-        result.push(processGroup, finalEntry, ...trailingEntries);
+        result.push(
+          ...leadingEntries,
+          processGroup,
+          finalEntry,
+          ...trailingEntries,
+        );
       } else {
         result.push(...turnEntries);
       }
@@ -549,12 +608,18 @@ export function useMessagesViewState({
     });
 
     if (finalAssistantIndex <= 0 || !finalAssistantId) {
-      return { finalAssistantId: null, groupIds: [] as string[], itemIds: [] as string[] };
+      return {
+        finalAssistantId: null,
+        groupIds: [] as string[],
+        itemIds: [] as string[],
+      };
     }
 
     const groupIds = groupedItems
       .slice(0, finalAssistantIndex)
-      .filter((entry) => entry.kind === "toolGroup" || entry.kind === "processGroup")
+      .filter(
+        (entry) => entry.kind === "toolGroup" || entry.kind === "processGroup",
+      )
       .map((entry) => entry.group.id);
 
     const itemIds = groupedItems
@@ -568,11 +633,11 @@ export function useMessagesViewState({
                   ? processEntry.group.items.map((item) => item.id)
                   : processEntry.item.id,
               )
-          : entry.item.kind === "tool" ||
-              entry.item.kind === "reasoning" ||
-              entry.item.kind === "userInput"
-            ? [entry.item.id]
-            : [],
+            : entry.item.kind === "tool" ||
+                entry.item.kind === "reasoning" ||
+                entry.item.kind === "userInput"
+              ? [entry.item.id]
+              : [],
       );
 
     return { finalAssistantId, groupIds, itemIds };
@@ -580,7 +645,9 @@ export function useMessagesViewState({
 
   const collapseAllToolGroups = useCallback(() => {
     const groupIds = groupedItems
-      .filter((entry) => entry.kind === "toolGroup" || entry.kind === "processGroup")
+      .filter(
+        (entry) => entry.kind === "toolGroup" || entry.kind === "processGroup",
+      )
       .map((entry) => entry.group.id);
     setIsToolGroupsAutoCollapsed(true);
     manuallyToggledToolGroupsRef.current = new Set(groupIds);
@@ -589,7 +656,9 @@ export function useMessagesViewState({
 
   const expandAllToolGroups = useCallback(() => {
     const groupIds = groupedItems
-      .filter((entry) => entry.kind === "toolGroup" || entry.kind === "processGroup")
+      .filter(
+        (entry) => entry.kind === "toolGroup" || entry.kind === "processGroup",
+      )
       .map((entry) => entry.group.id);
     setIsToolGroupsAutoCollapsed(false);
     groupIds.forEach((id) => manuallyToggledToolGroupsRef.current.add(id));
@@ -619,7 +688,9 @@ export function useMessagesViewState({
       return;
     }
     const groupIds = groupedItems
-      .filter((entry) => entry.kind === "toolGroup" || entry.kind === "processGroup")
+      .filter(
+        (entry) => entry.kind === "toolGroup" || entry.kind === "processGroup",
+      )
       .map((entry) => entry.group.id)
       .filter((id) => !manuallyToggledToolGroupsRef.current.has(id));
     if (groupIds.length === 0) {
@@ -639,8 +710,13 @@ export function useMessagesViewState({
   }, [defaultToolGroupsCollapsed, groupedItems, isToolGroupsAutoCollapsed]);
 
   useEffect(() => {
-    const { finalAssistantId, groupIds, itemIds } = finalAssistantCollapseTarget;
-    if (!finalAssistantId || (groupIds.length === 0 && itemIds.length === 0) || isThinking) {
+    const { finalAssistantId, groupIds, itemIds } =
+      finalAssistantCollapseTarget;
+    if (
+      !finalAssistantId ||
+      (groupIds.length === 0 && itemIds.length === 0) ||
+      isThinking
+    ) {
       return;
     }
     const collapseKey = `${threadId ?? "no-thread"}:${finalAssistantId}:${[
@@ -753,7 +829,10 @@ export function useMessagesViewState({
     collapsedToolGroups: isToolGroupsAutoCollapsed
       ? new Set(
           groupedItems
-            .filter((entry) => entry.kind === "toolGroup" || entry.kind === "processGroup")
+            .filter(
+              (entry) =>
+                entry.kind === "toolGroup" || entry.kind === "processGroup",
+            )
             .map((entry) => entry.group.id)
             .filter(
               (id) =>

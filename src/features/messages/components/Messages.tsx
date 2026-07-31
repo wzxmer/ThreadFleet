@@ -7,8 +7,9 @@ import {
   useRef,
   useState,
   type CSSProperties,
-  type FocusEvent as ReactFocusEvent,
   type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+  type WheelEvent as ReactWheelEvent,
 } from "react";
 import { createPortal } from "react-dom";
 import ArrowDown from "lucide-react/dist/esm/icons/arrow-down";
@@ -24,7 +25,6 @@ import type {
   RequestUserInputRequest,
   RequestUserInputResponse,
   SendMessageResult,
-  ThemeAccentPreference,
   ThemePreference,
   TurnExecutionSummary,
 } from "../../../types";
@@ -40,7 +40,6 @@ import {
   type MessageListBaseEntry,
   type MessageListEntry,
 } from "../utils/messageRenderUtils";
-import { CONVERSATION_STYLE_PRESETS } from "../utils/conversationStylePresets";
 import {
   toMarkdownQuote,
   type MessageReferenceAction,
@@ -50,6 +49,7 @@ import {
   DiffRow,
   ExploreRow,
   MessageRow,
+  ProcessMessageRow,
   ProcessRow,
   ReasoningRow,
   ReviewRow,
@@ -57,10 +57,14 @@ import {
   ToolRow,
   UserInputRow,
   WorkingIndicator,
+  type AssistantMessageMeta,
+  type AssistantProcessDisclosure,
 } from "./MessageRows";
 import { SubagentResultSummary } from "./SubagentResultSummary";
 import { useMessagesViewState } from "./useMessagesViewState";
 import type { SubagentResultSummary as SubagentResultSummaryData } from "../utils/subagentResults";
+import { ConversationExportControls } from "../export/ConversationExportControls";
+import { useConversationExport } from "../export/useConversationExport";
 
 function getSearchTargetForEntry(entry: MessageListEntry) {
   if (entry.kind === "processGroup") {
@@ -78,15 +82,104 @@ function baseEntryContainsItem(entry: MessageListBaseEntry, itemId: string) {
     : entry.item.id === itemId;
 }
 
-function entryContainsTurn(entry: MessageListEntry, turnChain: Set<string>): boolean {
+function entryContainsTurn(
+  entry: MessageListEntry,
+  turnChain: Set<string>,
+): boolean {
   if (entry.kind === "item") {
     return entry.item.turnId ? turnChain.has(entry.item.turnId) : false;
   }
   if (entry.kind === "toolGroup") {
-    return entry.group.items.some((item) => item.turnId && turnChain.has(item.turnId));
+    return entry.group.items.some(
+      (item) => item.turnId && turnChain.has(item.turnId),
+    );
   }
-  return entry.group.entries.some((child) => entryContainsTurn(child, turnChain));
+  return entry.group.entries.some((child) =>
+    entryContainsTurn(child, turnChain),
+  );
 }
+
+function coalesceDenseProcessToolGroups(
+  entries: MessageListBaseEntry[],
+  processGroupId: string,
+): MessageListBaseEntry[] {
+  const toolGroups = entries.filter(
+    (entry): entry is Extract<MessageListBaseEntry, { kind: "toolGroup" }> =>
+      entry.kind === "toolGroup",
+  );
+  const itemCount = toolGroups.reduce(
+    (total, entry) => total + entry.group.items.length,
+    0,
+  );
+  if (toolGroups.length < 2 || itemCount < 4) {
+    return entries;
+  }
+  const firstToolGroupIndex = entries.findIndex(
+    (entry) => entry.kind === "toolGroup",
+  );
+  const combinedGroup: MessageListBaseEntry = {
+    kind: "toolGroup",
+    group: {
+      id: `combined-${processGroupId}`,
+      items: toolGroups.flatMap((entry) => entry.group.items),
+      toolCount: toolGroups.reduce(
+        (total, entry) => total + entry.group.toolCount,
+        0,
+      ),
+      messageCount: toolGroups.reduce(
+        (total, entry) => total + entry.group.messageCount,
+        0,
+      ),
+    },
+  };
+  return entries.flatMap<MessageListBaseEntry>(
+    (entry, index): MessageListBaseEntry[] => {
+      if (entry.kind !== "toolGroup") {
+        return [entry];
+      }
+      return index === firstToolGroupIndex ? [combinedGroup] : [];
+    },
+  );
+}
+
+function extractAssistantIdentity(content?: string | null) {
+  const match = content?.match(/^#{1,6}\s+Identity\s*:\s*(.+)$/im);
+  return match?.[1]?.replace(/[*_`]/g, "").trim() || null;
+}
+
+function resolveAssistantName(
+  identity: string | null,
+  modelId: string | null | undefined,
+  modelOptions: AssistantModelOption[],
+) {
+  if (identity) {
+    return identity;
+  }
+  const option = modelOptions.find(
+    (candidate) => candidate.id === modelId || candidate.model === modelId,
+  );
+  const descriptor = [modelId, option?.model, option?.displayName]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  if (descriptor.includes("claude") || descriptor.includes("anthropic")) {
+    return "Claude";
+  }
+  if (
+    descriptor.includes("gpt") ||
+    descriptor.includes("codex") ||
+    descriptor.includes("openai")
+  ) {
+    return "GPT";
+  }
+  return "Assistant";
+}
+
+type AssistantModelOption = {
+  id: string;
+  model: string;
+  displayName: string;
+};
 
 function toolItemsForEntry(
   entry: MessageListEntry,
@@ -121,8 +214,10 @@ function derivePersistedLineChangeStats(entry: MessageListEntry) {
     if (item.toolType !== "fileChange") {
       return;
     }
-    const diffs = item.changes?.map((change) => change.diff ?? "").filter(Boolean) ?? [];
-    const sourceDiffs = diffs.length > 0 ? diffs : item.output ? [item.output] : [];
+    const diffs =
+      item.changes?.map((change) => change.diff ?? "").filter(Boolean) ?? [];
+    const sourceDiffs =
+      diffs.length > 0 ? diffs : item.output ? [item.output] : [];
     sourceDiffs.forEach((diff) => {
       const stats = countDiffLineChanges(diff);
       if (stats) {
@@ -141,7 +236,8 @@ function derivePersistedLineChangeStats(entry: MessageListEntry) {
     if (item.toolType !== "dynamicToolCall") {
       return;
     }
-    const stats = item.lineChangeStats ?? countApplyPatchLineChanges(item.detail);
+    const stats =
+      item.lineChangeStats ?? countApplyPatchLineChanges(item.detail);
     if (stats) {
       hasPatch = true;
       addLineChangeStats(patchStats, stats);
@@ -162,11 +258,7 @@ function getSearchTargetForItem(entries: MessageListEntry[], itemId: string) {
   return entry ? getSearchTargetForEntry(entry) : null;
 }
 
-function isNativeColorPickerBlur(event: ReactFocusEvent<HTMLElement>) {
-  return event.target instanceof HTMLInputElement
-    && event.target.type === "color"
-    && event.relatedTarget === null;
-}
+const HISTORY_TOP_CONTINUED_SCROLL_THRESHOLD_PX = 24;
 
 type MessagesProps = {
   items: ConversationItem[];
@@ -187,6 +279,7 @@ type MessagesProps = {
   codeBlockCopyUseModifier?: boolean;
   showMessageFilePath?: boolean;
   defaultToolGroupsCollapsed?: boolean;
+  /** Legacy persisted setting. Runtime rendering is always native. */
   messageReadingStyle?: MessageReadingStyle;
   messageCanvasColor?: string;
   messageUserBubbleColor?: string;
@@ -194,6 +287,9 @@ type MessagesProps = {
   messageAssistantBubbleColor?: string;
   messageAssistantAccentColor?: string;
   messageAssistantTextColor?: string;
+  assistantInstructionContent?: string | null;
+  assistantFallbackModelId?: string | null;
+  assistantModelOptions?: AssistantModelOption[];
   chatHistoryScrollbackItems?: number | null;
   interruptedStatus?: { timestamp: number } | null;
   activeTurnDiff?: string | null;
@@ -201,7 +297,6 @@ type MessagesProps = {
   turnExecutionSummaries?: TurnExecutionSummary[];
   onUpdateConversationStyle?: (next: {
     theme?: ThemePreference;
-    themeAccent?: ThemeAccentPreference;
     messageReadingStyle?: MessageReadingStyle;
     messageCanvasColor?: string;
     messageUserBubbleColor?: string;
@@ -290,13 +385,15 @@ export const Messages = memo(function Messages({
   codeBlockCopyUseModifier = false,
   showMessageFilePath = true,
   defaultToolGroupsCollapsed = false,
-  messageReadingStyle = "bubble",
-  messageCanvasColor = "#eef1f6",
-  messageUserBubbleColor = "#d9ebff",
-  messageUserTextColor = "#102033",
-  messageAssistantBubbleColor = "#f7f9fc",
-  messageAssistantAccentColor = "#8aa8d8",
-  messageAssistantTextColor = "#263040",
+  messageCanvasColor = "var(--surface-messages)",
+  messageUserBubbleColor = "var(--surface-bubble-user)",
+  messageUserTextColor = "var(--text-stronger)",
+  messageAssistantBubbleColor = "var(--surface-card-strong)",
+  messageAssistantAccentColor = "var(--border-accent-soft)",
+  messageAssistantTextColor = "var(--text-stronger)",
+  assistantInstructionContent = null,
+  assistantFallbackModelId = null,
+  assistantModelOptions = [],
   chatHistoryScrollbackItems = null,
   interruptedStatus = null,
   activeTurnDiff = null,
@@ -318,8 +415,8 @@ export const Messages = memo(function Messages({
     previousScrollHeight: number;
     previousScrollTop: number;
   } | null>(null);
+  const olderHistoryLoadInFlightRef = useRef(false);
   const { t } = useI18n();
-  const [stylePanelOpen, setStylePanelOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchThreadId, setSearchThreadId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -330,11 +427,12 @@ export const Messages = memo(function Messages({
     messageId: string;
     items: ConversationItem[];
   } | null>(null);
-  const styleMenuRef = useRef<HTMLDivElement | null>(null);
-  const stylePanelHostRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const searchTargetRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const handledSearchNavigationVersionRef = useRef(0);
+  const [headerToolsHost, setHeaderToolsHost] = useState<HTMLElement | null>(
+    null,
+  );
   const activeUserInputRequestId =
     threadId && userInputRequests.length
       ? (userInputRequests.find(
@@ -356,7 +454,9 @@ export const Messages = memo(function Messages({
   );
 
   const resendViewItems =
-    resendViewSnapshot?.threadId === threadId ? resendViewSnapshot.items : items;
+    resendViewSnapshot?.threadId === threadId
+      ? resendViewSnapshot.items
+      : items;
   const handleResendUserMessage = useCallback(
     async (
       message: Extract<ConversationItem, { kind: "message" }>,
@@ -386,7 +486,8 @@ export const Messages = memo(function Messages({
     () => getRetryableUserMessageId(resendViewItems, interruptedStatus),
     [interruptedStatus, resendViewItems],
   );
-  const hasVisibleUserInputRequest = hasActiveUserInputRequest && Boolean(onUserInputSubmit);
+  const hasVisibleUserInputRequest =
+    hasActiveUserInputRequest && Boolean(onUserInputSubmit);
   const userInputNode =
     hasActiveUserInputRequest && onUserInputSubmit ? (
       <RequestUserInputMessage
@@ -434,6 +535,11 @@ export const Messages = memo(function Messages({
     onPlanSubmitChanges,
     onQuoteMessage,
   });
+  const conversationExport = useConversationExport({
+    items: resendViewItems,
+    summaries: turnExecutionSummaries,
+    threadId,
+  });
   useLayoutEffect(() => {
     const restore = pendingOlderHistoryRestoreRef.current;
     const container = containerRef.current;
@@ -441,11 +547,17 @@ export const Messages = memo(function Messages({
       return;
     }
     container.scrollTop =
-      container.scrollHeight - restore.previousScrollHeight + restore.previousScrollTop;
+      container.scrollHeight -
+      restore.previousScrollHeight +
+      restore.previousScrollTop;
     pendingOlderHistoryRestoreRef.current = null;
   }, [containerRef, items.length]);
   const handleLoadOlderHistory = useCallback(async () => {
-    if (!onLoadOlderHistory || isLoadingOlderHistory) {
+    if (
+      !onLoadOlderHistory ||
+      isLoadingOlderHistory ||
+      olderHistoryLoadInFlightRef.current
+    ) {
       return;
     }
     const container = containerRef.current;
@@ -456,11 +568,56 @@ export const Messages = memo(function Messages({
         previousScrollTop: container.scrollTop,
       };
     }
-    const loaded = await onLoadOlderHistory();
-    if (!loaded) {
-      pendingOlderHistoryRestoreRef.current = null;
+    olderHistoryLoadInFlightRef.current = true;
+    try {
+      const loaded = await onLoadOlderHistory();
+      if (!loaded) {
+        pendingOlderHistoryRestoreRef.current = null;
+      }
+    } finally {
+      olderHistoryLoadInFlightRef.current = false;
     }
   }, [containerRef, isLoadingOlderHistory, items.length, onLoadOlderHistory]);
+  const handleMessagesWheel = useCallback(
+    (event: ReactWheelEvent<HTMLDivElement>) => {
+      if (event.deltaY >= 0) {
+        return;
+      }
+      const container = containerRef.current;
+      if (
+        !container ||
+        container.scrollTop > HISTORY_TOP_CONTINUED_SCROLL_THRESHOLD_PX
+      ) {
+        return;
+      }
+      if (hiddenBeforeCount > 0) {
+        loadEarlierHistory();
+        return;
+      }
+      if (hasOlderHistory) {
+        void handleLoadOlderHistory();
+      }
+    },
+    [
+      containerRef,
+      handleLoadOlderHistory,
+      hasOlderHistory,
+      hiddenBeforeCount,
+      loadEarlierHistory,
+    ],
+  );
+  const exportableMessageIds = useMemo(
+    () =>
+      new Set(
+        resendViewItems.flatMap((item) =>
+          item.kind === "message" &&
+          (item.role === "user" || item.role === "assistant")
+            ? [item.id]
+            : [],
+        ),
+      ),
+    [resendViewItems],
+  );
   const handleReferenceMessage = useCallback(
     (action: MessageReferenceAction) => {
       if (onReferenceMessage) {
@@ -468,7 +625,9 @@ export const Messages = memo(function Messages({
         return;
       }
       if (action.destination === "current" && onQuoteMessage) {
-        onQuoteMessage(toMarkdownQuote(action.selectedText ?? action.sourceText));
+        onQuoteMessage(
+          toMarkdownQuote(action.selectedText ?? action.sourceText),
+        );
       }
     },
     [onQuoteMessage, onReferenceMessage],
@@ -499,6 +658,16 @@ export const Messages = memo(function Messages({
     searchMatches.length > 0
       ? Math.min(activeSearchIndex, searchMatches.length - 1) + 1
       : 0;
+  const activeAssistantTurnIds = useMemo(
+    () =>
+      new Set(
+        turnExecutionSummary?.status === "active"
+          ? turnExecutionSummary.turnChain
+          : [],
+      ),
+    [turnExecutionSummary],
+  );
+  const assistantRunningLabel = t("messages.runningStatus");
 
   useEffect(() => {
     setSearchOpen(false);
@@ -518,25 +687,15 @@ export const Messages = memo(function Messages({
   }, [searchOpen]);
 
   useEffect(() => {
-    if (!stylePanelOpen) {
-      return;
-    }
-
-    const handlePointerDown = (event: PointerEvent) => {
-      const target = event.target;
-      if (
-        target instanceof Node &&
-        (styleMenuRef.current?.contains(target) ||
-          stylePanelHostRef.current?.contains(target))
-      ) {
-        return;
-      }
-      setStylePanelOpen(false);
+    const syncHeaderToolsHost = () => {
+      setHeaderToolsHost(
+        document.querySelector<HTMLElement>(".main-header-message-tools"),
+      );
     };
-
-    document.addEventListener("pointerdown", handlePointerDown);
-    return () => document.removeEventListener("pointerdown", handlePointerDown);
-  }, [stylePanelOpen]);
+    syncHeaderToolsHost();
+    const frame = window.requestAnimationFrame(syncHeaderToolsHost);
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
 
   useEffect(() => {
     if (!activeSearchMatch) {
@@ -547,9 +706,7 @@ export const Messages = memo(function Messages({
   }, [activeSearchMatch, revealGroupedItem, revealHistoryItemAtIndex]);
 
   useEffect(() => {
-    if (
-      handledSearchNavigationVersionRef.current === searchNavigationVersion
-    ) {
+    if (handledSearchNavigationVersionRef.current === searchNavigationVersion) {
       return;
     }
     if (!isSearchActiveForThread || !activeSearchTargetId) {
@@ -604,8 +761,9 @@ export const Messages = memo(function Messages({
       if (searchMatches.length === 0) {
         return;
       }
-      setActiveSearchIndex((current) =>
-        (current + direction + searchMatches.length) % searchMatches.length,
+      setActiveSearchIndex(
+        (current) =>
+          (current + direction + searchMatches.length) % searchMatches.length,
       );
       setSearchNavigationVersion((current) => current + 1);
     },
@@ -657,34 +815,17 @@ export const Messages = memo(function Messages({
     [onUpdateConversationStyle],
   );
 
-  const applyAssistantTheme = useCallback(
-    (backgroundColor: string, textColor: string, accentColor: string) => {
-      updateConversationStyle({
-        messageAssistantBubbleColor: backgroundColor,
-        messageAssistantAccentColor: accentColor,
-        messageAssistantTextColor: textColor,
-      });
-    },
-    [updateConversationStyle],
-  );
-
-  const applyUserTheme = useCallback(
-    (backgroundColor: string, textColor: string) => {
-      updateConversationStyle({
-        messageUserBubbleColor: backgroundColor,
-        messageUserTextColor: textColor,
-      });
-    },
-    [updateConversationStyle],
-  );
-
   const toggleToolAutoCollapse = useCallback(() => {
     const nextValue = !isToolGroupsAutoCollapsed;
     setToolGroupsAutoCollapsed(nextValue);
     updateConversationStyle({
       messageToolGroupsCollapsedByDefault: nextValue,
     });
-  }, [isToolGroupsAutoCollapsed, setToolGroupsAutoCollapsed, updateConversationStyle]);
+  }, [
+    isToolGroupsAutoCollapsed,
+    setToolGroupsAutoCollapsed,
+    updateConversationStyle,
+  ]);
 
   const planFollowupNode =
     planFollowup.shouldShow && onPlanAccept && onPlanSubmitChanges ? (
@@ -718,6 +859,112 @@ export const Messages = memo(function Messages({
     () => countDiffLineChanges(activeTurnDiff),
     [activeTurnDiff],
   );
+  const assistantMetaByMessageId = useMemo(() => {
+    const summaries =
+      turnExecutionSummaries.length > 0
+        ? turnExecutionSummaries
+        : turnExecutionSummary
+          ? [turnExecutionSummary]
+          : [];
+    const summaryByTurnId = new Map<string, TurnExecutionSummary>();
+    summaries.forEach((summary) => {
+      summary.turnChain.forEach((turnId) =>
+        summaryByTurnId.set(turnId, summary),
+      );
+      summaryByTurnId.set(summary.turnId, summary);
+    });
+
+    const finalAssistantIdByTurnId = new Map<string, string>();
+    const explicitFinalTurnIds = new Set<string>();
+    items.forEach((item) => {
+      if (
+        item.kind !== "message" ||
+        item.role !== "assistant" ||
+        !item.turnId
+      ) {
+        return;
+      }
+      if (item.phase === "final_answer") {
+        finalAssistantIdByTurnId.set(item.turnId, item.id);
+        explicitFinalTurnIds.add(item.turnId);
+      } else if (!explicitFinalTurnIds.has(item.turnId)) {
+        finalAssistantIdByTurnId.set(item.turnId, item.id);
+      }
+    });
+
+    const activityByTurnId = new Map<
+      string,
+      { toolCount: number; processMessageCount: number }
+    >();
+    const activityFor = (turnId: string) => {
+      const current = activityByTurnId.get(turnId) ?? {
+        toolCount: 0,
+        processMessageCount: 0,
+      };
+      activityByTurnId.set(turnId, current);
+      return current;
+    };
+    items.forEach((item) => {
+      if (!item.turnId) {
+        return;
+      }
+      const activity = activityFor(item.turnId);
+      if (item.kind === "tool") {
+        activity.toolCount += 1;
+      } else if (item.kind === "explore") {
+        activity.toolCount += item.entries.length;
+      } else if (item.kind === "reasoning" || item.kind === "userInput") {
+        activity.processMessageCount += 1;
+      } else if (
+        item.kind === "message" &&
+        item.role === "assistant" &&
+        finalAssistantIdByTurnId.get(item.turnId) !== item.id
+      ) {
+        activity.processMessageCount += 1;
+      }
+    });
+
+    const identity = extractAssistantIdentity(assistantInstructionContent);
+    const result = new Map<string, AssistantMessageMeta>();
+    items.forEach((item) => {
+      if (item.kind !== "message" || item.role !== "assistant") {
+        return;
+      }
+      const summary = item.turnId ? summaryByTurnId.get(item.turnId) : null;
+      const activity = item.turnId ? activityByTurnId.get(item.turnId) : null;
+      const activeLineChanges =
+        summary?.status === "active" ? activeTurnLineChangeStats : null;
+      const isFinalAssistantMessage =
+        Boolean(item.turnId) &&
+        finalAssistantIdByTurnId.get(item.turnId!) === item.id;
+      result.set(item.id, {
+        name: resolveAssistantName(
+          identity,
+          summary?.modelId ?? assistantFallbackModelId,
+          assistantModelOptions,
+        ),
+        toolCount: isFinalAssistantMessage ? (activity?.toolCount ?? 0) : 0,
+        processMessageCount: isFinalAssistantMessage
+          ? (activity?.processMessageCount ?? 0)
+          : 0,
+        additions: isFinalAssistantMessage
+          ? (activeLineChanges?.additions ?? summary?.addedLines ?? null)
+          : null,
+        deletions: isFinalAssistantMessage
+          ? (activeLineChanges?.deletions ?? summary?.deletedLines ?? null)
+          : null,
+      });
+    });
+    return result;
+  }, [
+    activeTurnLineChangeStats,
+    assistantFallbackModelId,
+    assistantInstructionContent,
+    assistantModelOptions,
+    items,
+    turnExecutionSummaries,
+    turnExecutionSummary,
+  ]);
   const lineChangeStatsByGroupId = useMemo(() => {
     const result = new Map<string, { additions: number; deletions: number }>();
     const summaries =
@@ -760,58 +1007,58 @@ export const Messages = memo(function Messages({
       }
     });
     if (activeTurnLineChangeStats) {
-      const activeSummary = summaries.find((summary) => summary.status === "active");
+      const activeSummary = summaries.find(
+        (summary) => summary.status === "active",
+      );
       const groupId = activeSummary
         ? findGroupId(activeSummary.turnChain)
         : [...groupedItems]
             .reverse()
-            .find((entry) => entry.kind === "processGroup" || entry.kind === "toolGroup")?.group.id;
+            .find(
+              (entry) =>
+                entry.kind === "processGroup" || entry.kind === "toolGroup",
+            )?.group.id;
       if (groupId) {
         result.set(groupId, activeTurnLineChangeStats);
       }
     }
     return result;
-  }, [activeTurnLineChangeStats, groupedItems, turnExecutionSummaries, turnExecutionSummary]);
-  const renderLineChangeStats = useCallback((lineChangeStats?: {
-    additions: number;
-    deletions: number;
-  }) => {
-    if (!lineChangeStats) {
-      return null;
-    }
-    return (
-      <span className="tool-group-line-change-stats" aria-label="Line changes">
-        {lineChangeStats.additions > 0 && (
-          <span className="tool-group-line-change-stat tool-group-line-change-stat-add">
-            +{lineChangeStats.additions}
-          </span>
-        )}
-        {lineChangeStats.deletions > 0 && (
-          <span className="tool-group-line-change-stat tool-group-line-change-stat-delete">
-            -{lineChangeStats.deletions}
-          </span>
-        )}
-      </span>
-    );
-  }, []);
+  }, [
+    activeTurnLineChangeStats,
+    groupedItems,
+    turnExecutionSummaries,
+    turnExecutionSummary,
+  ]);
+  const renderLineChangeStats = useCallback(
+    (lineChangeStats?: { additions: number; deletions: number }) => {
+      if (!lineChangeStats) {
+        return null;
+      }
+      return (
+        <span
+          className="tool-group-line-change-stats"
+          aria-label="Line changes"
+        >
+          {lineChangeStats.additions > 0 && (
+            <span className="tool-group-line-change-stat tool-group-line-change-stat-add">
+              +{lineChangeStats.additions}
+            </span>
+          )}
+          {lineChangeStats.deletions > 0 && (
+            <span className="tool-group-line-change-stat tool-group-line-change-stat-delete">
+              -{lineChangeStats.deletions}
+            </span>
+          )}
+        </span>
+      );
+    },
+    [],
+  );
   const statusSeparator = t("messages.statusSeparator");
-  const assistantColorPresets = [
-    { label: t("color.defaultBlue"), bg: "#f7f9fc", accent: "#7dadff", text: "#263040" },
-    { label: t("color.teal"), bg: "#f0faf6", accent: "#4aa389", text: "#24332f" },
-    { label: t("color.softPurple"), bg: "#f7f2ff", accent: "#9a7bd8", text: "#302a3d" },
-    { label: t("color.warmBrown"), bg: "#fff6ee", accent: "#d18455", text: "#3b2d25" },
-  ];
-  const userColorPresets = [
-    { label: t("color.apricot"), color: "#f3d6ad", text: "#332519" },
-    { label: t("color.lightBlue"), color: "#d9ebff", text: "#102033" },
-    { label: t("color.lightGreen"), color: "#dff3e8", text: "#183126" },
-    { label: t("color.lightPurple"), color: "#eadcf8", text: "#2e2140" },
-    { label: t("color.lightPink"), color: "#f6e2e2", text: "#3a2222" },
-  ];
-
   const renderItem = (
     item: ConversationItem,
-    options?: { suppressCliTimestamp?: boolean },
+    assistantProcessDisclosure?: AssistantProcessDisclosure,
+    assistantProcessContent?: ReactNode,
   ) => {
     if (item.kind === "message") {
       const isCopied = copiedMessageId === item.id;
@@ -822,13 +1069,31 @@ export const Messages = memo(function Messages({
           isCopied={isCopied}
           onCopy={handleCopyMessage}
           onReference={
-            onReferenceMessage || onQuoteMessage ? handleReferenceMessage : undefined
+            onReferenceMessage || onQuoteMessage
+              ? handleReferenceMessage
+              : undefined
           }
           onResendUserMessage={
             onResendUserMessage && item.id === retryableUserMessageId
               ? handleResendUserMessage
               : undefined
           }
+          assistantRunning={
+            item.role === "assistant" &&
+            Boolean(item.turnId && activeAssistantTurnIds.has(item.turnId))
+          }
+          assistantMeta={
+            item.role === "assistant"
+              ? (assistantMetaByMessageId.get(item.id) ?? null)
+              : null
+          }
+          assistantProcessDisclosure={
+            item.role === "assistant" ? assistantProcessDisclosure : undefined
+          }
+          assistantProcessContent={
+            item.role === "assistant" ? assistantProcessContent : undefined
+          }
+          runningLabel={assistantRunningLabel}
           codeBlockCopyUseModifier={codeBlockCopyUseModifier}
           showMessageFilePath={showMessageFilePath}
           interrupted={
@@ -838,11 +1103,24 @@ export const Messages = memo(function Messages({
                 }
               : null
           }
-          suppressCliTimestamp={options?.suppressCliTimestamp}
           workspacePath={workspacePath}
           onOpenFileLink={openFileLink}
           onOpenFileLinkMenu={showFileLinkMenu}
           onOpenThreadLink={handleOpenThreadLink}
+          exportSelectionMode={
+            conversationExport.selecting && exportableMessageIds.has(item.id)
+          }
+          exportSelected={conversationExport.selectedIds.has(item.id)}
+          onExportStart={
+            exportableMessageIds.has(item.id)
+              ? conversationExport.startSelection
+              : undefined
+          }
+          onExportToggle={
+            exportableMessageIds.has(item.id)
+              ? conversationExport.toggleSelection
+              : undefined
+          }
         />
       );
     }
@@ -929,564 +1207,461 @@ export const Messages = memo(function Messages({
     }
     return null;
   };
+  const renderProcessGroupEntry = (processEntry: MessageListBaseEntry) => {
+    if (processEntry.kind === "toolGroup") {
+      const shouldCollapseNestedGroup = processEntry.group.items.length >= 4;
+      if (!shouldCollapseNestedGroup) {
+        return (
+          <div
+            key={`nested-tool-group-${processEntry.group.id}`}
+            className="tool-group process-group-nested"
+          >
+            <div className="tool-group-body">
+              {processEntry.group.items.map((nestedItem) =>
+                renderItem(nestedItem),
+              )}
+            </div>
+          </div>
+        );
+      }
+      const nestedStateId = `nested-tool-group-${processEntry.group.id}`;
+      const isExpanded = expandedItems.has(nestedStateId);
+      const nestedBodyId = `${nestedStateId}-body`;
+      const ChevronIcon = isExpanded ? ChevronDown : ChevronRight;
+      return (
+        <div
+          key={`nested-tool-group-${processEntry.group.id}`}
+          className={`tool-group process-group-nested process-group-nested-collapsible${
+            isExpanded ? "" : " tool-group-collapsed"
+          }`}
+        >
+          <div className="tool-group-header">
+            <button
+              type="button"
+              className="tool-group-toggle"
+              data-button-elevation="none"
+              onClick={() => toggleExpanded(nestedStateId)}
+              aria-expanded={isExpanded}
+              aria-controls={nestedBodyId}
+              aria-label={
+                isExpanded
+                  ? t("messages.collapseTools")
+                  : t("messages.expandTools")
+              }
+            >
+              <span className="tool-group-chevron" aria-hidden>
+                <ChevronIcon size={14} />
+              </span>
+              <span className="tool-group-summary">
+                {formatCount(
+                  processEntry.group.toolCount,
+                  t("messages.toolCallSingular"),
+                  t("messages.toolCallPlural"),
+                )}
+              </span>
+            </button>
+          </div>
+          {isExpanded ? (
+            <div className="tool-group-body" id={nestedBodyId}>
+              {processEntry.group.items.map((nestedItem) =>
+                renderItem(nestedItem),
+              )}
+            </div>
+          ) : null}
+        </div>
+      );
+    }
+    if (
+      processEntry.item.kind === "message" &&
+      processEntry.item.role === "assistant"
+    ) {
+      return (
+        <ProcessMessageRow
+          key={processEntry.item.id}
+          item={processEntry.item}
+          showMessageFilePath={showMessageFilePath}
+          workspacePath={workspacePath}
+          onOpenFileLink={openFileLink}
+          onOpenFileLinkMenu={showFileLinkMenu}
+          onOpenThreadLink={handleOpenThreadLink}
+        />
+      );
+    }
+    return renderItem(processEntry.item);
+  };
+
+  const messageToolsNode = (
+    <div
+      className="messages-tool-controls"
+      aria-label={t("messages.toolAutoCollapse")}
+    >
+      <button
+        type="button"
+        className={`ghost messages-toggle-pill${
+          isToolGroupsAutoCollapsed ? " is-active" : ""
+        }`}
+        onClick={toggleToolAutoCollapse}
+        aria-pressed={isToolGroupsAutoCollapsed}
+        aria-label={`${t("messages.toolAutoCollapse")}${statusSeparator}${toolAutoCollapseStatus}`}
+        title={`${t("messages.toolAutoCollapse")}${statusSeparator}${toolAutoCollapseStatus}`}
+      >
+        {t("messages.autoCollapse")}
+        {statusSeparator}
+        {toolAutoCollapseStatus}
+      </button>
+    </div>
+  );
 
   return (
     <div
-      className={`messages-view messages-reading-${messageReadingStyle}`}
+      className="messages-view messages-reading-native"
       style={messagesStyle}
     >
-      <div className="messages-control-layer">
-        <div className="messages-control-inner">
-          {isSearchActiveForThread && (
-            <div className="messages-session-search" role="search">
-            <Search size={14} aria-hidden />
-            <input
-              ref={searchInputRef}
-              value={searchQuery}
-              onChange={(event) => handleSearchQueryChange(event.target.value)}
-              onKeyDown={handleSearchInputKeyDown}
-              aria-label={t("messages.searchCurrentSession")}
-              placeholder={t("messages.searchCurrentSession")}
-            />
-            <span className="messages-session-search-count" aria-live="polite">
-              {searchQuery.trim()
-                ? t("messages.searchCount")
-                    .replace(
-                      "{current}",
-                      String(activeSearchDisplayIndex),
-                    )
-                    .replace("{total}", String(searchMatches.length))
-                : t("messages.searchHint")}
-            </span>
-            <button
-              type="button"
-              className="ghost messages-session-search-icon-button"
-              onClick={() => moveSearch(-1)}
-              disabled={searchMatches.length === 0}
-              aria-label={t("messages.searchPrevious")}
-              title={t("messages.searchPrevious")}
-            >
-              <ArrowUp size={14} />
-            </button>
-            <button
-              type="button"
-              className="ghost messages-session-search-icon-button"
-              onClick={() => moveSearch(1)}
-              disabled={searchMatches.length === 0}
-              aria-label={t("messages.searchNext")}
-              title={t("messages.searchNext")}
-            >
-              <ArrowDown size={14} />
-            </button>
-            <button
-              type="button"
-              className="ghost messages-session-search-icon-button"
-              onClick={() => setSearchOpen(false)}
-              aria-label={t("messages.searchClose")}
-              title={t("messages.searchClose")}
-            >
-              <X size={14} />
-            </button>
-            </div>
-          )}
-          <div className="messages-tool-controls" aria-label={t("messages.readingStyle")}>
-            <div
-              className="messages-reading-segmented"
-              role="group"
-              aria-label={t("messages.readingStyleShort")}
-            >
-              {(["bubble", "native", "cli"] as const).map((style) => (
-                <button
-                  key={style}
-                  type="button"
-                  className={messageReadingStyle === style ? "is-selected" : ""}
-                  onClick={() => updateConversationStyle({ messageReadingStyle: style })}
+      {headerToolsHost ? createPortal(messageToolsNode, headerToolsHost) : null}
+      {(isSearchActiveForThread || !headerToolsHost) && (
+        <div className="messages-control-layer">
+          <div className="messages-control-inner">
+            {isSearchActiveForThread && (
+              <div className="messages-session-search" role="search">
+                <Search size={14} aria-hidden />
+                <input
+                  ref={searchInputRef}
+                  value={searchQuery}
+                  onChange={(event) =>
+                    handleSearchQueryChange(event.target.value)
+                  }
+                  onKeyDown={handleSearchInputKeyDown}
+                  aria-label={t("messages.searchCurrentSession")}
+                  placeholder={t("messages.searchCurrentSession")}
+                />
+                <span
+                  className="messages-session-search-count"
+                  aria-live="polite"
                 >
-                  {style === "bubble"
-                    ? t("messages.style.bubble")
-                    : style === "native"
-                      ? t("messages.style.native")
-                      : "CLI"}
+                  {searchQuery.trim()
+                    ? t("messages.searchCount")
+                        .replace("{current}", String(activeSearchDisplayIndex))
+                        .replace("{total}", String(searchMatches.length))
+                    : t("messages.searchHint")}
+                </span>
+                <button
+                  type="button"
+                  className="ghost messages-session-search-icon-button"
+                  onClick={() => moveSearch(-1)}
+                  disabled={searchMatches.length === 0}
+                  aria-label={t("messages.searchPrevious")}
+                  title={t("messages.searchPrevious")}
+                >
+                  <ArrowUp size={14} />
                 </button>
-              ))}
-            </div>
-            <button
-              type="button"
-              className={`ghost messages-toggle-pill${
-                isToolGroupsAutoCollapsed ? " is-active" : ""
-              }`}
-              onClick={toggleToolAutoCollapse}
-              aria-pressed={isToolGroupsAutoCollapsed}
-              aria-label={`${t("messages.toolAutoCollapse")}${statusSeparator}${toolAutoCollapseStatus}`}
-              title={`${t("messages.toolAutoCollapse")}${statusSeparator}${toolAutoCollapseStatus}`}
-            >
-              {t("messages.autoCollapse")}
-              {statusSeparator}
-              {toolAutoCollapseStatus}
-            </button>
-            <div
-              ref={styleMenuRef}
-              className="messages-style-menu"
-              onBlur={(event) => {
-                if (isNativeColorPickerBlur(event)) {
-                  return;
-                }
-                const nextTarget = event.relatedTarget;
-                if (
-                  nextTarget instanceof Node &&
-                  (event.currentTarget.contains(nextTarget) ||
-                    stylePanelHostRef.current?.contains(nextTarget))
-                ) {
-                  return;
-                }
-                setStylePanelOpen(false);
-              }}
-            >
-              <button
-                type="button"
-                className="ghost messages-toggle-pill"
-                onClick={() => setStylePanelOpen((open) => !open)}
-                aria-expanded={stylePanelOpen}
-              >
-                {t("messages.style")}
-              </button>
-              {stylePanelOpen && stylePanelHostRef.current
-                ? createPortal(
-                    <div
-                      className="messages-style-popover"
-                      role="dialog"
-                      aria-label={t("messages.styleDialog")}
-                      onBlur={(event) => {
-                        if (isNativeColorPickerBlur(event)) {
-                          return;
-                        }
-                        const nextTarget = event.relatedTarget;
-                        if (
-                          nextTarget instanceof Node &&
-                          (styleMenuRef.current?.contains(nextTarget) ||
-                            event.currentTarget.contains(nextTarget))
-                        ) {
-                          return;
-                        }
-                        setStylePanelOpen(false);
-                      }}
-                    >
-                  <div className="messages-style-section">
-                    <div className="messages-style-section-title">
-                      {t("messages.styleScheme")}
-                    </div>
-                    <div
-                      className="messages-scheme-presets"
-                      role="group"
-                      aria-label={t("messages.styleScheme")}
-                    >
-                      {CONVERSATION_STYLE_PRESETS.map((preset) => (
-                        <button
-                          key={preset.id}
-                          type="button"
-                          className="messages-scheme-preset"
-                          style={{ "--preset-color": preset.swatch } as CSSProperties}
-                          onClick={() => updateConversationStyle(preset.settings)}
-                        >
-                          <span
-                            className="messages-scheme-preset-swatch"
-                            style={{ background: preset.swatch }}
-                            aria-hidden
-                          />
-                          <span className="messages-scheme-preset-copy">
-                            <span className="messages-scheme-preset-title">
-                              {t(preset.messageTitleKey)}
-                            </span>
-                            <span className="messages-scheme-preset-subtitle">
-                              {t(preset.messageSubtitleKey)}
-                            </span>
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="messages-style-section">
-                    <div className="messages-style-section-title">
-                      {t("messages.aiTheme")}
-                    </div>
-                    <div
-                      className="messages-color-presets"
-                      role="group"
-                      aria-label={t("messages.aiTheme")}
-                    >
-                      {assistantColorPresets.map((preset) => (
-                        <button
-                          key={preset.label}
-                          type="button"
-                          className="messages-color-preset"
-                          style={{ "--preset-color": preset.accent } as CSSProperties}
-                          onClick={() =>
-                            applyAssistantTheme(preset.bg, preset.text, preset.accent)
-                          }
-                        >
-                          {preset.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="messages-style-section">
-                    <div className="messages-style-section-title">
-                      {t("messages.myMessage")}
-                    </div>
-                    <div
-                      className="messages-color-presets"
-                      role="group"
-                      aria-label={t("messages.myMessageColors")}
-                    >
-                      {userColorPresets.map((preset) => (
-                        <button
-                          key={preset.label}
-                          type="button"
-                          className="messages-color-preset"
-                          style={{ "--preset-color": preset.color } as CSSProperties}
-                          onClick={() => applyUserTheme(preset.color, preset.text)}
-                        >
-                          {preset.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="messages-style-field-grid">
-                    <label>
-                      <span>{t("messages.aiBackground")}</span>
-                      <input
-                        type="color"
-                        value={messageAssistantBubbleColor}
-                        onChange={(event) =>
-                          updateConversationStyle({
-                            messageAssistantBubbleColor: event.target.value,
-                          })
-                        }
-                      />
-                    </label>
-                    <label>
-                      <span>{t("messages.aiText")}</span>
-                      <input
-                        type="color"
-                        value={messageAssistantTextColor}
-                        onChange={(event) =>
-                          updateConversationStyle({
-                            messageAssistantTextColor: event.target.value,
-                          })
-                        }
-                      />
-                    </label>
-                    <label>
-                      <span>{t("messages.myBackground")}</span>
-                      <input
-                        type="color"
-                        value={messageUserBubbleColor}
-                        onChange={(event) =>
-                          updateConversationStyle({
-                            messageUserBubbleColor: event.target.value,
-                          })
-                        }
-                      />
-                    </label>
-                    <label>
-                      <span>{t("messages.myText")}</span>
-                      <input
-                        type="color"
-                        value={messageUserTextColor}
-                        onChange={(event) =>
-                          updateConversationStyle({
-                            messageUserTextColor: event.target.value,
-                          })
-                        }
-                      />
-                    </label>
-                    <label>
-                      <span>{t("messages.aiAccent")}</span>
-                      <input
-                        type="color"
-                        value={messageAssistantAccentColor}
-                        onChange={(event) =>
-                          updateConversationStyle({
-                            messageAssistantAccentColor: event.target.value,
-                          })
-                        }
-                      />
-                    </label>
-                  </div>
-                    </div>,
-                    stylePanelHostRef.current,
-                  )
-                : null}
-            </div>
+                <button
+                  type="button"
+                  className="ghost messages-session-search-icon-button"
+                  onClick={() => moveSearch(1)}
+                  disabled={searchMatches.length === 0}
+                  aria-label={t("messages.searchNext")}
+                  title={t("messages.searchNext")}
+                >
+                  <ArrowDown size={14} />
+                </button>
+                <button
+                  type="button"
+                  className="ghost messages-session-search-icon-button"
+                  onClick={() => setSearchOpen(false)}
+                  aria-label={t("messages.searchClose")}
+                  title={t("messages.searchClose")}
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            )}
+            {!headerToolsHost ? messageToolsNode : null}
           </div>
         </div>
-        <div
-          ref={stylePanelHostRef}
-          className={`messages-style-panel-host${stylePanelOpen ? " is-open" : ""}`}
-          aria-hidden={!stylePanelOpen}
-        />
-      </div>
+      )}
       <div
         className="messages messages-full"
         ref={containerRef}
         onScroll={updateAutoScroll}
+        onWheel={handleMessagesWheel}
       >
         <div className="messages-inner">
-        <SubagentResultSummary
-          results={subagentResults}
-          workspaceId={workspaceId}
-          workspacePath={workspacePath}
-          codeBlockCopyUseModifier={codeBlockCopyUseModifier}
-          showMessageFilePath={showMessageFilePath}
-          onOpenFileLink={openFileLink}
-          onOpenThreadLink={onOpenThreadLink}
-        />
-        {hiddenBeforeCount > 0 && (
-          <button
-            type="button"
-            className="messages-history-notice"
-            onClick={loadEarlierHistory}
-          >
-            {t("messages.historyEarlierNotice").replace(
-              "{count}",
-              String(hiddenBeforeCount),
-            )}
-          </button>
-        )}
-        {hiddenBeforeCount === 0 && hasOlderHistory && (
-          <button
-            type="button"
-            className="messages-history-notice"
-            onClick={() => void handleLoadOlderHistory()}
-            disabled={isLoadingOlderHistory}
-          >
-            {isLoadingOlderHistory
-              ? t("messages.historyLoadingOlder")
-              : t("messages.historyLoadOlder")}
-          </button>
-        )}
-        {groupedItems.map((entry) => {
-          const searchTarget = getSearchTargetForEntry(entry);
-          const isActiveSearchMatch = activeSearchTargetId === searchTarget;
-          const isUserMessageSearchTarget =
-            entry.kind === "item" &&
-            entry.item.kind === "message" &&
-            entry.item.role === "user";
-          const searchTargetClassName = `messages-search-target${
-            isActiveSearchMatch ? " is-active-search-match" : ""
-          }${isUserMessageSearchTarget ? " is-user-message-search-target" : ""}`;
-          if (entry.kind === "processGroup") {
-            const { group } = entry;
-            const isCollapsed = collapsedToolGroups.has(group.id);
-            const summaryParts = [];
-            if (group.toolCount > 0) {
-              summaryParts.push(
-                formatCount(
-                  group.toolCount,
-                  t("messages.toolCallSingular"),
-                  t("messages.toolCallPlural"),
-                ),
-              );
-            }
-            if (group.messageCount > 0) {
-              summaryParts.push(
-                formatCount(
-                  group.messageCount,
-                  t("messages.processMessageSingular"),
-                  t("messages.processMessagePlural"),
-                ),
-              );
-            }
-            const summaryText =
-              summaryParts.length > 0 ? summaryParts.join(", ") : t("messages.processMessages");
-            const groupBodyId = `tool-group-${group.id}`;
-            const ChevronIcon = isCollapsed ? ChevronRight : ChevronDown;
-            return (
-              <div
-                key={`process-group-${group.id}`}
-                ref={registerSearchTarget(searchTarget)}
-                className={`tool-group process-group ${searchTargetClassName} ${
-                  isCollapsed ? "tool-group-collapsed" : ""
-                }`}
-              >
-                <div className="tool-group-header">
-                  <button
-                    type="button"
-                    className="tool-group-toggle"
-                    data-button-elevation="none"
-                    onClick={() => toggleToolGroup(group.id)}
-                    aria-expanded={!isCollapsed}
-                    aria-controls={groupBodyId}
-                    aria-label={
-                      isCollapsed ? t("messages.expandProcess") : t("messages.collapseProcess")
-                    }
-                  >
-                    <span className="tool-group-chevron" aria-hidden>
-                      <ChevronIcon size={14} />
-                    </span>
-                    <span className="tool-group-summary-content">
-                      <span className="tool-group-summary">{summaryText}</span>
-                      {renderLineChangeStats(lineChangeStatsByGroupId.get(group.id))}
-                    </span>
-                  </button>
-                </div>
-                {!isCollapsed && (
-                  <div className="tool-group-body" id={groupBodyId}>
-                    {group.entries.map((processEntry) => {
-                      if (processEntry.kind === "toolGroup") {
-                        return (
-                          <div
-                            key={`nested-tool-group-${processEntry.group.id}`}
-                            className="tool-group process-group-nested"
-                          >
-                            <div className="tool-group-body">
-                              {processEntry.group.items.map((nestedItem) =>
-                                renderItem(nestedItem),
-                              )}
-                            </div>
-                          </div>
-                        );
-                      }
-                      return renderItem(processEntry.item);
-                    })}
-                  </div>
-                )}
-              </div>
-            );
-          }
-          if (entry.kind === "toolGroup") {
-            const { group } = entry;
-            const isCollapsed = collapsedToolGroups.has(group.id);
-            const summaryParts = [];
-            if (group.toolCount > 0) {
-              summaryParts.push(
-                formatCount(
-                  group.toolCount,
-                  t("messages.toolCallSingular"),
-                  t("messages.toolCallPlural"),
-                ),
-              );
-            }
-            if (group.messageCount > 0) {
-              summaryParts.push(
-                formatCount(
-                  group.messageCount,
-                  t("messages.messageSingular"),
-                  t("messages.messagePlural"),
-                ),
-              );
-            }
-            const summaryText =
-              summaryParts.length > 0 ? summaryParts.join(", ") : t("messages.processMessages");
-            const groupBodyId = `tool-group-${group.id}`;
-            const ChevronIcon = isCollapsed ? ChevronRight : ChevronDown;
-            return (
-              <div
-                key={`tool-group-${group.id}`}
-                ref={registerSearchTarget(searchTarget)}
-                className={`tool-group ${searchTargetClassName} ${
-                  isCollapsed ? "tool-group-collapsed" : ""
-                }`}
-              >
-                <div className="tool-group-header">
-                  <button
-                    type="button"
-                    className="tool-group-toggle"
-                    data-button-elevation="none"
-                    onClick={() => toggleToolGroup(group.id)}
-                    aria-expanded={!isCollapsed}
-                    aria-controls={groupBodyId}
-                    aria-label={
-                      isCollapsed ? t("messages.expandTools") : t("messages.collapseTools")
-                    }
-                  >
-                    <span className="tool-group-chevron" aria-hidden>
-                      <ChevronIcon size={14} />
-                    </span>
-                    <span className="tool-group-summary-content">
-                      <span className="tool-group-summary">{summaryText}</span>
-                      {renderLineChangeStats(lineChangeStatsByGroupId.get(group.id))}
-                    </span>
-                  </button>
-                </div>
-                {!isCollapsed && (
-                  <div className="tool-group-body" id={groupBodyId}>
-                    {group.items.map((item) => renderItem(item))}
-                  </div>
-                )}
-              </div>
-            );
-          }
-          return (
-            <div
-              key={`item-search-${entry.item.id}`}
-              ref={registerSearchTarget(searchTarget)}
-              className={searchTargetClassName}
+          <SubagentResultSummary
+            results={subagentResults}
+            workspaceId={workspaceId}
+            workspacePath={workspacePath}
+            codeBlockCopyUseModifier={codeBlockCopyUseModifier}
+            showMessageFilePath={showMessageFilePath}
+            onOpenFileLink={openFileLink}
+            onOpenThreadLink={onOpenThreadLink}
+          />
+          {hiddenBeforeCount > 0 && (
+            <button
+              type="button"
+              className="messages-history-notice"
+              onClick={loadEarlierHistory}
             >
-              {renderItem(entry.item)}
-            </div>
-          );
-        })}
-        {hiddenAfterCount > 0 && (
+              {t("messages.historyEarlierNotice").replace(
+                "{count}",
+                String(hiddenBeforeCount),
+              )}
+            </button>
+          )}
+          {hiddenBeforeCount === 0 && hasOlderHistory && (
+            <button
+              type="button"
+              className="messages-history-notice"
+              onClick={() => void handleLoadOlderHistory()}
+              disabled={isLoadingOlderHistory}
+            >
+              {isLoadingOlderHistory
+                ? t("messages.historyLoadingOlder")
+                : t("messages.historyLoadOlder")}
+            </button>
+          )}
+          {groupedItems.map((entry, entryIndex) => {
+            const searchTarget = getSearchTargetForEntry(entry);
+            const isActiveSearchMatch = activeSearchTargetId === searchTarget;
+            const isUserMessageSearchTarget =
+              entry.kind === "item" &&
+              entry.item.kind === "message" &&
+              entry.item.role === "user";
+            const searchTargetClassName = `messages-search-target${
+              isActiveSearchMatch ? " is-active-search-match" : ""
+            }${isUserMessageSearchTarget ? " is-user-message-search-target" : ""}`;
+            if (entry.kind === "processGroup") {
+              return null;
+            }
+            if (entry.kind === "toolGroup") {
+              const { group } = entry;
+              const isCollapsed = collapsedToolGroups.has(group.id);
+              const summaryParts = [];
+              if (group.toolCount > 0) {
+                summaryParts.push(
+                  formatCount(
+                    group.toolCount,
+                    t("messages.toolCallSingular"),
+                    t("messages.toolCallPlural"),
+                  ),
+                );
+              }
+              if (group.messageCount > 0) {
+                summaryParts.push(
+                  formatCount(
+                    group.messageCount,
+                    t("messages.messageSingular"),
+                    t("messages.messagePlural"),
+                  ),
+                );
+              }
+              const summaryText =
+                summaryParts.length > 0
+                  ? summaryParts.join(", ")
+                  : t("messages.processMessages");
+              const groupBodyId = `tool-group-${group.id}`;
+              const ChevronIcon = isCollapsed ? ChevronRight : ChevronDown;
+              return (
+                <div
+                  key={`tool-group-${group.id}`}
+                  ref={registerSearchTarget(searchTarget)}
+                  className={`tool-group ${searchTargetClassName} ${
+                    isCollapsed ? "tool-group-collapsed" : ""
+                  }`}
+                >
+                  <div className="tool-group-header">
+                    <button
+                      type="button"
+                      className="tool-group-toggle"
+                      data-button-elevation="none"
+                      onClick={() => toggleToolGroup(group.id)}
+                      aria-expanded={!isCollapsed}
+                      aria-controls={groupBodyId}
+                      aria-label={
+                        isCollapsed
+                          ? t("messages.expandTools")
+                          : t("messages.collapseTools")
+                      }
+                    >
+                      <span className="tool-group-chevron" aria-hidden>
+                        <ChevronIcon size={14} />
+                      </span>
+                      <span className="tool-group-summary-content">
+                        <span className="tool-group-summary">
+                          {summaryText}
+                        </span>
+                        {renderLineChangeStats(
+                          lineChangeStatsByGroupId.get(group.id),
+                        )}
+                      </span>
+                    </button>
+                  </div>
+                  {!isCollapsed && (
+                    <div className="tool-group-body" id={groupBodyId}>
+                      {group.items.map((item) => renderItem(item))}
+                    </div>
+                  )}
+                </div>
+              );
+            }
+            const precedingProcessEntry = groupedItems[entryIndex - 1];
+            const processGroupEntry =
+              entry.item.kind === "message" &&
+              entry.item.role === "assistant" &&
+              precedingProcessEntry?.kind === "processGroup"
+                ? precedingProcessEntry
+                : null;
+            const processGroup = processGroupEntry?.group;
+            const processSearchTarget = processGroupEntry
+              ? getSearchTargetForEntry(processGroupEntry)
+              : null;
+            const processGroupCollapsed = processGroup
+              ? collapsedToolGroups.has(processGroup.id)
+              : true;
+            const processGroupBodyId = processGroup
+              ? `tool-group-${processGroup.id}`
+              : "";
+            const processLineChanges = processGroup
+              ? lineChangeStatsByGroupId.get(processGroup.id)
+              : undefined;
+            const processDisclosure: AssistantProcessDisclosure | undefined =
+              processGroup
+                ? {
+                    toolCount: processGroup.toolCount,
+                    processMessageCount: processGroup.messageCount,
+                    additions: processLineChanges?.additions ?? null,
+                    deletions: processLineChanges?.deletions ?? null,
+                    isExpanded: !processGroupCollapsed,
+                    bodyId: processGroupBodyId,
+                    onToggle: () => toggleToolGroup(processGroup.id),
+                  }
+                : undefined;
+            const processContent =
+              processGroup && processSearchTarget && !processGroupCollapsed ? (
+                <div className="message-agent-process-content">
+                  <div
+                    ref={registerSearchTarget(processSearchTarget)}
+                    className={`tool-group process-group process-group-inline messages-search-target${
+                      activeSearchTargetId === processSearchTarget
+                        ? " is-active-search-match"
+                        : ""
+                    }`}
+                  >
+                    <div className="tool-group-body" id={processGroupBodyId}>
+                      {coalesceDenseProcessToolGroups(
+                        processGroup.entries,
+                        processGroup.id,
+                      ).map((processEntry) =>
+                        renderProcessGroupEntry(processEntry),
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : undefined;
+            return (
+              <div
+                key={`item-search-${entry.item.id}`}
+                ref={registerSearchTarget(searchTarget)}
+                className={searchTargetClassName}
+              >
+                {renderItem(entry.item, processDisclosure, processContent)}
+              </div>
+            );
+          })}
+          {hiddenAfterCount > 0 && (
+            <button
+              type="button"
+              className="messages-history-notice"
+              onClick={loadLaterHistory}
+            >
+              {t("messages.historyLaterNotice").replace(
+                "{count}",
+                String(hiddenAfterCount),
+              )}
+            </button>
+          )}
+          {planFollowupNode}
+          {userInputNode}
+          <WorkingIndicator
+            isThinking={isThinking}
+            processingStartedAt={processingStartedAt}
+            lastDurationMs={lastDurationMs}
+            hasItems={items.length > 0}
+            reasoningLabel={latestReasoningLabel}
+            showPollingFetchStatus={showPollingFetchStatus}
+            pollingIntervalMs={pollingIntervalMs}
+            completionStatus={
+              turnExecutionSummary?.status === "active"
+                ? null
+                : (turnExecutionSummary?.status ?? null)
+            }
+            workingLabel={
+              turnExecutionSummary ? t("messages.working") : undefined
+            }
+            runningLabel={assistantRunningLabel}
+            completedLabel={
+              turnExecutionSummary ? t("messages.completedIn") : undefined
+            }
+            interruptedLabel={
+              turnExecutionSummary ? t("messages.interruptedIn") : undefined
+            }
+            failedLabel={
+              turnExecutionSummary ? t("messages.failedIn") : undefined
+            }
+          />
+          {!items.length &&
+            !userInputNode &&
+            !isThinking &&
+            !isLoadingMessages && (
+              <div className="empty messages-empty">
+                {threadId
+                  ? t("messages.emptyExistingThread")
+                  : t("messages.emptyNewThread")}
+              </div>
+            )}
+          {!items.length &&
+            !userInputNode &&
+            !isThinking &&
+            isLoadingMessages && (
+              <div className="empty messages-empty">
+                <div
+                  className="messages-loading-indicator"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <span className="working-spinner" aria-hidden />
+                  <span className="messages-loading-label">
+                    {t("messages.loading")}
+                  </span>
+                </div>
+              </div>
+            )}
+          <div ref={bottomRef} />
+        </div>
+        {showScrollToLatest && (
           <button
             type="button"
-            className="messages-history-notice"
-            onClick={loadLaterHistory}
+            className="messages-scroll-latest-button"
+            onClick={scrollToLatest}
+            aria-label={t("messages.scrollToLatest")}
+            title={t("messages.scrollToLatest")}
           >
-            {t("messages.historyLaterNotice").replace(
-              "{count}",
-              String(hiddenAfterCount),
-            )}
+            <span aria-hidden>↓</span>
+            <span>{t("messages.latest")}</span>
           </button>
         )}
-        {planFollowupNode}
-        {userInputNode}
-        <WorkingIndicator
-          isThinking={isThinking}
-          processingStartedAt={processingStartedAt}
-          lastDurationMs={lastDurationMs}
-          hasItems={items.length > 0}
-          reasoningLabel={latestReasoningLabel}
-          showPollingFetchStatus={showPollingFetchStatus}
-          pollingIntervalMs={pollingIntervalMs}
-          completionStatus={
-            turnExecutionSummary?.status === "active"
-              ? null
-              : turnExecutionSummary?.status ?? null
-          }
-          workingLabel={turnExecutionSummary ? t("messages.working") : undefined}
-          completedLabel={turnExecutionSummary ? t("messages.completedIn") : undefined}
-          interruptedLabel={turnExecutionSummary ? t("messages.interruptedIn") : undefined}
-          failedLabel={turnExecutionSummary ? t("messages.failedIn") : undefined}
-        />
-        {!items.length && !userInputNode && !isThinking && !isLoadingMessages && (
-          <div className="empty messages-empty">
-            {threadId ? t("messages.emptyExistingThread") : t("messages.emptyNewThread")}
-          </div>
-        )}
-        {!items.length && !userInputNode && !isThinking && isLoadingMessages && (
-          <div className="empty messages-empty">
-            <div className="messages-loading-indicator" role="status" aria-live="polite">
-              <span className="working-spinner" aria-hidden />
-              <span className="messages-loading-label">{t("messages.loading")}</span>
-            </div>
-          </div>
-        )}
-        <div ref={bottomRef} />
       </div>
-      {showScrollToLatest && (
-        <button
-          type="button"
-          className="messages-scroll-latest-button"
-          onClick={scrollToLatest}
-          aria-label={t("messages.scrollToLatest")}
-          title={t("messages.scrollToLatest")}
-        >
-          <span aria-hidden>↓</span>
-          <span>{t("messages.latest")}</span>
-        </button>
-      )}
-      </div>
+      <ConversationExportControls
+        selecting={conversationExport.selecting}
+        selectedCount={conversationExport.selectedCount}
+        totalCount={conversationExport.totalCount}
+        busy={conversationExport.busy}
+        progress={conversationExport.progress}
+        onSelectAll={conversationExport.selectAll}
+        onCancelSelection={conversationExport.cancelSelection}
+        onExport={conversationExport.exportConversation}
+        onCancelExport={conversationExport.cancelExport}
+        onDismissProgress={conversationExport.dismissProgress}
+      />
     </div>
   );
 });

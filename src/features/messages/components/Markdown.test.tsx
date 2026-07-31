@@ -4,6 +4,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectOpenedFileTarget } from "../test/fileLinkAssertions";
 import { Markdown } from "./Markdown";
 
+vi.mock("@tauri-apps/api/core", () => ({
+  convertFileSrc: (path: string) => `asset://localhost/${encodeURIComponent(path)}`,
+}));
+
 describe("Markdown file-like href behavior", () => {
   afterEach(() => {
     cleanup();
@@ -637,6 +641,17 @@ describe("Markdown file-like href behavior", () => {
     expect(container.querySelector(".markdown-table-wrap")).toBe(tableWrap);
     expect(tableWrap.scrollLeft).toBe(240);
     expect(screen.getByText("Updated")).toBeTruthy();
+  });
+
+  it("converts Windows absolute Markdown image paths to Tauri asset URLs", () => {
+    const rawPath = "/D:/Project/CodexMonitor/.codex-monitor/preview.png";
+    const { container } = render(
+      <Markdown value={`![preview](${rawPath})`} className="markdown" />,
+    );
+
+    expect(container.querySelector("img")?.getAttribute("src")).toBe(
+      "asset://localhost/D%3A%2FProject%2FCodexMonitor%2F.codex-monitor%2Fpreview.png",
+    );
   });
 
   it("preserves message code block scroll position across markdown rerenders", () => {

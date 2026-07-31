@@ -3,7 +3,8 @@ import type { WorkspaceInfo } from "../../../types";
 import { isLocalCodexWorkspaceId } from "@/features/workspaces/domain/localCodexWorkspace";
 import type { ThreadListRefreshReason } from "@threads/types";
 
-const INITIAL_THREAD_LIST_MAX_PAGES = 6;
+const INITIAL_THREAD_LIST_FAST_MAX_PAGES = 1;
+const INITIAL_WORKSPACE_CONNECT_CONCURRENCY = 3;
 
 type WorkspaceRestoreOptions = {
   workspaces: WorkspaceInfo[];
@@ -15,9 +16,47 @@ type WorkspaceRestoreOptions = {
       preserveState?: boolean;
       maxPages?: number;
       refreshReason?: ThreadListRefreshReason;
+      knownWorkspaces?: WorkspaceInfo[];
     },
   ) => Promise<void>;
 };
+
+async function connectPendingWorkspaces(
+  pending: WorkspaceInfo[],
+  connectWorkspace: (workspace: WorkspaceInfo) => Promise<void>,
+) {
+  const connectedTargetsByIndex: Array<WorkspaceInfo | null> = Array.from({
+    length: pending.length,
+  }, () => null);
+  let nextIndex = 0;
+  const workerCount = Math.min(INITIAL_WORKSPACE_CONNECT_CONCURRENCY, pending.length);
+
+  async function connectNext() {
+    while (nextIndex < pending.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      const workspace = pending[index];
+      const wasConnected = workspace.connected;
+      const isLocalCodexWorkspace = isLocalCodexWorkspaceId(workspace.id);
+      try {
+        if (!wasConnected && !isLocalCodexWorkspace) {
+          await connectWorkspace(workspace);
+        }
+        connectedTargetsByIndex[index] = {
+          ...workspace,
+          connected: true,
+        };
+      } catch {
+        // Silent: connection errors show in debug panel.
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: workerCount }, connectNext));
+  return connectedTargetsByIndex.filter(
+    (workspace): workspace is WorkspaceInfo => workspace !== null,
+  );
+}
 
 export function useWorkspaceRestore({
   workspaces,
@@ -47,24 +86,16 @@ export function useWorkspaceRestore({
       restoredWorkspaces.current.add(workspace.id);
     });
     void (async () => {
-      const connectedTargets: WorkspaceInfo[] = [];
-      for (const workspace of pending) {
-        const wasConnected = workspace.connected;
-        const isLocalCodexWorkspace = isLocalCodexWorkspaceId(workspace.id);
-        try {
-          if (!wasConnected && !isLocalCodexWorkspace) {
-            await connectWorkspace(workspace);
-          }
-          connectedTargets.push({ ...workspace, connected: true });
-        } catch {
-          // Silent: connection errors show in debug panel.
-        }
-      }
+      const connectedTargets = await connectPendingWorkspaces(
+        pending,
+        connectWorkspace,
+      );
       try {
         if (connectedTargets.length > 0) {
           await listThreadsForWorkspaces(connectedTargets, {
-            maxPages: INITIAL_THREAD_LIST_MAX_PAGES,
+            maxPages: INITIAL_THREAD_LIST_FAST_MAX_PAGES,
             refreshReason: "initial_restore",
+            knownWorkspaces: workspaces,
           });
         }
       } finally {

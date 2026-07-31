@@ -370,12 +370,11 @@ describe("useQueuedSend", () => {
     expect(options.sendUserMessage).toHaveBeenLastCalledWith("Retry", []);
   });
 
-  it("retries queued send when sending is blocked", async () => {
+  it("drops a queued send when sending is blocked and restores the draft", async () => {
+    const onMessageRejected = vi.fn();
     const options = makeOptions({
-      sendUserMessage: vi
-        .fn()
-        .mockResolvedValueOnce({ status: "blocked" })
-        .mockResolvedValueOnce({ status: "sent" }),
+      sendUserMessage: vi.fn().mockResolvedValue({ status: "blocked" }),
+      onMessageRejected,
     });
     const { result } = renderHook((props) => useQueuedSend(props), {
       initialProps: options,
@@ -385,14 +384,17 @@ describe("useQueuedSend", () => {
       await result.current.queueMessage("Retry blocked");
     });
     await waitFor(() => {
-      expect(options.sendUserMessage).toHaveBeenCalledTimes(2);
+      expect(options.sendUserMessage).toHaveBeenCalledTimes(1);
     });
-    expect(options.sendUserMessage).toHaveBeenLastCalledWith("Retry blocked", []);
+    expect(result.current.activeQueue).toHaveLength(0);
+    expect(onMessageRejected).toHaveBeenCalledWith("Retry blocked", [], []);
   });
 
-  it("backs off and resumes automatic retries after repeated blocked sends", async () => {
+  it("does not schedule retries after a blocked queued send", async () => {
+    const onMessageRejected = vi.fn();
     const options = makeOptions({
       sendUserMessage: vi.fn().mockResolvedValue({ status: "blocked" }),
+      onMessageRejected,
     });
     const { result } = renderHook((props) => useQueuedSend(props), {
       initialProps: options,
@@ -402,15 +404,12 @@ describe("useQueuedSend", () => {
       await result.current.queueMessage("Still blocked");
     });
     await waitFor(() => {
-      expect(options.sendUserMessage).toHaveBeenCalledTimes(2);
+      expect(options.sendUserMessage).toHaveBeenCalledTimes(1);
     });
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(options.sendUserMessage).toHaveBeenCalledTimes(2);
-    expect(result.current.activeQueue.map((item) => item.text)).toEqual(["Still blocked"]);
-    await waitFor(
-      () => expect(options.sendUserMessage).toHaveBeenCalledTimes(3),
-      { timeout: 1_500 },
-    );
+    expect(options.sendUserMessage).toHaveBeenCalledTimes(1);
+    expect(result.current.activeQueue).toHaveLength(0);
+    expect(onMessageRejected).toHaveBeenCalledWith("Still blocked", [], []);
   });
 
   it("queues messages per thread and only flushes the active thread", async () => {

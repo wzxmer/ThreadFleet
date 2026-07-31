@@ -9,6 +9,7 @@ type UseRemoteThreadRefreshOnFocusOptions = {
   activeWorkspace: WorkspaceInfo | null;
   activeThreadId: string | null;
   activeThreadIsProcessing?: boolean;
+  activeThreadNeedsBackgroundRefresh?: boolean;
   suspendPolling?: boolean;
   reconnectWorkspace?: (workspace: WorkspaceInfo) => Promise<unknown> | unknown;
   refreshThread: (workspaceId: string, threadId: string) => Promise<unknown> | unknown;
@@ -19,6 +20,7 @@ export function useRemoteThreadRefreshOnFocus({
   activeWorkspace,
   activeThreadId,
   activeThreadIsProcessing = false,
+  activeThreadNeedsBackgroundRefresh = true,
   suspendPolling = false,
   reconnectWorkspace,
   refreshThread,
@@ -55,6 +57,7 @@ export function useRemoteThreadRefreshOnFocus({
 
     const canRefresh = () =>
       backendMode === "remote" &&
+      activeThreadNeedsBackgroundRefresh &&
       Boolean(workspaceId) &&
       Boolean(activeThreadId);
 
@@ -207,6 +210,7 @@ export function useRemoteThreadRefreshOnFocus({
   }, [
     activeThreadId,
     activeThreadIsProcessing,
+    activeThreadNeedsBackgroundRefresh,
     backendMode,
     suspendPolling,
     workspaceId,

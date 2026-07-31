@@ -1,14 +1,38 @@
 // @vitest-environment jsdom
 import { useCallback, useState } from "react";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ConversationItem, SendMessageResult } from "../../../types";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
+import type {
+  ConversationItem,
+  SendMessageResult,
+  TurnExecutionSummary,
+} from "../../../types";
 import type { SubagentResultSummary } from "../utils/subagentResults";
 import { expectOpenedFileTarget } from "../test/fileLinkAssertions";
 import { Messages } from "./Messages";
 
 const useFileLinkOpenerMock = vi.fn(
-  (_workspacePath: string | null, _openTargets: unknown[], _selectedOpenAppId: string) => ({
+  (
+    _workspacePath: string | null,
+    _openTargets: unknown[],
+    _selectedOpenAppId: string,
+  ) => ({
     openFileLink: openFileLinkMock,
     showFileLinkMenu: showFileLinkMenuMock,
   }),
@@ -28,9 +52,8 @@ vi.mock("../hooks/useFileLinkOpener", () => ({
 }));
 
 vi.mock("@services/tauri", async () => {
-  const actual = await vi.importActual<typeof import("@services/tauri")>(
-    "@services/tauri",
-  );
+  const actual =
+    await vi.importActual<typeof import("@services/tauri")>("@services/tauri");
   return {
     ...actual,
     exportMarkdownFile: exportMarkdownFileMock,
@@ -55,12 +78,228 @@ describe("Messages", () => {
     exportMarkdownFileMock.mockReset();
   });
 
+  it("shows the global assistant identity with date time and running state", () => {
+    const createdAt = new Date("2026-07-30T14:28:00").getTime();
+    const summary: TurnExecutionSummary = {
+      schemaVersion: 1,
+      executionId: "exec-1",
+      workspaceId: "ws-1",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      turnChain: ["turn-1"],
+      modelId: "gpt-5-codex",
+      status: "active",
+      startedAtMs: createdAt,
+      endedAtMs: null,
+      workingDurationMs: null,
+      addedLines: null,
+      deletedLines: null,
+      diffRevision: 0,
+      recordRevision: 1,
+      updatedAtMs: createdAt,
+    };
+
+    const { container } = render(
+      <Messages
+        items={[
+          {
+            id: "user-1",
+            kind: "message",
+            role: "user",
+            text: "全部 UI 都要升级",
+            createdAt,
+            turnId: "turn-1",
+          },
+          {
+            id: "assistant-1",
+            kind: "message",
+            role: "assistant",
+            text: "完整客户端壳层已建立。",
+            createdAt,
+            turnId: "turn-1",
+          },
+        ]}
+        threadId="thread-1"
+        workspaceId="ws-1"
+        isThinking
+        messageReadingStyle="native"
+        assistantInstructionContent="# Identity: BT-7274"
+        turnExecutionSummary={summary}
+        turnExecutionSummaries={[summary]}
+        openTargets={[]}
+        selectedOpenAppId=""
+      />,
+    );
+
+    expect(container.querySelector(".message-agent-name")?.textContent).toBe(
+      "BT-7274",
+    );
+    expect(container.querySelector(".message-agent-time")?.textContent).toBe(
+      "2026-07-30 14:28",
+    );
+    expect(container.querySelector(".message-agent-avatar svg")).toBeTruthy();
+    expect(
+      container.querySelector(".message-agent-running")?.textContent,
+    ).toContain("RUNNING");
+    expect(container.querySelector(".message-user-time")?.textContent).toBe(
+      "14:28",
+    );
+    expect(container.querySelector(".working-agent-name")).toBeNull();
+    expect(container.querySelector(".working-status")?.textContent).toBe(
+      "RUNNING",
+    );
+  });
+
+  it("normalizes the turn model to a provider name instead of showing its slug", () => {
+    const summary: TurnExecutionSummary = {
+      schemaVersion: 1,
+      executionId: "exec-1",
+      workspaceId: "ws-1",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      turnChain: ["turn-1"],
+      modelId: "gpt-5-codex",
+      status: "completed",
+      startedAtMs: 1,
+      endedAtMs: 2,
+      workingDurationMs: 1,
+      addedLines: null,
+      deletedLines: null,
+      diffRevision: 0,
+      recordRevision: 1,
+      updatedAtMs: 2,
+    };
+
+    const { container } = render(
+      <Messages
+        items={[
+          {
+            id: "assistant-1",
+            kind: "message",
+            role: "assistant",
+            text: "Done",
+            turnId: "turn-1",
+          },
+        ]}
+        threadId="thread-1"
+        workspaceId="ws-1"
+        isThinking={false}
+        messageReadingStyle="native"
+        turnExecutionSummaries={[summary]}
+        openTargets={[]}
+        selectedOpenAppId=""
+      />,
+    );
+
+    expect(container.querySelector(".message-agent-name")?.textContent).toBe(
+      "GPT",
+    );
+    expect(container.querySelector(".message-agent-avatar svg")).toBeTruthy();
+    expect(container.textContent).not.toContain("gpt-5-codex");
+  });
+
+  it("shows turn activity and code changes on the final assistant message", () => {
+    const summary: TurnExecutionSummary = {
+      schemaVersion: 1,
+      executionId: "exec-claude",
+      workspaceId: "ws-1",
+      threadId: "thread-1",
+      turnId: "turn-claude",
+      turnChain: ["turn-claude"],
+      modelId: "model-claude",
+      status: "completed",
+      startedAtMs: 1,
+      endedAtMs: 2,
+      workingDurationMs: 1,
+      addedLines: 8,
+      deletedLines: 3,
+      diffRevision: 1,
+      recordRevision: 1,
+      updatedAtMs: 2,
+    };
+
+    const { container } = render(
+      <Messages
+        items={[
+          {
+            id: "assistant-commentary",
+            kind: "message",
+            role: "assistant",
+            phase: "commentary",
+            text: "Checking files.",
+            turnId: "turn-claude",
+          },
+          {
+            id: "tool-1",
+            kind: "tool",
+            toolType: "commandExecution",
+            title: "Command",
+            detail: "rg files",
+            turnId: "turn-claude",
+          },
+          {
+            id: "reasoning-1",
+            kind: "reasoning",
+            summary: "Plan",
+            content: "Inspect first",
+            turnId: "turn-claude",
+          },
+          {
+            id: "assistant-final",
+            kind: "message",
+            role: "assistant",
+            phase: "final_answer",
+            text: "Done",
+            turnId: "turn-claude",
+          },
+        ]}
+        threadId="thread-1"
+        workspaceId="ws-1"
+        isThinking={false}
+        assistantModelOptions={[
+          {
+            id: "model-claude",
+            model: "claude-sonnet",
+            displayName: "Claude Sonnet",
+          },
+        ]}
+        turnExecutionSummaries={[summary]}
+        openTargets={[]}
+        selectedOpenAppId=""
+      />,
+    );
+
+    const finalMessage = container.querySelector(
+      ".message.assistant:last-of-type",
+    );
+    expect(
+      finalMessage?.querySelector(".message-agent-name")?.textContent,
+    ).toBe("Claude");
+    expect(
+      finalMessage?.querySelector(".message-agent-stats")?.textContent,
+    ).toContain("1 次工具调用");
+    expect(
+      finalMessage?.querySelector(".message-agent-stats")?.textContent,
+    ).toContain("2 条过程消息");
+    expect(
+      finalMessage?.querySelector(".message-agent-stat-add")?.textContent,
+    ).toBe("+8");
+    expect(
+      finalMessage?.querySelector(".message-agent-stat-delete")?.textContent,
+    ).toBe("-3");
+  });
+
   it("requests an older backend history page after the local window is exhausted", async () => {
     const onLoadOlderHistory = vi.fn(async () => true);
     render(
       <Messages
         items={[
-          { id: "message-1", kind: "message", role: "assistant", text: "Latest" },
+          {
+            id: "message-1",
+            kind: "message",
+            role: "assistant",
+            text: "Latest",
+          },
         ]}
         threadId="thread-history"
         workspaceId="ws-history"
@@ -75,6 +314,129 @@ describe("Messages", () => {
     fireEvent.click(screen.getByRole("button", { name: "加载更早历史" }));
 
     await waitFor(() => expect(onLoadOlderHistory).toHaveBeenCalledTimes(1));
+  });
+
+  it("loads an older backend history page when the user keeps scrolling upward at the top", async () => {
+    const onLoadOlderHistory = vi.fn(async () => true);
+    const { container } = render(
+      <Messages
+        items={[
+          {
+            id: "message-1",
+            kind: "message",
+            role: "assistant",
+            text: "Latest",
+          },
+        ]}
+        threadId="thread-history"
+        workspaceId="ws-history"
+        isThinking={false}
+        hasOlderHistory
+        onLoadOlderHistory={onLoadOlderHistory}
+        openTargets={[]}
+        selectedOpenAppId=""
+      />,
+    );
+
+    const scroller = container.querySelector<HTMLDivElement>(
+      ".messages.messages-full",
+    );
+    expect(scroller).toBeTruthy();
+    fireEvent.wheel(scroller!, { deltaY: -48 });
+
+    await waitFor(() => expect(onLoadOlderHistory).toHaveBeenCalledTimes(1));
+  });
+
+  it("reveals local hidden history before requesting an older backend page on upward top scroll", () => {
+    const onLoadOlderHistory = vi.fn(async () => true);
+    const { container } = render(
+      <Messages
+        items={[
+          {
+            id: "message-0",
+            kind: "message",
+            role: "user",
+            text: "Older local",
+          },
+          {
+            id: "message-1",
+            kind: "message",
+            role: "assistant",
+            text: "Latest local",
+          },
+        ]}
+        threadId="thread-local-window"
+        workspaceId="ws-history"
+        isThinking={false}
+        hasOlderHistory
+        onLoadOlderHistory={onLoadOlderHistory}
+        chatHistoryScrollbackItems={1}
+        openTargets={[]}
+        selectedOpenAppId=""
+      />,
+    );
+
+    expect(screen.queryByText("Older local")).toBeNull();
+    const scroller = container.querySelector<HTMLDivElement>(
+      ".messages.messages-full",
+    );
+    expect(scroller).toBeTruthy();
+    fireEvent.wheel(scroller!, { deltaY: -48 });
+
+    expect(screen.getByText("Older local")).toBeTruthy();
+    expect(onLoadOlderHistory).not.toHaveBeenCalled();
+  });
+
+  it("selects exportable conversation messages and clears selection when the thread changes", () => {
+    const items: ConversationItem[] = [
+      { id: "user-export", kind: "message", role: "user", text: "Question" },
+      {
+        id: "tool-export",
+        kind: "tool",
+        toolType: "shell",
+        title: "Internal tool call",
+        detail: "not exported",
+        status: "completed",
+      },
+      {
+        id: "assistant-export",
+        kind: "message",
+        role: "assistant",
+        text: "Answer",
+      },
+    ];
+    const renderMessages = (threadId: string) => (
+      <Messages
+        items={items}
+        threadId={threadId}
+        workspaceId="ws-export"
+        isThinking={false}
+        openTargets={[]}
+        selectedOpenAppId=""
+      />
+    );
+
+    const { container, rerender } = render(renderMessages("thread-export-a"));
+    const exportButtons = screen.getAllByRole("button", {
+      name: "导出会话正文",
+    });
+    expect(exportButtons).toHaveLength(2);
+
+    fireEvent.click(exportButtons[0]);
+    expect(screen.getByRole("toolbar", { name: "导出会话正文" })).toBeTruthy();
+    expect(
+      screen.getAllByRole("checkbox", { name: "导出会话正文" }),
+    ).toHaveLength(2);
+    expect(screen.getByText("已选 1 条")).toBeTruthy();
+    expect(
+      container.querySelector(".tool-inline .message-export-checkbox"),
+    ).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "全选正文" }));
+    expect(screen.getByText("已选 2 条")).toBeTruthy();
+
+    rerender(renderMessages("thread-export-b"));
+    expect(screen.queryByRole("toolbar", { name: "导出会话正文" })).toBeNull();
   });
 
   it("summarizes child results and opens long output in a detail drawer", async () => {
@@ -110,14 +472,18 @@ describe("Messages", () => {
     );
 
     expect(screen.getByText("子会话结果")).toBeTruthy();
-    expect(screen.getByText("package.json 中没有定义 license 字段。")).toBeTruthy();
+    expect(
+      screen.getByText("package.json 中没有定义 license 字段。"),
+    ).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /查看详情/ }));
 
     const drawer = screen.getByRole("dialog", { name: "检查许可证" });
     expect(drawer).toBeTruthy();
     expect(screen.getByText("这是完整结果。")).toBeTruthy();
     fireEvent.click(within(drawer).getByRole("button", { name: "复制结果" }));
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith(subagentResults[0].content));
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith(subagentResults[0].content),
+    );
     fireEvent.click(within(drawer).getByRole("button", { name: "打开子会话" }));
     expect(onOpenThreadLink).toHaveBeenCalledWith("child-thread", "ws-1");
     fireEvent.keyDown(window, { key: "Escape" });
@@ -194,12 +560,15 @@ describe("Messages", () => {
   });
 
   it("keeps unlimited history DOM bounded to the safe default batch", () => {
-    const items: ConversationItem[] = Array.from({ length: 3000 }, (_, index) => ({
-      id: `large-msg-${index}`,
-      kind: "message",
-      role: "user",
-      text: `Large message ${index}`,
-    }));
+    const items: ConversationItem[] = Array.from(
+      { length: 3000 },
+      (_, index) => ({
+        id: `large-msg-${index}`,
+        kind: "message",
+        role: "user",
+        text: `Large message ${index}`,
+      }),
+    );
 
     const { container } = render(
       <Messages
@@ -549,7 +918,9 @@ describe("Messages", () => {
       id: "assistant-table-scroll",
       kind: "message",
       role: "assistant",
-      text: ["| Name | Value |", "| --- | --- |", "| Status | Ready |"].join("\n"),
+      text: ["| Name | Value |", "| --- | --- |", "| Status | Ready |"].join(
+        "\n",
+      ),
     };
     const renderMessages = (items: ConversationItem[]) => (
       <Messages
@@ -562,7 +933,9 @@ describe("Messages", () => {
       />
     );
     const { container, rerender } = render(renderMessages([tableItem]));
-    const tableWrap = container.querySelector<HTMLElement>(".markdown-table-wrap");
+    const tableWrap = container.querySelector<HTMLElement>(
+      ".markdown-table-wrap",
+    );
 
     expect(tableWrap).not.toBeNull();
     if (!tableWrap) {
@@ -601,7 +974,9 @@ describe("Messages", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "引用消息" }));
     fireEvent.click(screen.getByRole("menuitem", { name: /引用到当前会话/ }));
-    expect(onQuoteMessage).toHaveBeenCalledWith("> First line\n> Second line\n\n");
+    expect(onQuoteMessage).toHaveBeenCalledWith(
+      "> First line\n> Second line\n\n",
+    );
   });
 
   it("quotes selected message fragment when text is highlighted", () => {
@@ -648,7 +1023,9 @@ describe("Messages", () => {
   });
 
   it("edits a user message in place and resends it", async () => {
-    const onResendUserMessage = vi.fn(async () => ({ status: "sent" as const }));
+    const onResendUserMessage = vi.fn(async () => ({
+      status: "sent" as const,
+    }));
     const items: ConversationItem[] = [
       {
         id: "msg-edit-user-1",
@@ -705,8 +1082,18 @@ describe("Messages", () => {
         }),
     );
     const history: ConversationItem[] = [
-      { id: "msg-history-user", kind: "message", role: "user", text: "Earlier prompt" },
-      { id: "msg-history-agent", kind: "message", role: "assistant", text: "Earlier reply" },
+      {
+        id: "msg-history-user",
+        kind: "message",
+        role: "user",
+        text: "Earlier prompt",
+      },
+      {
+        id: "msg-history-agent",
+        kind: "message",
+        role: "assistant",
+        text: "Earlier reply",
+      },
     ];
     const failedTurn: ConversationItem[] = [
       {
@@ -745,9 +1132,9 @@ describe("Messages", () => {
 
     rerender(renderMessages(history));
 
-    expect((screen.getByLabelText("编辑消息") as HTMLTextAreaElement).value).toBe(
-      "Edited retry prompt",
-    );
+    expect(
+      (screen.getByLabelText("编辑消息") as HTMLTextAreaElement).value,
+    ).toBe("Edited retry prompt");
     expect(screen.getByText("Turn failed: Service unavailable")).toBeTruthy();
 
     rerender(
@@ -856,9 +1243,10 @@ describe("Messages", () => {
     expect((pendingButton as HTMLButtonElement).disabled).toBe(true);
     expect(pendingButton.getAttribute("aria-busy")).toBe("true");
     expect(textarea.disabled).toBe(true);
-    expect((screen.getByRole("button", { name: "取消" }) as HTMLButtonElement).disabled).toBe(
-      true,
-    );
+    expect(
+      (screen.getByRole("button", { name: "取消" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
     fireEvent.click(pendingButton);
     expect(onResendUserMessage).toHaveBeenCalledTimes(1);
 
@@ -868,12 +1256,13 @@ describe("Messages", () => {
 
     await waitFor(() => {
       expect(
-        (screen.getByRole("button", { name: "重新发送" }) as HTMLButtonElement).disabled,
+        (screen.getByRole("button", { name: "重新发送" }) as HTMLButtonElement)
+          .disabled,
       ).toBe(false);
     });
-    expect((screen.getByLabelText("编辑消息") as HTMLTextAreaElement).value).toBe(
-      "修改后的消息",
-    );
+    expect(
+      (screen.getByLabelText("编辑消息") as HTMLTextAreaElement).value,
+    ).toBe("修改后的消息");
   });
 
   it("marks user search matches so the highlight can follow the bubble", async () => {
@@ -930,7 +1319,9 @@ describe("Messages", () => {
         selectedOpenAppId=""
       />
     );
-    const { rerender } = render(renderMessages("thread-1", "Shared target in thread one"));
+    const { rerender } = render(
+      renderMessages("thread-1", "Shared target in thread one"),
+    );
 
     fireEvent.keyDown(window, { key: "f", ctrlKey: true });
     fireEvent.change(screen.getByLabelText("搜索当前会话"), {
@@ -990,7 +1381,12 @@ describe("Messages", () => {
       <Messages
         items={[
           { id: "msg-user", kind: "message", role: "user", text: "Hello" },
-          { id: "msg-assistant", kind: "message", role: "assistant", text: "Done" },
+          {
+            id: "msg-assistant",
+            kind: "message",
+            role: "assistant",
+            text: "Done",
+          },
         ]}
         threadId="thread-1"
         workspaceId="ws-1"
@@ -1007,7 +1403,9 @@ describe("Messages", () => {
   it("offers edit and resend for interrupted final user message", () => {
     render(
       <Messages
-        items={[{ id: "msg-user", kind: "message", role: "user", text: "Continue" }]}
+        items={[
+          { id: "msg-user", kind: "message", role: "user", text: "Continue" },
+        ]}
         threadId="thread-1"
         workspaceId="ws-1"
         isThinking={false}
@@ -1459,7 +1857,8 @@ describe("Messages", () => {
 
   it("renders absolute file references outside workspace using dotdot-relative paths", () => {
     const workspacePath = "/Users/dimillian/Documents/Dev/ThreadFleet";
-    const absolutePath = "/Users/dimillian/Documents/Other/IceCubesApp/file.rs:123";
+    const absolutePath =
+      "/Users/dimillian/Documents/Other/IceCubesApp/file.rs:123";
     const items: ConversationItem[] = [
       {
         id: "msg-file-link-absolute-outside",
@@ -1590,7 +1989,9 @@ describe("Messages", () => {
 
     expect(container.querySelector(".reasoning-inline")).toBeTruthy();
     const reasoningDetail = container.querySelector(".reasoning-inline-detail");
-    expect(reasoningDetail?.textContent ?? "").toContain("Looking for entry points");
+    expect(reasoningDetail?.textContent ?? "").toContain(
+      "Looking for entry points",
+    );
     const workingText = container.querySelector(".working-text");
     expect(workingText?.textContent ?? "").toContain("Scanning repository");
   });
@@ -1621,7 +2022,9 @@ describe("Messages", () => {
     expect(workingText?.textContent ?? "").toContain("Plan from content");
     const reasoningDetail = container.querySelector(".reasoning-inline-detail");
     expect(reasoningDetail?.textContent ?? "").toContain("More detail here");
-    expect(reasoningDetail?.textContent ?? "").not.toContain("Plan from content");
+    expect(reasoningDetail?.textContent ?? "").not.toContain(
+      "Plan from content",
+    );
   });
 
   it("does not show a stale reasoning label from a previous turn", () => {
@@ -1709,11 +2112,15 @@ describe("Messages", () => {
         />,
       );
 
-      expect(container.querySelector(".working-timer-clock")?.textContent).toBe("0:00");
+      expect(container.querySelector(".working-timer-clock")?.textContent).toBe(
+        "0:00",
+      );
       act(() => {
         vi.advanceTimersByTime(2_000);
       });
-      expect(container.querySelector(".working-timer-clock")?.textContent).toBe("0:02");
+      expect(container.querySelector(".working-timer-clock")?.textContent).toBe(
+        "0:02",
+      );
     } finally {
       vi.useRealTimers();
     }
@@ -1812,9 +2219,7 @@ describe("Messages", () => {
       />,
     );
 
-    expect(
-      screen.getByText(/Proceed with deployment\?: Yes \+1/),
-    ).toBeTruthy();
+    expect(screen.getByText(/Proceed with deployment\?: Yes \+1/)).toBeTruthy();
     expect(screen.queryByText("user_note: after running tests")).toBeNull();
 
     fireEvent.click(
@@ -1857,9 +2262,9 @@ describe("Messages", () => {
     expect(screen.queryByText(/tool calls/i)).toBeNull();
     const exploreItems = container.querySelectorAll(".explore-inline-item");
     expect(exploreItems.length).toBe(2);
-    expect(container.querySelector(".explore-inline-title")?.textContent ?? "").toContain(
-      "Explored",
-    );
+    expect(
+      container.querySelector(".explore-inline-title")?.textContent ?? "",
+    ).toContain("Explored");
   });
 
   it("uses the latest explore status when merging a consecutive run", async () => {
@@ -1981,7 +2386,9 @@ describe("Messages", () => {
     await waitFor(() => {
       expect(container.querySelectorAll(".explore-inline").length).toBe(2);
     });
-    const exploreBlocks = Array.from(container.querySelectorAll(".explore-inline"));
+    const exploreBlocks = Array.from(
+      container.querySelectorAll(".explore-inline"),
+    );
     const reasoningDetail = container.querySelector(".reasoning-inline-detail");
     expect(exploreBlocks.length).toBe(2);
     expect(reasoningDetail).toBeTruthy();
@@ -2031,7 +2438,7 @@ describe("Messages", () => {
 
     await waitFor(() => {
       const groupHeaders = container.querySelectorAll(".tool-group-header");
-      expect(groupHeaders.length).toBe(2);
+      expect(groupHeaders.length).toBe(1);
     });
     expect(screen.getByText("A message between explore blocks")).toBeTruthy();
     screen.getAllByLabelText(/展开(?:工具调用|过程消息)/).forEach((button) => {
@@ -2129,7 +2536,8 @@ describe("Messages", () => {
         id: "tool-2",
         kind: "tool",
         toolType: "commandExecution",
-        title: "Command: git diff -- src/features/messages/components/Messages.tsx",
+        title:
+          "Command: git diff -- src/features/messages/components/Messages.tsx",
         detail: "/repo",
         status: "completed",
         output: "",
@@ -2212,7 +2620,9 @@ describe("Messages", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "工具调用自动收起：关" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "工具调用自动收起：关" }),
+    );
     await waitFor(() => {
       expect(screen.queryByText("git status")).toBeNull();
     });
@@ -2442,15 +2852,259 @@ describe("Messages", () => {
     );
 
     await waitFor(() => {
-      expect(screen.queryByText("Interim process answer should collapse.")).toBeNull();
+      expect(
+        screen.queryByText("Interim process answer should collapse."),
+      ).toBeNull();
     });
     expect(screen.queryByText("git status")).toBeNull();
-    expect(screen.getByText("1 次工具调用, 1 条过程消息")).toBeTruthy();
+    expect(screen.getByText("1 次工具调用")).toBeTruthy();
+    expect(screen.getByText("1 条过程消息")).toBeTruthy();
     expect(screen.getByText("Final result is ready.")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "展开过程消息" }));
-    expect(screen.getByText("Interim process answer should collapse.")).toBeTruthy();
+    expect(
+      screen.getByText("Interim process answer should collapse."),
+    ).toBeTruthy();
     expect(screen.getByText("git status")).toBeTruthy();
+  });
+
+  it("unifies process messages and late tool calls under one process header", async () => {
+    const items: ConversationItem[] = [
+      {
+        id: "assistant-unified-process-1",
+        kind: "message",
+        role: "assistant",
+        phase: "commentary",
+        turnId: "turn-unified-process",
+        text: "准备落补丁，先统一过程显示。",
+      },
+      {
+        id: "assistant-unified-final",
+        kind: "message",
+        role: "assistant",
+        phase: "final_answer",
+        turnId: "turn-unified-process",
+        text: "最终结果已完成。",
+      },
+      {
+        id: "tool-unified-process-1",
+        kind: "tool",
+        toolType: "commandExecution",
+        title: "Command: npm run typecheck",
+        detail: "/repo",
+        status: "completed",
+        output: "",
+        turnId: "turn-unified-process",
+      },
+    ];
+
+    const { container } = render(
+      <Messages
+        items={items}
+        threadId="thread-1"
+        workspaceId="ws-1"
+        isThinking={false}
+        openTargets={[]}
+        selectedOpenAppId=""
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText("准备落补丁，先统一过程显示。")).toBeNull();
+    });
+    expect(screen.queryByText("npm run typecheck")).toBeNull();
+    expect(screen.getByText("1 次工具调用")).toBeTruthy();
+    expect(screen.getByText("1 条过程消息")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "展开工具调用" })).toBeNull();
+    expect(container.querySelectorAll(".process-group")).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "展开过程消息" }));
+
+    expect(screen.getByText("准备落补丁，先统一过程显示。")).toBeTruthy();
+    expect(screen.getByText("npm run typecheck")).toBeTruthy();
+    const processGroup = container.querySelector(".process-group");
+    expect(processGroup?.querySelector(".process-message-inline")).toBeTruthy();
+    expect(processGroup?.querySelector(".message-agent-meta")).toBeNull();
+  });
+
+  it("folds late same-turn tools into a final message without a phase marker", async () => {
+    const items: ConversationItem[] = [
+      {
+        id: "assistant-late-unphased-process",
+        kind: "message",
+        role: "assistant",
+        text: "先检查开发版状态。",
+        turnId: "turn-late-unphased",
+      },
+      {
+        id: "tool-late-unphased-before",
+        kind: "tool",
+        toolType: "commandExecution",
+        title: "Command: first check",
+        detail: "/repo",
+        status: "completed",
+        output: "",
+        turnId: "turn-late-unphased",
+      },
+      {
+        id: "assistant-late-unphased-final",
+        kind: "message",
+        role: "assistant",
+        text: "开发版已经启动。",
+        turnId: "turn-late-unphased",
+      },
+      {
+        id: "tool-late-unphased-after",
+        kind: "tool",
+        toolType: "commandExecution",
+        title: "Command: second check",
+        detail: "/repo",
+        status: "completed",
+        output: "",
+        turnId: "turn-late-unphased",
+      },
+    ];
+
+    const { container } = render(
+      <Messages
+        items={items}
+        threadId="thread-1"
+        workspaceId="ws-1"
+        isThinking={false}
+        openTargets={[]}
+        selectedOpenAppId=""
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText("first check")).toBeNull();
+      expect(screen.queryByText("second check")).toBeNull();
+    });
+    expect(screen.getByText("2 次工具调用")).toBeTruthy();
+    expect(
+      container.querySelectorAll(".message-agent-process-toggle"),
+    ).toHaveLength(1);
+    expect(container.querySelectorAll(".tool-group-header")).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "展开过程消息" }));
+    expect(screen.getByText("first check")).toBeTruthy();
+    expect(screen.getByText("second check")).toBeTruthy();
+  });
+
+  it("collapses dense tool runs again inside expanded process details", async () => {
+    const items: ConversationItem[] = [
+      {
+        id: "assistant-dense-tools-process",
+        kind: "message",
+        role: "assistant",
+        phase: "commentary",
+        text: "准备执行一组检查。",
+        turnId: "turn-dense-tools",
+      },
+      ...Array.from({ length: 5 }, (_, index) => ({
+        id: `dense-tool-${index + 1}`,
+        kind: "tool" as const,
+        toolType: "commandExecution" as const,
+        title: `Command: nested command ${index + 1}`,
+        detail: "/repo",
+        status: "completed",
+        output: "",
+        turnId: "turn-dense-tools",
+      })),
+      {
+        id: "assistant-dense-tools-final",
+        kind: "message",
+        role: "assistant",
+        phase: "final_answer",
+        text: "检查完成。",
+        turnId: "turn-dense-tools",
+      },
+    ];
+
+    const { container } = render(
+      <Messages
+        items={items}
+        threadId="thread-1"
+        workspaceId="ws-1"
+        isThinking={false}
+        openTargets={[]}
+        selectedOpenAppId=""
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "展开过程消息" }));
+    expect(screen.queryByText("nested command 1")).toBeNull();
+    expect(
+      container.querySelector(
+        ".process-group-nested-collapsible .tool-group-summary",
+      )?.textContent,
+    ).toBe("5 次工具调用");
+
+    fireEvent.click(screen.getByRole("button", { name: "展开工具调用" }));
+    expect(screen.getByText("nested command 1")).toBeTruthy();
+    expect(screen.getByText("nested command 5")).toBeTruthy();
+  });
+
+  it("coalesces split tool runs into one nested disclosure", async () => {
+    const items: ConversationItem[] = [
+      {
+        id: "split-tool-first",
+        kind: "tool",
+        toolType: "dynamicToolCall",
+        title: "Tool: functions / exec",
+        detail: "first",
+        status: "completed",
+        output: "",
+        turnId: "turn-split-tools",
+      },
+      {
+        id: "split-tool-commentary",
+        kind: "message",
+        role: "assistant",
+        phase: "commentary",
+        text: "继续检查剩余状态。",
+        turnId: "turn-split-tools",
+      },
+      ...Array.from({ length: 6 }, (_, index) => ({
+        id: `split-tool-rest-${index + 1}`,
+        kind: "tool" as const,
+        toolType: "dynamicToolCall" as const,
+        title: index === 1 ? "Tool: functions / wait" : "Tool: functions / exec",
+        detail: `rest ${index + 1}`,
+        status: "completed",
+        output: "",
+        turnId: "turn-split-tools",
+      })),
+      {
+        id: "split-tool-final",
+        kind: "message",
+        role: "assistant",
+        phase: "final_answer",
+        text: "检查完成。",
+        turnId: "turn-split-tools",
+      },
+    ];
+
+    const { container } = render(
+      <Messages
+        items={items}
+        threadId="thread-1"
+        workspaceId="ws-1"
+        isThinking={false}
+        openTargets={[]}
+        selectedOpenAppId=""
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "展开过程消息" }));
+    const nestedGroups = container.querySelectorAll(
+      ".process-group-nested-collapsible",
+    );
+    expect(nestedGroups).toHaveLength(1);
+    expect(nestedGroups[0]?.querySelector(".tool-group-summary")?.textContent).toBe(
+      "7 次工具调用",
+    );
+    expect(container.querySelectorAll(".process-group-nested:not(.process-group-nested-collapsible)")).toHaveLength(0);
   });
 
   it("renders turn line changes inline after process group summary text", async () => {
@@ -2501,11 +3155,10 @@ describe("Messages", () => {
     await waitFor(() => {
       expect(screen.queryByText("Editing files.")).toBeNull();
     });
-    const stats = container.querySelector(".tool-group-header .tool-group-line-change-stats");
+    const stats = container.querySelector(".message-agent-stats");
     expect(stats?.textContent).toContain("+2");
     expect(stats?.textContent).toContain("-1");
-    expect(stats?.parentElement?.classList.contains("tool-group-summary-content")).toBe(true);
-    expect(container.querySelector(".message-line-change-stats")).toBeNull();
+    expect(container.querySelector(".tool-group-line-change-stats")).toBeNull();
   });
 
   it("binds persisted line changes to the matching turn tool group", async () => {
@@ -2575,11 +3228,12 @@ describe("Messages", () => {
     );
 
     await waitFor(() => {
-      const groups = container.querySelectorAll(".tool-group-header");
-      expect(groups).toHaveLength(2);
-      expect(groups[0]?.textContent).not.toContain("+5");
-      expect(groups[1]?.textContent).toContain("+5");
-      expect(groups[1]?.textContent).toContain("-2");
+      const additions = container.querySelectorAll(".message-agent-stat-add");
+      expect(additions).toHaveLength(1);
+      expect(additions[0]?.textContent).toContain("+5");
+      expect(
+        container.querySelector(".message-agent-stat-delete")?.textContent,
+      ).toContain("-2");
     });
   });
 
@@ -2632,9 +3286,7 @@ describe("Messages", () => {
     );
 
     await waitFor(() => {
-      const stats = container.querySelector(
-        ".tool-group-header .tool-group-line-change-stats",
-      );
+      const stats = container.querySelector(".message-agent-stats");
       expect(stats?.textContent).toContain("+2");
       expect(stats?.textContent).toContain("-1");
     });
@@ -2675,9 +3327,7 @@ describe("Messages", () => {
     );
 
     await waitFor(() => {
-      const stats = container.querySelector(
-        ".tool-group-header .tool-group-line-change-stats",
-      );
+      const stats = container.querySelector(".message-agent-stats");
       expect(stats?.textContent).toContain("+1");
       expect(stats?.textContent).toContain("-1");
     });
@@ -2735,11 +3385,14 @@ describe("Messages", () => {
     );
 
     await waitFor(() => {
-      expect(screen.queryByText("跑消息和设置测试，抓 UI 交互回归。")).toBeNull();
+      expect(
+        screen.queryByText("跑消息和设置测试，抓 UI 交互回归。"),
+      ).toBeNull();
     });
     expect(screen.queryByText("测试过。再补一条回归。")).toBeNull();
     expect(screen.queryByText("npm run test")).toBeNull();
-    expect(screen.getByText("2 次工具调用, 2 条过程消息")).toBeTruthy();
+    expect(screen.getByText("2 次工具调用")).toBeTruthy();
+    expect(screen.getByText("2 条过程消息")).toBeTruthy();
     expect(screen.getByText("最终结果已完成。")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "展开过程消息" }));
@@ -2791,25 +3444,16 @@ describe("Messages", () => {
       />,
     );
 
-    expect(screen.queryByText("2 条过程消息")).toBeNull();
-    expect(screen.queryByRole("button", { name: "展开过程消息" })).toBeNull();
-    const firstBubble = screen
-      .getByText("First process message.")
-      .closest(".message-bubble");
-    const secondBubble = screen
-      .getByText("Second process message.")
-      .closest(".message-bubble");
-
-    expect(firstBubble?.getAttribute("data-cli-timestamp")).toBe("2026-07-08 19:54:52");
-    expect(firstBubble?.classList.contains("message-bubble-cli-timestamp-hidden")).toBe(
-      false,
-    );
-    expect(secondBubble?.classList.contains("message-bubble-cli-timestamp-hidden")).toBe(
-      false,
-    );
     expect(
-      container.querySelectorAll(".message-bubble-cli-timestamp-hidden"),
-    ).toHaveLength(0);
+      container.querySelector(".message-agent-stats")?.textContent,
+    ).toContain("2 条过程消息");
+    expect(screen.queryByRole("button", { name: "展开过程消息" })).toBeNull();
+    expect(screen.getByText("First process message.")).toBeTruthy();
+    expect(screen.getByText("Second process message.")).toBeTruthy();
+    expect(container.querySelector(".messages-view")?.className).toContain(
+      "messages-reading-native",
+    );
+    expect(container.querySelector("[data-cli-timestamp]")).toBeNull();
   });
 
   it("collapses verbose text-only commentary before the final answer", async () => {
@@ -2846,7 +3490,7 @@ describe("Messages", () => {
     await waitFor(() => {
       expect(screen.queryByText("Verbose process message 1.")).toBeNull();
     });
-    expect(screen.getByText("3 条过程消息")).toBeTruthy();
+    expect(screen.getAllByText("3 条过程消息")).toHaveLength(1);
     expect(screen.getByText("Final result.")).toBeTruthy();
   });
 
@@ -2927,7 +3571,9 @@ describe("Messages", () => {
     expect(screen.queryByText("npm run typecheck")).toBeNull();
     expect(screen.getByText("第一轮最终结果")).toBeTruthy();
     expect(screen.getByText("第二轮最终结果")).toBeTruthy();
-    expect(screen.getAllByRole("button", { name: "展开过程消息" })).toHaveLength(2);
+    expect(
+      screen.getAllByRole("button", { name: "展开过程消息" }),
+    ).toHaveLength(2);
   });
 
   it("collapses standalone process rows before a final assistant message", async () => {
@@ -2980,7 +3626,7 @@ describe("Messages", () => {
     expect(screen.getByText("Final result is ready.")).toBeTruthy();
   });
 
-  it("switches message reading styles from the conversation toolbar", () => {
+  it("does not expose message reading style switches from the conversation toolbar", () => {
     const onUpdateConversationStyle = vi.fn();
     const items: ConversationItem[] = [
       {
@@ -3003,22 +3649,14 @@ describe("Messages", () => {
       />,
     );
 
-    expect(screen.queryByRole("button", { name: "舒适" })).toBeNull();
-
-    fireEvent.click(screen.getByRole("button", { name: "原生" }));
-
-    expect(onUpdateConversationStyle).toHaveBeenCalledWith({
-      messageReadingStyle: "native",
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "CLI" }));
-
-    expect(onUpdateConversationStyle).toHaveBeenCalledWith({
-      messageReadingStyle: "cli",
-    });
+    expect(screen.queryByRole("button", { name: "气泡" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "原生" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "CLI" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "样式" })).toBeNull();
+    expect(onUpdateConversationStyle).not.toHaveBeenCalled();
   });
 
-  it("keeps conversation style controls visible for an empty new thread", () => {
+  it("keeps tool auto-collapse controls visible for an empty new thread", () => {
     render(
       <Messages
         items={[]}
@@ -3030,11 +3668,39 @@ describe("Messages", () => {
       />,
     );
 
-    expect(screen.getByRole("group", { name: "阅读样式" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "样式" })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: /工具调用自动收起/ }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("group", { name: "阅读样式" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "样式" })).toBeNull();
   });
 
-  it("uses a concrete timestamp for CLI assistant message headers", () => {
+  it("moves conversation tools into the main header host when available", async () => {
+    const host = document.createElement("div");
+    host.className = "main-header-message-tools";
+    document.body.appendChild(host);
+    try {
+      render(
+        <Messages
+          items={[]}
+          threadId={null}
+          workspaceId="ws-1"
+          isThinking={false}
+          openTargets={[]}
+          selectedOpenAppId=""
+        />,
+      );
+
+      await waitFor(() => {
+        expect(host.querySelector(".messages-tool-controls")).toBeTruthy();
+      });
+      expect(document.querySelector(".messages-control-layer")).toBeNull();
+    } finally {
+      host.remove();
+    }
+  });
+
+  it("does not render CLI assistant message headers", () => {
     const items: ConversationItem[] = [
       {
         id: "assistant-cli-time",
@@ -3057,11 +3723,14 @@ describe("Messages", () => {
       />,
     );
 
+    expect(container.querySelector(".messages-view")?.className).toContain(
+      "messages-reading-native",
+    );
     expect(
-      container.querySelector(".message.assistant .message-bubble")?.getAttribute(
-        "data-cli-timestamp",
-      ),
-    ).toMatch(/2026-07-07 \d{2}:21:59/);
+      container
+        .querySelector(".message.assistant .message-bubble")
+        ?.getAttribute("data-cli-timestamp"),
+    ).toBeNull();
   });
 
   it("shows interrupted status on the latest assistant message without replacing content", () => {
@@ -3092,7 +3761,7 @@ describe("Messages", () => {
     expect(screen.getByText("Session stopped.")).toBeTruthy();
   });
 
-  it("updates conversation colors without changing reading style", () => {
+  it("does not expose conversation color style controls", () => {
     const onUpdateConversationStyle = vi.fn();
     const items: ConversationItem[] = [
       {
@@ -3111,160 +3780,23 @@ describe("Messages", () => {
         isThinking={false}
         openTargets={[]}
         selectedOpenAppId=""
-        messageCanvasColor="#eef1f6"
-        messageUserBubbleColor="#d9ebff"
-        messageUserTextColor="#102033"
-        messageAssistantBubbleColor="#f7f9fc"
-        messageAssistantAccentColor="#8aa8d8"
-        messageAssistantTextColor="#263040"
+        messageCanvasColor="#f6f8fa"
+        messageUserBubbleColor="#ffffff"
+        messageUserTextColor="#0f1720"
+        messageAssistantBubbleColor="#ffffff"
+        messageAssistantAccentColor="#127e66"
+        messageAssistantTextColor="#233141"
         onUpdateConversationStyle={onUpdateConversationStyle}
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "样式" }));
-    fireEvent.click(screen.getByRole("button", { name: /黑橙/ }));
-    fireEvent.click(screen.getByRole("button", { name: "青绿" }));
-    fireEvent.click(screen.getByRole("button", { name: "浅紫" }));
-    fireEvent.change(screen.getByDisplayValue("#d9ebff"), {
-      target: { value: "#cfe8ff" },
-    });
-    fireEvent.change(screen.getByDisplayValue("#102033"), {
-      target: { value: "#223044" },
-    });
-    fireEvent.change(screen.getByDisplayValue("#f7f9fc"), {
-      target: { value: "#eef8f4" },
-    });
-    fireEvent.change(screen.getByDisplayValue("#263040"), {
-      target: { value: "#334155" },
-    });
-
-    expect(onUpdateConversationStyle).toHaveBeenCalledWith(
-      expect.objectContaining({
-        messageCanvasColor: "#111315",
-        messageUserBubbleColor: "#3a2a1d",
-        messageUserTextColor: "#fff3df",
-        messageAssistantBubbleColor: "#1b1b1c",
-        messageAssistantAccentColor: "#ff9f43",
-      }),
-    );
-    const firstPresetSettings = onUpdateConversationStyle.mock.calls[0]?.[0];
-    expect(firstPresetSettings).toEqual(
-      expect.objectContaining({
-        theme: "dark",
-        themeAccent: "orange",
-      }),
-    );
-    expect(firstPresetSettings).not.toHaveProperty("messageReadingStyle");
-    expect(onUpdateConversationStyle).toHaveBeenCalledWith({
-      messageAssistantBubbleColor: "#f0faf6",
-      messageAssistantAccentColor: "#4aa389",
-      messageAssistantTextColor: "#24332f",
-    });
-    expect(onUpdateConversationStyle).toHaveBeenCalledWith({
-      messageUserBubbleColor: "#eadcf8",
-      messageUserTextColor: "#2e2140",
-    });
-    expect(onUpdateConversationStyle).toHaveBeenCalledWith({
-      messageUserBubbleColor: "#cfe8ff",
-    });
-    expect(onUpdateConversationStyle).toHaveBeenCalledWith({
-      messageUserTextColor: "#223044",
-    });
-    expect(onUpdateConversationStyle).toHaveBeenCalledWith({
-      messageAssistantBubbleColor: "#eef8f4",
-    });
-    expect(onUpdateConversationStyle).toHaveBeenCalledWith({
-      messageAssistantTextColor: "#334155",
-    });
+    expect(screen.queryByRole("button", { name: "样式" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /黑橙/ })).toBeNull();
+    expect(screen.queryByDisplayValue("#ffffff")).toBeNull();
+    expect(onUpdateConversationStyle).not.toHaveBeenCalled();
     expect(screen.queryByText("字体")).toBeNull();
     expect(screen.queryByText(/字号/)).toBeNull();
     expect(screen.queryByText(/字重/)).toBeNull();
-  });
-
-  it("keeps the style popover open when the native color picker blurs the color input", () => {
-    render(
-      <Messages
-        items={[{ id: "msg-color-picker", kind: "message", role: "assistant", text: "Output" }]}
-        threadId="thread-1"
-        workspaceId="ws-1"
-        isThinking={false}
-        openTargets={[]}
-        selectedOpenAppId=""
-        messageUserBubbleColor="#d9ebff"
-      />,
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "样式" }));
-    fireEvent.blur(screen.getByLabelText("我的背景"), { relatedTarget: null });
-
-    expect(screen.getByRole("dialog", { name: "对话样式" })).toBeTruthy();
-
-    fireEvent.pointerDown(document.body);
-
-    expect(screen.queryByRole("dialog", { name: "对话样式" })).toBeNull();
-  });
-
-  it("applies pure white canvas from white color preset", () => {
-    const onUpdateConversationStyle = vi.fn();
-
-    render(
-      <Messages
-        items={[{ id: "msg-white", kind: "message", role: "assistant", text: "Output" }]}
-        threadId="thread-1"
-        workspaceId="ws-1"
-        isThinking={false}
-        openTargets={[]}
-        selectedOpenAppId=""
-        onUpdateConversationStyle={onUpdateConversationStyle}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "样式" }));
-    fireEvent.click(screen.getByRole("button", { name: /纯白/ }));
-
-    expect(onUpdateConversationStyle).toHaveBeenCalledWith(
-      expect.objectContaining({
-        messageCanvasColor: "#ffffff",
-      }),
-    );
-    const presetSettings = onUpdateConversationStyle.mock.calls[0]?.[0];
-    expect(presetSettings).toEqual(
-      expect.objectContaining({
-        theme: "light",
-        themeAccent: "orange",
-      }),
-    );
-    expect(presetSettings).not.toHaveProperty("messageReadingStyle");
-  });
-
-  it("closes the conversation style popover when focus leaves it", () => {
-    const items: ConversationItem[] = [
-      {
-        id: "msg-style-blur",
-        kind: "message",
-        role: "assistant",
-        text: "Readable output",
-      },
-    ];
-
-    render(
-      <Messages
-        items={items}
-        threadId="thread-1"
-        workspaceId="ws-1"
-        isThinking={false}
-        openTargets={[]}
-        selectedOpenAppId=""
-      />,
-    );
-
-    const styleButton = screen.getByRole("button", { name: "样式" });
-    fireEvent.click(styleButton);
-    expect(screen.getByRole("dialog", { name: "对话样式" })).toBeTruthy();
-
-    fireEvent.blur(styleButton, { relatedTarget: document.body });
-
-    expect(screen.queryByRole("dialog", { name: "对话样式" })).toBeNull();
   });
 
   it("re-pins to bottom on thread switch even when previous thread was scrolled up", () => {
@@ -3337,19 +3869,24 @@ describe("Messages", () => {
       />,
     );
 
-    const scrollNode = container.querySelector(".messages.messages-full") as HTMLDivElement;
+    const scrollNode = container.querySelector(
+      ".messages.messages-full",
+    ) as HTMLDivElement;
     let scrollHeight = 0;
     Object.defineProperty(scrollNode, "scrollHeight", {
       configurable: true,
       get: () => scrollHeight,
     });
 
-    const loadedItems: ConversationItem[] = Array.from({ length: 60 }, (_, index) => ({
-      id: `async-msg-${index}`,
-      kind: "message",
-      role: "assistant",
-      text: `Async message ${index}`,
-    }));
+    const loadedItems: ConversationItem[] = Array.from(
+      { length: 60 },
+      (_, index) => ({
+        id: `async-msg-${index}`,
+        kind: "message",
+        role: "assistant",
+        text: `Async message ${index}`,
+      }),
+    );
     scrollHeight = 1200;
 
     rerender(
@@ -3370,28 +3907,17 @@ describe("Messages", () => {
     expect(scrollNode.scrollTop).toBe(1200);
 
     const controlLayer = container.querySelector(".messages-control-layer");
-    const controls = screen.getByLabelText("对话阅读样式");
+    const controls = screen.getByLabelText("工具调用自动收起");
     expect(controlLayer).toBeTruthy();
     expect(controlLayer?.contains(controls)).toBe(true);
     expect(scrollNode.contains(controls)).toBe(false);
 
-    fireEvent.click(screen.getByRole("button", { name: "原生" }));
-    expect(onUpdateConversationStyle).toHaveBeenCalledWith({
-      messageReadingStyle: "native",
-    });
-
     fireEvent.keyDown(window, { key: "f", ctrlKey: true });
-    fireEvent.click(screen.getByRole("button", { name: "样式" }));
 
     const search = screen.getByRole("search");
-    const styleDialog = screen.getByRole("dialog", { name: "对话样式" });
-    const stylePanelHost = container.querySelector(".messages-style-panel-host");
     expect(controlLayer?.contains(search)).toBe(true);
-    expect(stylePanelHost).toBeTruthy();
-    expect(stylePanelHost?.contains(styleDialog)).toBe(true);
-    expect(controlLayer?.contains(styleDialog)).toBe(true);
     expect(scrollNode.contains(search)).toBe(false);
-    expect(scrollNode.contains(styleDialog)).toBe(false);
+    expect(screen.queryByRole("dialog", { name: "对话样式" })).toBeNull();
   });
 
   it("does not invent a CLI timestamp when a historical message has no trusted time", () => {
@@ -3415,22 +3941,27 @@ describe("Messages", () => {
     );
 
     expect(
-      container.querySelector(".message-bubble")?.getAttribute("data-cli-timestamp"),
-    ).toBe("");
+      container
+        .querySelector(".message-bubble")
+        ?.getAttribute("data-cli-timestamp"),
+    ).toBeNull();
   });
 
   it("keeps the latest content pinned when message layout grows after opening", () => {
     let resizeCallback: ResizeObserverCallback | null = null;
     const observe = vi.fn();
     const disconnect = vi.fn();
-    vi.stubGlobal("ResizeObserver", class ResizeObserverMock {
-      constructor(callback: ResizeObserverCallback) {
-        resizeCallback = callback;
-      }
-      observe = observe;
-      unobserve = vi.fn();
-      disconnect = disconnect;
-    });
+    vi.stubGlobal(
+      "ResizeObserver",
+      class ResizeObserverMock {
+        constructor(callback: ResizeObserverCallback) {
+          resizeCallback = callback;
+        }
+        observe = observe;
+        unobserve = vi.fn();
+        disconnect = disconnect;
+      },
+    );
     const requestAnimationFrameSpy = vi
       .spyOn(window, "requestAnimationFrame")
       .mockImplementation((callback) => {
@@ -3440,7 +3971,9 @@ describe("Messages", () => {
 
     const { container } = render(
       <Messages
-        items={[{ id: "msg-1", kind: "message", role: "assistant", text: "Latest" }]}
+        items={[
+          { id: "msg-1", kind: "message", role: "assistant", text: "Latest" },
+        ]}
         threadId="thread-1"
         workspaceId="ws-1"
         isThinking={false}
@@ -3449,7 +3982,9 @@ describe("Messages", () => {
       />,
     );
 
-    const scrollNode = container.querySelector(".messages.messages-full") as HTMLDivElement;
+    const scrollNode = container.querySelector(
+      ".messages.messages-full",
+    ) as HTMLDivElement;
     let scrollHeight = 600;
     Object.defineProperty(scrollNode, "scrollHeight", {
       configurable: true,
@@ -3458,7 +3993,10 @@ describe("Messages", () => {
     scrollNode.scrollTop = 600;
     scrollHeight = 900;
 
-    (resizeCallback as ResizeObserverCallback | null)?.([], {} as ResizeObserver);
+    (resizeCallback as ResizeObserverCallback | null)?.(
+      [],
+      {} as ResizeObserver,
+    );
 
     expect(observe).toHaveBeenCalled();
     expect(scrollNode.scrollTop).toBe(900);
@@ -3469,14 +4007,17 @@ describe("Messages", () => {
 
   it("does not reclaim scroll position after the user scrolls away from latest", () => {
     let resizeCallback: ResizeObserverCallback | null = null;
-    vi.stubGlobal("ResizeObserver", class ResizeObserverMock {
-      constructor(callback: ResizeObserverCallback) {
-        resizeCallback = callback;
-      }
-      observe = vi.fn();
-      unobserve = vi.fn();
-      disconnect = vi.fn();
-    });
+    vi.stubGlobal(
+      "ResizeObserver",
+      class ResizeObserverMock {
+        constructor(callback: ResizeObserverCallback) {
+          resizeCallback = callback;
+        }
+        observe = vi.fn();
+        unobserve = vi.fn();
+        disconnect = vi.fn();
+      },
+    );
     const requestAnimationFrameSpy = vi
       .spyOn(window, "requestAnimationFrame")
       .mockImplementation((callback) => {
@@ -3486,7 +4027,9 @@ describe("Messages", () => {
 
     const { container } = render(
       <Messages
-        items={[{ id: "msg-1", kind: "message", role: "assistant", text: "Latest" }]}
+        items={[
+          { id: "msg-1", kind: "message", role: "assistant", text: "Latest" },
+        ]}
         threadId="thread-1"
         workspaceId="ws-1"
         isThinking={false}
@@ -3495,13 +4038,24 @@ describe("Messages", () => {
       />,
     );
 
-    const scrollNode = container.querySelector(".messages.messages-full") as HTMLDivElement;
-    Object.defineProperty(scrollNode, "clientHeight", { configurable: true, value: 200 });
-    Object.defineProperty(scrollNode, "scrollHeight", { configurable: true, value: 900 });
+    const scrollNode = container.querySelector(
+      ".messages.messages-full",
+    ) as HTMLDivElement;
+    Object.defineProperty(scrollNode, "clientHeight", {
+      configurable: true,
+      value: 200,
+    });
+    Object.defineProperty(scrollNode, "scrollHeight", {
+      configurable: true,
+      value: 900,
+    });
     scrollNode.scrollTop = 200;
     fireEvent.scroll(scrollNode);
 
-    (resizeCallback as ResizeObserverCallback | null)?.([], {} as ResizeObserver);
+    (resizeCallback as ResizeObserverCallback | null)?.(
+      [],
+      {} as ResizeObserver,
+    );
 
     expect(scrollNode.scrollTop).toBe(200);
 
@@ -3538,9 +4092,7 @@ describe("Messages", () => {
     );
 
     expect(screen.getByText("计划已就绪")).toBeTruthy();
-    expect(
-      screen.getByRole("button", { name: "执行这个计划" }),
-    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "执行这个计划" })).toBeTruthy();
   });
 
   it("exports plan tool-call output from the conversation view", async () => {
@@ -3708,12 +4260,13 @@ describe("Messages", () => {
       />,
     );
 
-    const sendChangesButton = screen.getByRole("button", { name: "发送修改意见" });
+    const sendChangesButton = screen.getByRole("button", {
+      name: "发送修改意见",
+    });
     expect((sendChangesButton as HTMLButtonElement).disabled).toBe(true);
 
-    const textarea = screen.getByPlaceholderText(
-      "描述你想修改计划中的哪些内容...",
-    );
+    const textarea =
+      screen.getByPlaceholderText("描述你想修改计划中的哪些内容...");
     fireEvent.change(textarea, { target: { value: "Add error handling" } });
 
     expect((sendChangesButton as HTMLButtonElement).disabled).toBe(false);
@@ -3750,9 +4303,7 @@ describe("Messages", () => {
       />,
     );
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "执行这个计划" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "执行这个计划" }));
     expect(onPlanAccept).toHaveBeenCalledTimes(1);
     expect(screen.queryByText("计划已就绪")).toBeNull();
   });
@@ -3869,9 +4420,13 @@ describe("Messages", () => {
     expect(screen.getByText("session-start")).toBeTruthy();
     expect(screen.getByText("failed • 0:03")).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Toggle tool details" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Toggle tool details" }),
+    );
     expect(
-      screen.getByText("command • sync • thread • session-start.sh • Preparing"),
+      screen.getByText(
+        "command • sync • thread • session-start.sh • Preparing",
+      ),
     ).toBeTruthy();
     expect(screen.getByText("[error] Missing config")).toBeTruthy();
   });

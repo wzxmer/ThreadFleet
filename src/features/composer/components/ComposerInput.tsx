@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type {
   ChangeEvent,
   ClipboardEvent,
   CompositionEvent,
   CSSProperties,
   KeyboardEvent,
+  PointerEvent as ReactPointerEvent,
   RefObject,
   SyntheticEvent,
 } from "react";
@@ -157,11 +158,24 @@ export function ComposerInput({
   const isComposingRef = useRef(false);
   const committedCompositionRef = useRef<string | null>(null);
   const [compositionText, setCompositionText] = useState<string | null>(null);
-  const [progressBounds, setProgressBounds] = useState({ width: 0, height: 0 });
-  const { isPhoneLayout, isPhoneTallInput } = useComposerInputLayout({
+  const [manualTextareaHeight, setManualTextareaHeight] = useState<number | null>(null);
+  const resizeDragRef = useRef<{
+    startY: number;
+    startHeight: number;
+    minHeight: number;
+    maxHeight: number;
+  } | null>(null);
+  const displayedText = compositionText ?? text;
+  const {
+    isPhoneLayout,
+    isPhoneTallInput,
+    textareaScrollable,
+    textareaHeightBounds,
+  } = useComposerInputLayout({
     isExpanded,
-    text,
+    text: displayedText,
     textareaRef,
+    manualHeight: manualTextareaHeight,
   });
   const { mobileActionsOpen, mobileActionsRef, setMobileActionsOpen } =
     useComposerMobileActions({ disabled });
@@ -185,29 +199,6 @@ export function ComposerInput({
     },
     [dropTargetRef],
   );
-  useEffect(() => {
-    const node = dropTargetRef.current;
-    if (!node) {
-      return undefined;
-    }
-    const updateBounds = () => {
-      const { width, height } = node.getBoundingClientRect();
-      setProgressBounds((prev) => {
-        const nextWidth = Math.round(width);
-        const nextHeight = Math.round(height);
-        return prev.width === nextWidth && prev.height === nextHeight
-          ? prev
-          : { width: nextWidth, height: nextHeight };
-      });
-    };
-    updateBounds();
-    if (typeof ResizeObserver === "undefined") {
-      return undefined;
-    }
-    const observer = new ResizeObserver(updateBounds);
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [dropTargetRef]);
   const handleActionClick = useCallback(() => {
     if (canStop) {
       onStop();
@@ -267,10 +258,43 @@ export function ComposerInput({
     "{count}",
     String(contextCompactionCount),
   );
-  const progressStrokeInset = 1;
-  const progressWidth = Math.max(progressBounds.width, 1);
-  const progressHeight = Math.max(progressBounds.height, 1);
-  const progressRadius = Math.min(20, progressHeight / 2);
+  const handleResizePointerDown = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    const textarea = textareaRef.current;
+    if (!textarea) {
+      return;
+    }
+    event.preventDefault();
+    resizeDragRef.current = {
+      startY: event.clientY,
+      startHeight: textarea.getBoundingClientRect().height,
+      minHeight: textareaHeightBounds.min,
+      maxHeight: textareaHeightBounds.max,
+    };
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      const drag = resizeDragRef.current;
+      if (!drag) {
+        return;
+      }
+      const delta = drag.startY - moveEvent.clientY;
+      const nextHeight = Math.min(
+        Math.max(drag.startHeight + delta, drag.minHeight),
+        drag.maxHeight,
+      );
+      setManualTextareaHeight(nextHeight);
+    };
+
+    const handlePointerUp = () => {
+      resizeDragRef.current = null;
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerUp);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp, { once: true });
+    window.addEventListener("pointercancel", handlePointerUp, { once: true });
+  }, [textareaHeightBounds.max, textareaHeightBounds.min, textareaRef]);
 
   const handleTextareaChange = useCallback(
     (event: ChangeEvent<HTMLTextAreaElement>) => {
@@ -354,10 +378,13 @@ export function ComposerInput({
   return (
     <div className={`composer-input${isPhoneLayout && isPhoneTallInput ? " is-phone-tall" : ""}`}>
       <div
-        className={`composer-input-area ${contextStatus.className}${isDragOver ? " is-drag-over" : ""}`}
+        className={`composer-input-area ${contextStatus.className}${
+          contextCompactionInProgress ? " is-context-compacting" : ""
+        }${isDragOver ? " is-drag-over" : ""}`}
         style={
           {
             "--composer-context-used": boundedContextCyclePercent ?? 0,
+            "--composer-context-width": `${boundedContextCyclePercent ?? 0}%`,
             "--composer-context-color": contextStatus.color,
           } as CSSProperties
         }
@@ -367,30 +394,19 @@ export function ComposerInput({
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
-        <svg
-          className="composer-context-progress"
-          viewBox={`0 0 ${progressWidth} ${progressHeight}`}
-          aria-hidden
-          focusable="false"
-        >
-          <rect
-            x={progressStrokeInset}
-            y={progressStrokeInset}
-            width={Math.max(progressWidth - progressStrokeInset * 2, 0)}
-            height={Math.max(progressHeight - progressStrokeInset * 2, 0)}
-            rx={progressRadius}
-            ry={progressRadius}
-            pathLength={boundedContextCyclePercent === null ? undefined : 100}
+        <button
+          type="button"
+          className="composer-input-resize-handle"
+          data-button-elevation="none"
+          aria-label={t("composer.resizeInput")}
+          title={t("composer.resizeInput")}
+          onPointerDown={handleResizePointerDown}
+          onDoubleClick={() => setManualTextareaHeight(null)}
+        />
+        <div className="composer-context-cycle-track" aria-hidden>
+          <span
+            className={contextCompactionInProgress ? "is-compacting" : undefined}
           />
-        </svg>
-        <div
-          className="composer-context-count ds-tooltip-trigger"
-          data-tooltip={`${contextStatus.label} · ${contextCompactionLabel}`}
-          data-tooltip-placement="bottom"
-          data-tooltip-align="start"
-          aria-label={`${contextStatus.label}; ${contextCompactionLabel}`}
-        >
-          {contextCompactionCount}
         </div>
         <ComposerAttachments
           attachments={attachments}
@@ -435,7 +451,8 @@ export function ComposerInput({
                 ? t("composer.reviewPlaceholder")
                 : t("composer.placeholder")
             }
-            value={compositionText ?? text}
+            className={textareaScrollable ? "is-scrollable" : undefined}
+            value={displayedText}
             onChange={handleTextareaChange}
             onSelect={handleTextareaSelect}
             onCompositionStart={handleCompositionStart}
@@ -449,6 +466,40 @@ export function ComposerInput({
             onPaste={handleTextareaPaste}
           />
           <div className="composer-input-actions">
+            <div
+              className={`composer-context-count ds-tooltip-trigger${
+                contextCompactionInProgress ? " is-compacting" : ""
+              }`}
+              data-tooltip={`${contextStatus.label} · ${contextCompactionLabel}`}
+              data-tooltip-placement="bottom"
+              data-tooltip-align="center"
+              aria-label={`${contextStatus.label}; ${contextCompactionLabel}`}
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={
+                contextCompactionInProgress
+                  ? undefined
+                  : boundedContextCyclePercent ?? undefined
+              }
+            >
+              <svg
+                className="composer-context-progress"
+                viewBox="0 0 32 32"
+                aria-hidden
+                focusable="false"
+              >
+                <circle className="composer-context-progress-track" cx="16" cy="16" r="13" />
+                <circle
+                  className="composer-context-progress-value"
+                  cx="16"
+                  cy="16"
+                  r="13"
+                  pathLength={boundedContextCyclePercent === null ? undefined : 100}
+                />
+              </svg>
+              <span className="composer-context-count-value">{contextCompactionCount}</span>
+            </div>
             {onToggleExpand && (
               <button
                 className={`composer-action composer-action--expand${

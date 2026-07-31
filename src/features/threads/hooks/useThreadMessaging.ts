@@ -17,7 +17,6 @@ import type {
   WorkflowHostPreflightPreview,
   WorkflowAdditionalContext,
   WorkflowRuntimeMode,
-  ThreadTokenUsage,
   WorkspaceInfo,
 } from "@/types";
 import {
@@ -350,7 +349,6 @@ type UseThreadMessagingOptions = {
   ) => Promise<void>;
   threadStatusById: ThreadState["threadStatusById"];
   activeTurnIdByThread: ThreadState["activeTurnIdByThread"];
-  tokenUsageByThread?: Record<string, ThreadTokenUsage>;
   rateLimitsByWorkspace: Record<string, RateLimitSnapshot | null>;
   pendingInterruptsRef: MutableRefObject<Set<string>>;
   dispatch: Dispatch<ThreadAction>;
@@ -419,7 +417,6 @@ export function useThreadMessaging({
   ensureWorkspaceRuntimeCodexArgs,
   threadStatusById,
   activeTurnIdByThread,
-  tokenUsageByThread = {},
   rateLimitsByWorkspace,
   pendingInterruptsRef,
   dispatch,
@@ -1215,7 +1212,6 @@ export function useThreadMessaging({
       setActiveTurnId,
       steerEnabled,
       threadStatusById,
-      tokenUsageByThread,
       onUserMessageCreated,
       onUserTurnRequested,
       t,

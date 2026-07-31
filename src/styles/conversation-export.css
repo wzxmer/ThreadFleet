@@ -1,0 +1,230 @@
+.conversation-export-host {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 794px;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0;
+}
+
+.conversation-export-render-root {
+  position: fixed;
+  left: 0;
+  top: 0;
+  display: flow-root;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0;
+  background: #ffffff;
+}
+
+.conversation-export-document {
+  width: 794px;
+  box-sizing: border-box;
+  padding: 54px 60px;
+  background: #ffffff;
+  color: #1b2430;
+  font-family: "Noto Sans SC Variable", "Noto Sans SC", Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.conversation-export-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 28px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #d9dee7;
+}
+
+.conversation-export-brand { font-size: 18px; font-weight: 700; color: #0f1720; }
+.conversation-export-time { font-size: 11px; color: #697383; }
+.conversation-export-messages { display: grid; gap: 18px; }
+
+.conversation-export-message {
+  padding: 16px 18px;
+  border: 1px solid #dce1e8;
+  border-left: 3px solid #8090a5;
+  border-radius: 6px;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.conversation-export-message--user { border-left-color: #2f78c4; background: #f5f9fd; }
+
+.conversation-export-role {
+  margin-bottom: 8px;
+  color: #334055;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.conversation-export-markdown,
+.conversation-export-markdown p,
+.conversation-export-markdown ul,
+.conversation-export-markdown ol,
+.conversation-export-markdown pre,
+.conversation-export-markdown blockquote { margin-top: 0; }
+.conversation-export-markdown > *:last-child { margin-bottom: 0; }
+
+.conversation-export-markdown pre {
+  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border: 1px solid #d9dee7;
+  border-radius: 5px;
+  background: #f3f5f8;
+  color: #17202b;
+  padding: 11px 12px;
+}
+
+.conversation-export-markdown code { font-family: Consolas, "SFMono-Regular", monospace; }
+.conversation-export-markdown table { width: 100%; border-collapse: collapse; }
+.conversation-export-markdown th,
+.conversation-export-markdown td { padding: 6px 8px; border: 1px solid #d9dee7; text-align: left; }
+
+.conversation-export-image-frame {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 76px;
+  margin: 0 0 12px;
+  border: 1px solid #d9dee7;
+  border-radius: 5px;
+  overflow: hidden;
+  background: #f3f5f8;
+}
+
+.conversation-export-image-frame img {
+  display: block;
+  max-width: 100%;
+  max-height: 520px;
+  object-fit: contain;
+}
+
+.conversation-export-image-placeholder { display: none; padding: 24px; color: #697383; font-size: 12px; }
+.conversation-export-image-frame[data-image-error="true"] img,
+.conversation-export-image-frame:not(:has(img)) img { display: none; }
+.conversation-export-image-frame[data-image-error="true"] .conversation-export-image-placeholder,
+.conversation-export-image-frame:not(:has(img)) .conversation-export-image-placeholder { display: block; }
+
+.conversation-export-bar {
+  position: relative;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  align-self: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  min-height: 42px;
+  max-width: calc(100% - 28px);
+  margin: 8px auto 12px;
+  padding: 6px 8px 6px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--messages-solid-panel);
+  box-shadow: var(--shadow-popover);
+  pointer-events: auto;
+}
+
+.conversation-export-count {
+  flex: 0 0 auto;
+  margin-right: 4px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.conversation-export-bar > button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.conversation-export-format-button { display: inline-flex; align-items: center; gap: 5px; }
+.conversation-export-close { display: inline-grid; place-items: center; width: 28px; height: 28px; padding: 0; }
+
+.message-export-button,
+.message-export-checkbox { position: absolute; bottom: -12px; z-index: 9; }
+.message-export-button { right: 62px; }
+.message-export-checkbox { left: 6px; }
+.message-edit-button:has(~ .message-export-button) { right: 90px; }
+
+.message-export-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border: 1px solid rgba(16, 32, 51, 0.18);
+  border-radius: 999px;
+  background: #ffffff;
+  color: #344256;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.messages-reading-native .message .message-export-button {
+  bottom: -20px;
+  border-color: color-mix(in srgb, var(--messages-process-border) 82%, transparent);
+  background: color-mix(in srgb, var(--messages-solid-control) 86%, var(--messages-solid-main) 14%);
+  color: var(--messages-process-text);
+}
+
+.messages-reading-native .message .message-export-button:hover {
+  border-color: color-mix(in srgb, var(--conversation-assistant-accent) 72%, var(--messages-process-border));
+  background: color-mix(in srgb, var(--messages-solid-control) 72%, var(--messages-solid-panel) 28%);
+  color: var(--conversation-assistant-text);
+}
+
+.message:hover .message-export-button,
+.message:focus-within .message-export-button { opacity: 1; transform: translateY(0); }
+
+.message-export-checkbox {
+  display: grid;
+  place-items: center;
+  width: 25px;
+  height: 25px;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--surface-card);
+  box-shadow: var(--shadow-control);
+}
+
+.message-export-checkbox input { width: 14px; height: 14px; margin: 0; accent-color: var(--accent-primary); }
+.message.is-export-selected .bubble { outline: 2px solid color-mix(in srgb, var(--accent-primary) 48%, transparent); outline-offset: 3px; }
+
+.conversation-export-toasts {
+  position: relative;
+  align-self: flex-end;
+  flex: 0 0 auto;
+  width: min(360px, calc(100vw - 40px));
+  margin: 0 20px 12px auto;
+  z-index: 80;
+  pointer-events: none;
+}
+
+.conversation-export-toast-body { margin-bottom: 10px; }
+.conversation-export-toast .update-toast-progress-fill.is-indeterminate {
+  animation: conversation-export-progress 1.2s ease-in-out infinite alternate;
+}
+
+@keyframes conversation-export-progress {
+  from { transform: translateX(-20%); }
+  to { transform: translateX(320%); }
+}
+
+@media (max-width: 720px) {
+  .conversation-export-bar {
+    width: calc(100% - 20px);
+    justify-content: flex-start;
+  }
+  .conversation-export-count { white-space: nowrap; }
+  .conversation-export-toasts {
+    width: calc(100vw - 20px);
+    margin: 0 10px 10px;
+  }
+}

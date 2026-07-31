@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { MouseEvent } from "react";
+import type { MouseEvent, ReactNode } from "react";
 import { createPortal } from "react-dom";
+import Bot from "lucide-react/dist/esm/icons/bot";
 import Brain from "lucide-react/dist/esm/icons/brain";
 import Check from "lucide-react/dist/esm/icons/check";
 import ChevronDown from "lucide-react/dist/esm/icons/chevron-down";
@@ -9,6 +10,7 @@ import Copy from "lucide-react/dist/esm/icons/copy";
 import Diff from "lucide-react/dist/esm/icons/diff";
 import FileDiffIcon from "lucide-react/dist/esm/icons/file-diff";
 import FileText from "lucide-react/dist/esm/icons/file-text";
+import FileOutput from "lucide-react/dist/esm/icons/file-output";
 import Image from "lucide-react/dist/esm/icons/image";
 import Pencil from "lucide-react/dist/esm/icons/pencil";
 import Quote from "lucide-react/dist/esm/icons/quote";
@@ -30,6 +32,7 @@ import {
   basename,
   buildToolSummary,
   exploreKindLabel,
+  formatCount,
   formatDurationMs,
   formatToolStatusLabel,
   normalizeMessageImageSrc,
@@ -69,6 +72,7 @@ type WorkingIndicatorProps = {
   pollingIntervalMs?: number;
   completionStatus?: "completed" | "interrupted" | "failed" | null;
   workingLabel?: string;
+  runningLabel?: string;
   completedLabel?: string;
   interruptedLabel?: string;
   failedLabel?: string;
@@ -83,9 +87,39 @@ type MessageRowProps = MarkdownFileLinkProps & {
     item: Extract<ConversationItem, { kind: "message" }>,
     text: string,
   ) => Promise<SendMessageResult>;
+  assistantRunning?: boolean;
+  assistantMeta?: AssistantMessageMeta | null;
+  assistantProcessDisclosure?: AssistantProcessDisclosure;
+  assistantProcessContent?: ReactNode;
+  runningLabel?: string;
   interrupted?: { label: string } | null;
   codeBlockCopyUseModifier?: boolean;
-  suppressCliTimestamp?: boolean;
+  exportSelectionMode?: boolean;
+  exportSelected?: boolean;
+  onExportStart?: (messageId: string) => void;
+  onExportToggle?: (messageId: string) => void;
+};
+
+export type AssistantMessageMeta = {
+  name: string;
+  toolCount: number;
+  processMessageCount: number;
+  additions: number | null;
+  deletions: number | null;
+};
+
+export type AssistantProcessDisclosure = {
+  toolCount: number;
+  processMessageCount: number;
+  additions: number | null;
+  deletions: number | null;
+  isExpanded: boolean;
+  bodyId: string;
+  onToggle: () => void;
+};
+
+type ProcessMessageRowProps = MarkdownFileLinkProps & {
+  item: Extract<ConversationItem, { kind: "message" }>;
 };
 
 type SubagentCheckpointRowProps = MarkdownFileLinkProps & {
@@ -150,17 +184,16 @@ function extractTimestampFromMessageId(id: string) {
   return Number.isFinite(value) ? value : null;
 }
 
-export function formatCliTimestamp(timestamp: number) {
+function formatMessageTimestamp(timestamp: number, includeDate = false) {
   const date = new Date(timestamp);
   if (!Number.isFinite(date.getTime())) {
     return "";
   }
   const pad = (value: number) => String(value).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
-    date.getDate(),
-  )} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(
-    date.getSeconds(),
-  )}`;
+  const time = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  return includeDate
+    ? `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${time}`
+    : time;
 }
 
 const MessageImageGrid = memo(function MessageImageGrid({
@@ -282,7 +315,9 @@ const MessageAttachmentList = memo(function MessageAttachmentList({
   );
 });
 
-const CommandOutput = memo(function CommandOutput({ output }: CommandOutputProps) {
+const CommandOutput = memo(function CommandOutput({
+  output,
+}: CommandOutputProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [isPinned, setIsPinned] = useState(true);
   const outputTail = useMemo(() => {
@@ -313,7 +348,8 @@ const CommandOutput = memo(function CommandOutput({ output }: CommandOutputProps
       return;
     }
     const threshold = 6;
-    const distanceFromBottom = node.scrollHeight - node.scrollTop - node.clientHeight;
+    const distanceFromBottom =
+      node.scrollHeight - node.scrollTop - node.clientHeight;
     setIsPinned(distanceFromBottom <= threshold);
   }, []);
 
@@ -396,7 +432,9 @@ function buildPlanExportFileName(itemId: string) {
   if (!normalized) {
     return "plan.md";
   }
-  return normalized.startsWith("plan-") ? `${normalized}.md` : `plan-${normalized}.md`;
+  return normalized.startsWith("plan-")
+    ? `${normalized}.md`
+    : `plan-${normalized}.md`;
 }
 
 export const WorkingIndicator = memo(function WorkingIndicator({
@@ -409,6 +447,7 @@ export const WorkingIndicator = memo(function WorkingIndicator({
   pollingIntervalMs = 12000,
   completionStatus = null,
   workingLabel = "Working…",
+  runningLabel = "RUNNING",
   completedLabel = "Done in",
   interruptedLabel = "Interrupted in",
   failedLabel = "Failed in",
@@ -456,11 +495,23 @@ export const WorkingIndicator = memo(function WorkingIndicator({
     <>
       {isThinking && (
         <div className="working">
-          <span className="working-spinner" aria-hidden />
-          <div className="working-timer">
-            <span className="working-timer-clock">{formatDurationMs(elapsedMs)}</span>
+          <span className="working-agent-avatar" aria-hidden>
+            <Bot size={14} />
+          </span>
+          <div className="working-main">
+            <div className="working-meta">
+              <span className="working-spinner" aria-hidden />
+              <span className="working-status">{runningLabel}</span>
+              <div className="working-timer">
+                <span className="working-timer-clock">
+                  {formatDurationMs(elapsedMs)}
+                </span>
+              </div>
+            </div>
+            <span className="working-text">
+              {reasoningLabel || workingLabel}
+            </span>
           </div>
-          <span className="working-text">{reasoningLabel || workingLabel}</span>
         </div>
       )}
       {!isThinking && lastDurationMs !== null && hasItems && (
@@ -490,14 +541,22 @@ export const MessageRow = memo(function MessageRow({
   onCopy,
   onReference,
   onResendUserMessage,
+  assistantRunning = false,
+  assistantMeta = null,
+  assistantProcessDisclosure,
+  assistantProcessContent,
+  runningLabel = "RUNNING",
   interrupted,
   codeBlockCopyUseModifier,
-  suppressCliTimestamp = false,
   showMessageFilePath,
   workspacePath,
   onOpenFileLink,
   onOpenFileLinkMenu,
   onOpenThreadLink,
+  exportSelectionMode = false,
+  exportSelected = false,
+  onExportStart,
+  onExportToggle,
 }: MessageRowProps) {
   const { t } = useI18n();
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
@@ -505,7 +564,8 @@ export const MessageRow = memo(function MessageRow({
   const [isResending, setIsResending] = useState(false);
   const [editText, setEditText] = useState(item.text);
   const [referenceMenuOpen, setReferenceMenuOpen] = useState(false);
-  const [referenceMode, setReferenceMode] = useState<MessageReferenceMode>("full");
+  const [referenceMode, setReferenceMode] =
+    useState<MessageReferenceMode>("full");
   const bubbleRef = useRef<HTMLDivElement | null>(null);
   const editTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const resendInFlightRef = useRef(false);
@@ -534,13 +594,25 @@ export const MessageRow = memo(function MessageRow({
     isStandaloneMarkdownTable(item.text);
   const isLongUserMessage =
     item.role === "user" &&
-    (item.text.trim().length > 180 || imageItems.length > 0 || attachments.length > 0);
-  const canEditUserMessage = item.role === "user" && Boolean(onResendUserMessage);
-  const cliTimestamp = useMemo(() => {
+    (item.text.trim().length > 180 ||
+      imageItems.length > 0 ||
+      attachments.length > 0);
+  const canEditUserMessage =
+    item.role === "user" && Boolean(onResendUserMessage);
+  const messageTimestamp = useMemo(() => {
     const timestamp = item.createdAt ?? extractTimestampFromMessageId(item.id);
-    return timestamp === null || timestamp === undefined
-      ? ""
-      : formatCliTimestamp(timestamp);
+    if (timestamp === null || timestamp === undefined) {
+      return null;
+    }
+    const date = new Date(timestamp);
+    if (!Number.isFinite(date.getTime())) {
+      return null;
+    }
+    return {
+      clock: formatMessageTimestamp(timestamp),
+      dateTime: formatMessageTimestamp(timestamp, true),
+      iso: date.toISOString(),
+    };
   }, [item.createdAt, item.id]);
 
   useEffect(() => {
@@ -551,7 +623,12 @@ export const MessageRow = memo(function MessageRow({
   const getSelectedMessageText = useCallback(() => {
     const bubble = bubbleRef.current;
     const selection = window.getSelection();
-    if (!bubble || !selection || selection.rangeCount === 0 || selection.isCollapsed) {
+    if (
+      !bubble ||
+      !selection ||
+      selection.rangeCount === 0 ||
+      selection.isCollapsed
+    ) {
       return null;
     }
     const selectedText = selection.toString().trim();
@@ -570,12 +647,15 @@ export const MessageRow = memo(function MessageRow({
       const element = node instanceof Element ? node : node.parentElement;
       return Boolean(
         element?.closest(
-          ".message-quote-button, .message-copy-button, .message-edit-button",
+          ".message-quote-button, .message-copy-button, .message-edit-button, .message-export-button",
         ),
       );
     };
 
-    if (isWithinMessageControls(selection.anchorNode) || isWithinMessageControls(selection.focusNode)) {
+    if (
+      isWithinMessageControls(selection.anchorNode) ||
+      isWithinMessageControls(selection.focusNode)
+    ) {
       return null;
     }
     return selectedText;
@@ -585,7 +665,8 @@ export const MessageRow = memo(function MessageRow({
     if (!onReference) {
       return;
     }
-    const selectedText = getSelectedMessageText() ?? selectionSnapshotRef.current;
+    const selectedText =
+      getSelectedMessageText() ?? selectionSnapshotRef.current;
     selectionSnapshotRef.current = selectedText;
     setReferenceMode(defaultReferenceMode(selectedText ?? item.text));
     setReferenceMenuOpen((open) => !open);
@@ -653,16 +734,159 @@ export const MessageRow = memo(function MessageRow({
   }, [editText, item, onResendUserMessage]);
 
   return (
-    <div className={`message ${item.role}${isLongUserMessage ? " message-long" : ""}`}>
+    <div
+      className={`message ${item.role}${isLongUserMessage ? " message-long" : ""}${
+        exportSelected ? " is-export-selected" : ""
+      }`}
+    >
       <div
         ref={bubbleRef}
         className={`bubble message-bubble${
           isTableOnlyAssistantMessage ? " message-bubble-table-only" : ""
-        }${suppressCliTimestamp ? " message-bubble-cli-timestamp-hidden" : ""}`}
-        data-cli-timestamp={cliTimestamp}
+        }`}
       >
+        {item.role === "assistant" ? (
+          <div className="message-agent-meta">
+            <span className="message-agent-avatar" aria-hidden>
+              <Bot size={14} />
+            </span>
+            <span className="message-agent-name" title={assistantMeta?.name}>
+              {assistantMeta?.name ?? "Assistant"}
+            </span>
+            {messageTimestamp?.dateTime ? (
+              <time
+                className="message-agent-time"
+                dateTime={messageTimestamp.iso}
+              >
+                {messageTimestamp.dateTime}
+              </time>
+            ) : null}
+            {(() => {
+              const toolCount =
+                assistantProcessDisclosure?.toolCount ??
+                assistantMeta?.toolCount ??
+                0;
+              const processMessageCount =
+                assistantProcessDisclosure?.processMessageCount ??
+                assistantMeta?.processMessageCount ??
+                0;
+              const additions =
+                assistantProcessDisclosure?.additions ??
+                assistantMeta?.additions ??
+                null;
+              const deletions =
+                assistantProcessDisclosure?.deletions ??
+                assistantMeta?.deletions ??
+                null;
+              if (
+                toolCount === 0 &&
+                processMessageCount === 0 &&
+                (additions ?? 0) === 0 &&
+                (deletions ?? 0) === 0
+              ) {
+                return null;
+              }
+              return (
+                <span className="message-agent-stats">
+                  {assistantProcessDisclosure ? (
+                    <button
+                      type="button"
+                      className="message-agent-process-toggle"
+                      data-button-elevation="none"
+                      onClick={assistantProcessDisclosure.onToggle}
+                      aria-expanded={assistantProcessDisclosure.isExpanded}
+                      aria-controls={assistantProcessDisclosure.bodyId}
+                      aria-label={
+                        assistantProcessDisclosure.isExpanded
+                          ? t("messages.collapseProcess")
+                          : t("messages.expandProcess")
+                      }
+                      title={
+                        assistantProcessDisclosure.isExpanded
+                          ? t("messages.collapseProcess")
+                          : t("messages.expandProcess")
+                      }
+                    >
+                      <span
+                        className="message-agent-process-chevron"
+                        aria-hidden
+                      >
+                        {assistantProcessDisclosure.isExpanded ? (
+                          <ChevronDown size={13} />
+                        ) : (
+                          <ChevronRight size={13} />
+                        )}
+                      </span>
+                      {toolCount > 0 ? (
+                        <span className="message-agent-stat">
+                          {formatCount(
+                            toolCount,
+                            t("messages.toolCallSingular"),
+                            t("messages.toolCallPlural"),
+                          )}
+                        </span>
+                      ) : null}
+                      {processMessageCount > 0 ? (
+                        <span className="message-agent-stat">
+                          {formatCount(
+                            processMessageCount,
+                            t("messages.processMessageSingular"),
+                            t("messages.processMessagePlural"),
+                          )}
+                        </span>
+                      ) : null}
+                    </button>
+                  ) : null}
+                  {!assistantProcessDisclosure && toolCount > 0 ? (
+                    <span className="message-agent-stat">
+                      {formatCount(
+                        toolCount,
+                        t("messages.toolCallSingular"),
+                        t("messages.toolCallPlural"),
+                      )}
+                    </span>
+                  ) : null}
+                  {!assistantProcessDisclosure && processMessageCount > 0 ? (
+                    <span className="message-agent-stat">
+                      {formatCount(
+                        processMessageCount,
+                        t("messages.processMessageSingular"),
+                        t("messages.processMessagePlural"),
+                      )}
+                    </span>
+                  ) : null}
+                  {(additions ?? 0) > 0 ? (
+                    <span className="message-agent-stat message-agent-stat-add">
+                      +{additions}
+                    </span>
+                  ) : null}
+                  {(deletions ?? 0) > 0 ? (
+                    <span className="message-agent-stat message-agent-stat-delete">
+                      -{deletions}
+                    </span>
+                  ) : null}
+                </span>
+              );
+            })()}
+            {assistantRunning ? (
+              <span className="message-agent-running">
+                <span className="message-agent-running-dot" aria-hidden />
+                <span>{runningLabel}</span>
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+        {assistantProcessContent}
+        {item.role === "user" && messageTimestamp?.clock ? (
+          <div className="message-user-meta">
+            <span className="message-user-time">{messageTimestamp.clock}</span>
+          </div>
+        ) : null}
         {interrupted && (
-          <span className="message-interrupted-status" title={interrupted.label}>
+          <span
+            className="message-interrupted-status"
+            title={interrupted.label}
+          >
             <TriangleAlert size={13} aria-hidden />
             <span>{interrupted.label}</span>
           </span>
@@ -714,7 +938,10 @@ export const MessageRow = memo(function MessageRow({
                 aria-busy={isResending}
               >
                 {isResending && (
-                  <span className="working-spinner message-edit-resend-spinner" aria-hidden />
+                  <span
+                    className="working-spinner message-edit-resend-spinner"
+                    aria-hidden
+                  />
                 )}
                 {t(isResending ? "messages.resending" : "messages.resend")}
               </button>
@@ -740,59 +967,120 @@ export const MessageRow = memo(function MessageRow({
             onClose={() => setLightboxIndex(null)}
           />
         )}
-        {onReference && hasText && (
-          <div className="message-reference-control">
+        {exportSelectionMode && onExportToggle ? (
+          <label
+            className="message-export-checkbox"
+            title={t("messages.export")}
+          >
+            <input
+              type="checkbox"
+              checked={exportSelected}
+              onChange={() => onExportToggle(item.id)}
+              aria-label={t("messages.export")}
+            />
+          </label>
+        ) : null}
+        {!exportSelectionMode && (
+          <div className="message-actions">
+            {onReference && hasText && (
+              <div className="message-reference-control">
+                <button
+                  type="button"
+                  className={`ghost message-quote-button${referenceMenuOpen ? " is-active" : ""}`}
+                  data-button-elevation="none"
+                  onPointerDown={(event) => {
+                    event.stopPropagation();
+                    selectionSnapshotRef.current = getSelectedMessageText();
+                  }}
+                  onClick={handleReferenceMenuToggle}
+                  aria-label={t("messages.referenceAction")}
+                  title={t("messages.referenceAction")}
+                  aria-haspopup="menu"
+                  aria-expanded={referenceMenuOpen}
+                >
+                  <Quote size={14} aria-hidden />
+                </button>
+                {referenceMenuOpen && (
+                  <MessageReferenceMenu
+                    mode={referenceMode}
+                    characterCount={referenceCharacterCount}
+                    estimatedTokens={referenceEstimatedTokens}
+                    hasSelection={Boolean(selectionSnapshotRef.current)}
+                    onModeChange={setReferenceMode}
+                    onChoose={handleReferenceChoose}
+                    onClose={() => setReferenceMenuOpen(false)}
+                  />
+                )}
+              </div>
+            )}
+            {canEditUserMessage && hasText && !isEditing && (
+              <button
+                type="button"
+                className="ghost message-edit-button"
+                data-button-elevation="none"
+                onClick={startEdit}
+                aria-label={t("messages.editAndResend")}
+                title={t("messages.editAndResend")}
+              >
+                <Pencil size={14} aria-hidden />
+              </button>
+            )}
             <button
               type="button"
-              className={`ghost message-quote-button${referenceMenuOpen ? " is-active" : ""}`}
-              onPointerDown={(event) => {
-                event.stopPropagation();
-                selectionSnapshotRef.current = getSelectedMessageText();
-              }}
-              onClick={handleReferenceMenuToggle}
-              aria-label={t("messages.referenceAction")}
-              title={t("messages.referenceAction")}
-              aria-haspopup="menu"
-              aria-expanded={referenceMenuOpen}
+              className={`ghost message-copy-button${isCopied ? " is-copied" : ""}`}
+              data-button-elevation="none"
+              onClick={() => onCopy(item)}
+              aria-label="Copy message"
+              title="Copy message"
             >
-              <Quote size={14} aria-hidden />
+              <span className="message-copy-icon" aria-hidden>
+                <Copy className="message-copy-icon-copy" size={14} />
+                <Check className="message-copy-icon-check" size={14} />
+              </span>
             </button>
-            {referenceMenuOpen && (
-              <MessageReferenceMenu
-                mode={referenceMode}
-                characterCount={referenceCharacterCount}
-                estimatedTokens={referenceEstimatedTokens}
-                hasSelection={Boolean(selectionSnapshotRef.current)}
-                onModeChange={setReferenceMode}
-                onChoose={handleReferenceChoose}
-                onClose={() => setReferenceMenuOpen(false)}
-              />
-            )}
+            {onExportStart ? (
+              <button
+                type="button"
+                className="ghost message-export-button"
+                data-button-elevation="none"
+                onClick={() => onExportStart(item.id)}
+                aria-label={t("messages.export")}
+                title={t("messages.export")}
+              >
+                <FileOutput size={14} aria-hidden />
+              </button>
+            ) : null}
           </div>
         )}
-        {canEditUserMessage && hasText && !isEditing && (
-          <button
-            type="button"
-            className="ghost message-edit-button"
-            onClick={startEdit}
-            aria-label={t("messages.editAndResend")}
-            title={t("messages.editAndResend")}
-          >
-            <Pencil size={14} aria-hidden />
-          </button>
-        )}
-        <button
-          type="button"
-          className={`ghost message-copy-button${isCopied ? " is-copied" : ""}`}
-          onClick={() => onCopy(item)}
-          aria-label="Copy message"
-          title="Copy message"
-        >
-          <span className="message-copy-icon" aria-hidden>
-            <Copy className="message-copy-icon-copy" size={14} />
-            <Check className="message-copy-icon-check" size={14} />
-          </span>
-        </button>
+      </div>
+    </div>
+  );
+});
+
+export const ProcessMessageRow = memo(function ProcessMessageRow({
+  item,
+  showMessageFilePath,
+  workspacePath,
+  onOpenFileLink,
+  onOpenFileLinkMenu,
+  onOpenThreadLink,
+}: ProcessMessageRowProps) {
+  return (
+    <div className="tool-inline process-message-inline">
+      <div className="tool-inline-bar-toggle" aria-hidden />
+      <div className="tool-inline-content">
+        <div className="process-inline-summary">
+          <Bot className="tool-inline-icon completed" size={14} aria-hidden />
+          <Markdown
+            value={item.text}
+            className="tool-inline-detail markdown process-message-inline-text"
+            showFilePath={showMessageFilePath}
+            workspacePath={workspacePath}
+            onOpenFileLink={onOpenFileLink}
+            onOpenFileLinkMenu={onOpenFileLinkMenu}
+            onOpenThreadLink={onOpenThreadLink}
+          />
+        </div>
       </div>
     </div>
   );
@@ -812,7 +1100,9 @@ export const ReasoningRow = memo(function ReasoningRow({
   const { summaryTitle, bodyText, hasBody } = parsed;
   const reasoningTone: StatusTone = hasBody ? "completed" : "processing";
   return (
-    <div className={`tool-inline reasoning-inline ${isExpanded ? "tool-inline-expanded" : ""}`}>
+    <div
+      className={`tool-inline reasoning-inline ${isExpanded ? "tool-inline-expanded" : ""}`}
+    >
       <button
         type="button"
         className="tool-inline-bar-toggle"
@@ -862,7 +1152,8 @@ export const ReviewRow = memo(function ReviewRow({
   onOpenFileLinkMenu,
   onOpenThreadLink,
 }: ReviewRowProps) {
-  const title = item.state === "started" ? "Review started" : "Review completed";
+  const title =
+    item.state === "started" ? "Review started" : "Review completed";
   return (
     <div className="item-card review">
       <div className="review-header">
@@ -918,7 +1209,9 @@ export const UserInputRow = memo(function UserInputRow({
   const extraQuestions = Math.max(0, item.questions.length - 1);
 
   return (
-    <div className={`tool-inline user-input-inline ${isExpanded ? "tool-inline-expanded" : ""}`}>
+    <div
+      className={`tool-inline user-input-inline ${isExpanded ? "tool-inline-expanded" : ""}`}
+    >
       <button
         type="button"
         className="tool-inline-bar-toggle"
@@ -945,7 +1238,8 @@ export const UserInputRow = memo(function UserInputRow({
         {isExpanded && (
           <div className="user-input-inline-details">
             {item.questions.map((question, index) => {
-              const title = question.question || question.header || `Question ${index + 1}`;
+              const title =
+                question.question || question.header || `Question ${index + 1}`;
               return (
                 <div
                   key={`${question.id}-${index}`}
@@ -1019,7 +1313,10 @@ function SubagentCheckpointContent({
     );
   }
 
-  const preview = text.replace(/\s+/g, " ").trim().slice(0, SUBAGENT_CHECKPOINT_PREVIEW_LENGTH);
+  const preview = text
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, SUBAGENT_CHECKPOINT_PREVIEW_LENGTH);
   return (
     <div className="tool-inline-detail subagent-checkpoint-preview">
       <span>{preview}...</span>
@@ -1047,7 +1344,9 @@ export const ProcessRow = memo(function ProcessRow({ item }: ProcessRowProps) {
           <Icon className="tool-inline-icon completed" size={14} aria-hidden />
           <span className="tool-inline-label">{summary.label}:</span>
           <span className="tool-inline-value">{item.label}</span>
-          {item.status && <span className="tool-inline-status">{item.status}</span>}
+          {item.status && (
+            <span className="tool-inline-status">{item.status}</span>
+          )}
         </div>
         {item.detail && <div className="tool-inline-detail">{item.detail}</div>}
       </div>
@@ -1084,12 +1383,21 @@ export const SubagentCheckpointRow = memo(function SubagentCheckpointRow({
             <div className="tool-inline-bar-toggle" aria-hidden />
             <div className="tool-inline-content">
               <div className="process-inline-summary">
-                <Users className="tool-inline-icon completed" size={14} aria-hidden />
+                <Users
+                  className="tool-inline-icon completed"
+                  size={14}
+                  aria-hidden
+                />
                 <span className="tool-inline-label">{label}:</span>
-                <span className="tool-inline-value" title={checkpoint.childThreadId}>
+                <span
+                  className="tool-inline-value"
+                  title={checkpoint.childThreadId}
+                >
                   {childLabel}
                 </span>
-                <span className="tool-inline-status">#{checkpoint.sequence}</span>
+                <span className="tool-inline-status">
+                  #{checkpoint.sequence}
+                </span>
               </div>
               <SubagentCheckpointContent
                 text={checkpoint.text}
@@ -1148,7 +1456,8 @@ export const ToolRow = memo(function ToolRow({
     isCommand && !isExpanded && (summaryValue?.length ?? 0) > 80;
   const showToolOutput = isExpanded && (!isFileChange || !hasChanges);
   const normalizedStatus = (item.status ?? "").toLowerCase();
-  const isCommandRunning = isCommand && /in[_\s-]*progress|running|started/.test(normalizedStatus);
+  const isCommandRunning =
+    isCommand && /in[_\s-]*progress|running|started/.test(normalizedStatus);
   const [showLiveOutput, setShowLiveOutput] = useState(false);
   const [isExportingPlan, setIsExportingPlan] = useState(false);
 
@@ -1174,7 +1483,12 @@ export const ToolRow = memo(function ToolRow({
     if (showCommandOutput && isCommandRunning && showLiveOutput) {
       onRequestAutoScroll?.();
     }
-  }, [isCommandRunning, onRequestAutoScroll, showCommandOutput, showLiveOutput]);
+  }, [
+    isCommandRunning,
+    onRequestAutoScroll,
+    showCommandOutput,
+    showLiveOutput,
+  ]);
 
   const handlePlanExport = useCallback(
     async (event: MouseEvent<HTMLButtonElement>) => {
@@ -1188,7 +1502,8 @@ export const ToolRow = memo(function ToolRow({
       try {
         await exportMarkdownFile(output, buildPlanExportFileName(item.id));
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Unable to export plan.";
+        const message =
+          error instanceof Error ? error.message : "Unable to export plan.";
         pushErrorToast({
           title: "Plan export failed",
           message,
@@ -1201,7 +1516,9 @@ export const ToolRow = memo(function ToolRow({
   );
 
   return (
-    <div className={`tool-inline tool-inline-row ${isExpanded ? "tool-inline-expanded" : ""}`}>
+    <div
+      className={`tool-inline tool-inline-row ${isExpanded ? "tool-inline-expanded" : ""}`}
+    >
       <button
         type="button"
         className="tool-inline-bar-toggle"
@@ -1218,7 +1535,11 @@ export const ToolRow = memo(function ToolRow({
           onClick={() => onToggle(item.id)}
           aria-expanded={isExpanded}
         >
-          <ToolIcon className={`tool-inline-icon ${tone}`} size={14} aria-hidden />
+          <ToolIcon
+            className={`tool-inline-icon ${tone}`}
+            size={14}
+            aria-hidden
+          />
           {summaryLabel && (
             <span className="tool-inline-label">{summaryLabel}:</span>
           )}
@@ -1272,7 +1593,10 @@ export const ToolRow = memo(function ToolRow({
                 </div>
                 {change.diff && (
                   <div className="diff-viewer-output">
-                    <PierreDiffBlock diff={change.diff} displayPath={change.path} />
+                    <PierreDiffBlock
+                      diff={change.diff}
+                      displayPath={change.path}
+                    />
                   </div>
                 )}
               </div>
@@ -1338,8 +1662,13 @@ export const ExploreRow = memo(function ExploreRow({ item }: ExploreRowProps) {
         </div>
         <div className="explore-inline-list">
           {item.entries.map((entry, index) => (
-            <div key={`${entry.kind}-${entry.label}-${index}`} className="explore-inline-item">
-              <span className="explore-inline-kind">{exploreKindLabel(entry.kind)}</span>
+            <div
+              key={`${entry.kind}-${entry.label}-${index}`}
+              className="explore-inline-item"
+            >
+              <span className="explore-inline-kind">
+                {exploreKindLabel(entry.kind)}
+              </span>
               <span className="explore-inline-label">{entry.label}</span>
               {entry.detail && entry.detail !== entry.label && (
                 <span className="explore-inline-detail">{entry.detail}</span>

@@ -3,10 +3,20 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 describe("message tool group interaction styles", () => {
-  const buttonsCss = readFileSync(new URL("./buttons.css", import.meta.url), "utf8");
-  const messagesCss = readFileSync(new URL("./messages.css", import.meta.url), "utf8");
+  const buttonsCss = readFileSync(
+    new URL("./buttons.css", import.meta.url),
+    "utf8",
+  );
+  const messagesCss = readFileSync(
+    new URL("./messages.css", import.meta.url),
+    "utf8",
+  );
   const messagesSource = readFileSync(
     new URL("../features/messages/components/Messages.tsx", import.meta.url),
+    "utf8",
+  );
+  const messageRowsSource = readFileSync(
+    new URL("../features/messages/components/MessageRows.tsx", import.meta.url),
     "utf8",
   );
 
@@ -17,18 +27,25 @@ describe("message tool group interaction styles", () => {
     expect(buttonsCss).toContain(
       'button:not(:where([data-button-elevation="none"])):active:not(:disabled)',
     );
-    expect(buttonsCss).not.toContain('button:not([data-button-elevation="none"])');
+    expect(buttonsCss).not.toContain(
+      'button:not([data-button-elevation="none"])',
+    );
     expect(buttonsCss).not.toMatch(/^button:hover:not\(:disabled\)\s*\{/m);
     expect(buttonsCss).not.toMatch(/^button:active:not\(:disabled\)\s*\{/m);
   });
 
   it("marks every tool group toggle as a non-elevated composite control", () => {
-    expect(messagesSource.match(/className="tool-group-toggle"/g)).toHaveLength(2);
+    expect(messagesSource.match(/className="tool-group-toggle"/g)).toHaveLength(
+      2,
+    );
     expect(
       messagesSource.match(
         /className="tool-group-toggle"\s+data-button-elevation="none"/g,
       ),
     ).toHaveLength(2);
+    expect(messageRowsSource).toMatch(
+      /className="message-agent-process-toggle"[\s\S]*?data-button-elevation="none"/,
+    );
   });
 
   it("does not reintroduce local elevation resets in message styles", () => {
@@ -46,24 +63,18 @@ describe("message tool group interaction styles", () => {
     );
   });
 
-  it("overlays the style panel without changing the message layout flow", () => {
+  it("does not keep removed reading or style switch styles", () => {
     const controlsRule = messagesCss.match(
       /\.messages-tool-controls\s*\{([\s\S]*?)\n\}/,
     );
-    const stylePopoverRule = messagesCss.match(
-      /\.messages-style-popover\s*\{([\s\S]*?)\n\}/,
-    );
 
-    expect(controlsRule?.[1]).not.toMatch(/position:\s*(?:sticky|fixed|absolute)/);
+    expect(controlsRule?.[1]).not.toMatch(
+      /position:\s*(?:sticky|fixed|absolute)/,
+    );
     expect(controlsRule?.[1]).not.toMatch(/\btop:/);
-    expect(messagesCss).toMatch(
-      /\.messages-style-panel-host\s*\{[^}]*position:\s*absolute;[^}]*top:\s*100%;[^}]*right:\s*var\(--main-panel-padding, 24px\);/s,
-    );
-    expect(messagesCss).toMatch(
-      /\.messages-style-panel-host\.is-open\s*\{[^}]*display:\s*block;/s,
-    );
-    expect(stylePopoverRule?.[1]).toContain("overflow-y: auto");
-    expect(stylePopoverRule?.[1]).not.toContain("flex: 1 1 100%");
+    expect(messagesCss).not.toContain(".messages-reading-segmented");
+    expect(messagesCss).not.toContain(".messages-style-popover");
+    expect(messagesCss).not.toContain(".messages-style-panel-host");
   });
 
   it("keeps horizontal scrolling inside wide content instead of the conversation pane", () => {
@@ -82,19 +93,11 @@ describe("message tool group interaction styles", () => {
     );
   });
 
-  it("lets CLI conversations grow on wide windows without misaligning expanded groups", () => {
-    expect(messagesCss).toMatch(
-      /\.messages-reading-cli \.messages-inner\s*\{[^}]*--messages-cli-end-gutter:\s*54px;[^}]*max-width:\s*min\(100%, clamp\(980px, 76vw, 1240px\)\);/s,
-    );
-    expect(messagesCss).toMatch(
-      /\.messages-reading-cli \.tool-group\s*\{[^}]*max-width:\s*calc\(100% - var\(--messages-cli-end-gutter\)\);/s,
-    );
-    expect(messagesCss).toMatch(
-      /\.messages-reading-cli \.tool-group-body > \.message\.assistant\s*\{[^}]*padding-right:\s*0;/s,
-    );
-    expect(messagesCss).toMatch(
-      /\.messages-reading-cli \.tool-group-body \.tool-inline\s*\{[^}]*max-width:\s*100%;/s,
-    );
+  it("does not keep CLI reading mode styles", () => {
+    expect(messagesCss).not.toContain(".messages-reading-cli");
+    expect(messagesCss).not.toContain("--messages-cli-end-gutter");
+    expect(messagesCss).not.toContain("data-cli-timestamp");
+    expect(messagesCss).not.toContain("message-bubble-cli-timestamp-hidden");
   });
 
   it("anchors child result details to the chat layer and above the composer", () => {
@@ -117,7 +120,9 @@ describe("message tool group interaction styles", () => {
       /\.subagent-results-heading\s*\{([\s\S]*?)\n\}/,
     );
 
-    expect(headerRule?.[1]).toContain("color: var(--conversation-assistant-text)");
+    expect(headerRule?.[1]).toContain(
+      "color: var(--conversation-assistant-text)",
+    );
     expect(headingRule?.[1]).toContain("color: inherit");
   });
 
@@ -142,10 +147,181 @@ describe("message tool group interaction styles", () => {
       "color: var(--conversation-assistant-text)",
     );
   });
+
+  it("uses compact bordered process groups with assistant metadata only on answers", () => {
+    expect(messagesCss).toMatch(
+      /\.tool-group\s*\{[^}]*gap:\s*0;[^}]*border:\s*1px solid var\(--messages-process-border\);[^}]*border-radius:\s*var\(--cm-radius-card,\s*12px\);/s,
+    );
+    expect(messagesCss).toMatch(
+      /\.tool-group-body\s*\{[^}]*gap:\s*4px;[^}]*padding:\s*5px;/s,
+    );
+    expect(messagesCss).toMatch(
+      /\.tool-group-body \.tool-inline\s*\{[^}]*border:\s*1px solid\s+color-mix\(\s*in srgb,\s*var\(--messages-process-border\) 58%,\s*transparent\s*\);[^}]*border-radius:\s*var\(--cm-radius-dense,\s*8px\);/s,
+    );
+    expect(messagesCss).toMatch(
+      /\.tool-group-body > \* \+ \*\s*\{[^}]*border-top:\s*0;/s,
+    );
+    expect(messageRowsSource).toContain('className="message-agent-name"');
+    expect(messageRowsSource).toContain('className="message-agent-time"');
+    expect(messageRowsSource).toContain('className="message-agent-stats"');
+    expect(messageRowsSource).toContain(
+      'className="message-agent-process-toggle"',
+    );
+    expect(messageRowsSource).not.toContain('className="working-agent-name"');
+    expect(messageRowsSource).not.toContain('t("messages.agentName")');
+    expect(messageRowsSource).toContain('className="message-agent-avatar"');
+    expect(messagesCss).toMatch(
+      /\.message-agent-process-toggle\s*\{[^}]*display:\s*inline-flex;[^}]*border:\s*0;[^}]*background:\s*transparent;/s,
+    );
+    expect(messagesCss).toContain(".message-agent-process-content");
+    expect(messagesCss).toMatch(
+      /\.process-group-nested-collapsible\s*\{[^}]*border:\s*1px solid[^}]*border-radius:\s*8px;/s,
+    );
+    expect(messagesCss).toMatch(
+      /\.message-agent-meta\s*\{[^}]*font-size:\s*13px;/s,
+    );
+    expect(messagesCss).toMatch(
+      /\.message-agent-name\s*\{[^}]*font-size:\s*14px;/s,
+    );
+    expect(messagesCss).toMatch(
+      /:root:not\(\[data-theme\]\) \.messages-view,\s*:root\[data-theme="light"\] \.messages-view\s*\{[^}]*--message-link-color:\s*#0f675c;[^}]*--messages-inline-code-text:\s*#242a2f;/s,
+    );
+  });
+
+  it("uses shared success and error tokens for line-change statistics", () => {
+    expect(messagesCss).toMatch(
+      /\.message-agent-stat-add\s*\{[^}]*color:\s*var\(--status-success\);/s,
+    );
+    expect(messagesCss).toMatch(
+      /\.message-agent-stat-delete\s*\{[^}]*color:\s*var\(--status-error\);/s,
+    );
+    expect(messagesCss).toMatch(
+      /\.tool-group-line-change-stat-add\s*\{[^}]*color:\s*var\(--status-success\);/s,
+    );
+    expect(messagesCss).toMatch(
+      /\.tool-group-line-change-stat-delete\s*\{[^}]*color:\s*var\(--status-error\);/s,
+    );
+  });
+
+  it("gives native conversations a readable assistant stream and timed user cards", () => {
+    expect(messagesCss).toMatch(
+      /\.messages-view\s*\{[^}]*--conversation-user-text:\s*#000;[^}]*--conversation-assistant-text:\s*#000;/s,
+    );
+    expect(messagesCss).toMatch(
+      /\.app:is\(\.layout-desktop, \.layout-compact\):not\(\.layout-phone\) \.messages-view\s*\{[^}]*--conversation-user-text:\s*#000;[^}]*--conversation-assistant-text:\s*#000;/s,
+    );
+    expect(messagesCss).toMatch(
+      /\.messages-reading-native \.messages-inner\s*\{[^}]*max-width:\s*min\(100%, var\(--conversation-reading-width, 860px\)\);[^}]*gap:\s*22px;/s,
+    );
+    expect(messagesCss).not.toMatch(
+      /\.messages-view\s*\{[^}]*--conversation-reading-width:/s,
+    );
+    expect(messagesCss).toMatch(
+      /\.messages-reading-native \.message\.assistant \.bubble\s*\{[^}]*width:\s*100%;[^}]*max-width:\s*100%;[^}]*padding:\s*0 0 22px;[^}]*border:\s*0;[^}]*border-bottom:\s*1px solid\s+color-mix/s,
+    );
+    expect(messagesCss).toMatch(
+      /:root:not\(\[data-theme\]\)\s+\.app:is\(\.layout-desktop, \.layout-compact\):not\(\.layout-phone\)\s+\.messages-view\.messages-reading-native\s+\.message\.assistant\s+\.bubble,\s*:root\[data-theme="light"\]\s+\.app:is\(\.layout-desktop, \.layout-compact\):not\(\.layout-phone\)\s+\.messages-view\.messages-reading-native\s+\.message\.assistant\s+\.bubble\s*\{[^}]*border-color:\s*transparent;[^}]*border-left-color:\s*transparent;[^}]*background:\s*transparent;/s,
+    );
+    expect(messagesCss).toMatch(
+      /\.messages-reading-native \.message\.assistant \.markdown,\s*\.messages-reading-native \.message\.assistant \.item-text\s*\{[^}]*max-width:\s*78ch;[^}]*margin-left:\s*0;[^}]*margin-top:\s*0;/s,
+    );
+    expect(messagesCss).toMatch(
+      /\.messages-reading-native \.message\.assistant \.markdown,\s*\.messages-reading-native \.message\.assistant \.item-text\s*\{[^}]*max-width:\s*78ch;[^}]*font-size:\s*var\(--message-font-size, 15px\);[^}]*line-height:\s*1\.74;/s,
+    );
+    expect(messagesCss).toContain(".message-agent-name");
+    expect(messagesCss).toContain(".message-agent-time");
+    expect(messagesCss).toContain(".message-agent-stats");
+    expect(messagesCss).not.toContain(".working-agent-name");
+    expect(messagesCss).toMatch(
+      /\.messages-reading-native \.message \.message-actions\s*\{[^}]*bottom:\s*-15px;/s,
+    );
+    expect(messagesCss).toMatch(
+      /\.message-actions \.message-copy-button,\s*\.message-actions \.message-edit-button,\s*\.message-actions \.message-quote-button,\s*\.message-actions \.message-export-button\s*\{[^}]*position:\s*static;[^}]*width:\s*28px;[^}]*height:\s*28px;/s,
+    );
+    expect(messagesCss).toMatch(
+      /\.messages-reading-native \.message\.user\s*\{[^}]*justify-content:\s*flex-end;[^}]*min-width:\s*0;[^}]*box-sizing:\s*border-box;/s,
+    );
+    expect(messagesCss).toMatch(
+      /\.messages-reading-native \.message\.user \.bubble\s*\{[^}]*position:\s*relative;[^}]*width:\s*fit-content;[^}]*max-width:\s*min\(68%, 680px\);[^}]*min-height:\s*42px;[^}]*padding:\s*12px 56px 11px 16px;[^}]*border-radius:\s*12px;[^}]*background:\s*color-mix\(\s*in srgb,\s*var\(--messages-solid-control\) 58%,\s*var\(--messages-solid-panel\) 42%\s*\);/s,
+    );
+    expect(messagesCss).toMatch(
+      /:root:not\(\[data-theme\]\) \.messages-reading-native \.message\.user \.bubble,\s*:root\[data-theme="light"\] \.messages-reading-native \.message\.user \.bubble\s*\{[^}]*background:\s*var\(--conversation-user-color\);[^}]*color:\s*var\(--conversation-user-text\);/s,
+    );
+    expect(messagesCss).toMatch(
+      /\.messages-reading-native \.message-user-meta\s*\{[^}]*position:\s*absolute;[^}]*top:\s*11px;[^}]*right:\s*14px;[^}]*display:\s*flex;/s,
+    );
+    expect(messageRowsSource).toMatch(
+      /className=\{`ghost message-quote-button[^`]+`\}\s+data-button-elevation="none"/s,
+    );
+    expect(messageRowsSource).toContain('className="message-actions"');
+    expect(messageRowsSource).toMatch(
+      /className="ghost message-edit-button"\s+data-button-elevation="none"/s,
+    );
+    expect(messageRowsSource).toMatch(
+      /className=\{`ghost message-copy-button[^`]+`\}\s+data-button-elevation="none"/s,
+    );
+    expect(messageRowsSource).toMatch(
+      /className="ghost message-export-button"\s+data-button-elevation="none"/s,
+    );
+    expect(messagesCss).toMatch(
+      /\.messages-reading-native \.working\s*\{[^}]*display:\s*grid;[^}]*background:\s*transparent;/s,
+    );
+    expect(messagesCss).toMatch(
+      /\.message-agent-avatar\s*\{[^}]*width:\s*24px;[^}]*height:\s*24px;[^}]*border-radius:\s*8px;/s,
+    );
+    expect(messagesCss).toMatch(
+      /\.message-edit-form\s*\{[^}]*padding:\s*12px;[^}]*border:\s*1px solid\s+color-mix/s,
+    );
+  });
+
+  it("keeps light process text distinct from its pale surface", () => {
+    expect(messagesCss).toMatch(
+      /:root:not\(\[data-theme\]\) \.messages-view,\s*:root\[data-theme="light"\] \.messages-view\s*\{[^}]*--messages-process-text:\s*#202832;[^}]*--messages-process-text-soft:\s*#56616b;/s,
+    );
+    expect(messagesCss).toMatch(
+      /:root:not\(\[data-theme\]\) \.messages-view \.message-agent-time,\s*:root\[data-theme="light"\] \.messages-view \.message-agent-time\s*\{[^}]*color:\s*var\(--messages-process-text-soft\);/s,
+    );
+  });
+
+  it("keeps dark conversation rules but lets the light theme override them", () => {
+    expect(messagesCss).toMatch(
+      /\.app:is\(\.layout-desktop, \.layout-compact\):not\(\.layout-phone\) \.messages-view,\s*\.app:is\(\.layout-desktop, \.layout-compact\):not\(\.layout-phone\)\s+\.messages-view\s+\.messages-full,\s*\.app:is\(\.layout-desktop, \.layout-compact\):not\(\.layout-phone\)\s+\.messages-view\s+\.messages-control-layer\s*\{[^}]*background:\s*#101419;/s,
+    );
+    expect(messagesCss).toMatch(
+      /\.app:is\(\.layout-desktop, \.layout-compact\):not\(\.layout-phone\) \.messages-view\s*\{[^}]*--messages-process-bg:\s*color-mix\(in srgb, #15191e 82%, transparent\);/s,
+    );
+    expect(messagesCss).toMatch(
+      /\.app:is\(\.layout-desktop, \.layout-compact\):not\(\.layout-phone\) \.messages-view\s*\{[^}]*--cm-scrollbar-track:\s*transparent;[^}]*--cm-scrollbar-thumb:\s*#46515a;[^}]*--cm-scrollbar-thumb-hover:\s*#65717a;/s,
+    );
+    expect(messagesCss).toMatch(
+      /\.app:is\(\.layout-desktop, \.layout-compact\):not\(\.layout-phone\)\s+\.messages-view\s+\.working\s*\{[^}]*background:\s*var\(--messages-process-bg\);[^}]*box-shadow:\s*none;/s,
+    );
+    expect(messagesCss).toMatch(
+      /\.app:is\(\.layout-desktop, \.layout-compact\):not\(\.layout-phone\)\s+\.messages-view\s+\.messages-empty:has\(\.messages-loading-indicator\)\s*\{[^}]*background:\s*#15191e;[^}]*box-shadow:\s*none;/s,
+    );
+    expect(messagesCss).toMatch(
+      /:root:not\(\[data-theme\]\)\s+\.app:is\(\.layout-desktop, \.layout-compact\):not\(\.layout-phone\)\s+\.messages-view,\s*:root\[data-theme="light"\]\s+\.app:is\(\.layout-desktop, \.layout-compact\):not\(\.layout-phone\)\s+\.messages-view\s*\{[^}]*--conversation-canvas:\s*var\(--cm-light-main-bg\);[^}]*--messages-solid-main:\s*var\(--cm-light-main-bg\);/s,
+    );
+    expect(messagesCss).toMatch(
+      /:root:not\(\[data-theme\]\)\s+\.app:is\(\.layout-desktop, \.layout-compact\):not\(\.layout-phone\)\s+\.messages-view,\s*:root:not\(\[data-theme\]\)\s+\.app:is\(\.layout-desktop, \.layout-compact\):not\(\.layout-phone\)\s+\.messages-view\s+\.messages-full,\s*:root:not\(\[data-theme\]\)\s+\.app:is\(\.layout-desktop, \.layout-compact\):not\(\.layout-phone\)\s+\.messages-view\s+\.messages-control-layer,\s*:root\[data-theme="light"\]\s+\.app:is\(\.layout-desktop, \.layout-compact\):not\(\.layout-phone\)\s+\.messages-view,[\s\S]*?\{[^}]*background:\s*var\(--cm-light-main-bg\);/s,
+    );
+    expect(messagesCss).not.toContain(
+      ".messages-view:not(.messages-reading-native)",
+    );
+  });
 });
 
 describe("markdown table layout styles", () => {
-  const messagesCss = readFileSync(new URL("./messages.css", import.meta.url), "utf8");
+  it("caps Markdown images while keeping them responsive", () => {
+    expect(messagesCss).toMatch(
+      /\.markdown img\s*\{[^}]*max-width:\s*min\(100%, 200px\);[^}]*max-height:\s*200px;[^}]*height:\s*auto;[^}]*object-fit:\s*contain;/s,
+    );
+  });
+
+  const messagesCss = readFileSync(
+    new URL("./messages.css", import.meta.url),
+    "utf8",
+  );
 
   it("keeps generic tables responsive and scopes fixed widths to review tables", () => {
     expect(messagesCss).toMatch(
@@ -167,7 +343,10 @@ describe("markdown table layout styles", () => {
 });
 
 describe("markdown code block selection styles", () => {
-  const messagesCss = readFileSync(new URL("./messages.css", import.meta.url), "utf8");
+  const messagesCss = readFileSync(
+    new URL("./messages.css", import.meta.url),
+    "utf8",
+  );
 
   it("keeps code block chrome out of manual text selections", () => {
     expect(messagesCss).toMatch(

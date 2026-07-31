@@ -55,7 +55,11 @@ type UseQueuedSendOptions = {
     images: readonly string[],
   ) => void;
   onReferencesAccepted?: (references: ComposerReference[]) => void;
-  onMessageRejected?: (text: string, references: ComposerReference[]) => void;
+  onMessageRejected?: (
+    text: string,
+    references: ComposerReference[],
+    images: string[],
+  ) => void;
 };
 
 type UseQueuedSendResult = {
@@ -440,7 +444,7 @@ export function useQueuedSend({
       if (sendResult.status === "sent" || sendResult.status === "steer_failed") {
         onReferencesAccepted?.(references);
       } else if (sendResult.status === "blocked") {
-        onMessageRejected?.(trimmed, references);
+        onMessageRejected?.(trimmed, references, submittedImages);
       }
     },
     [
@@ -642,6 +646,17 @@ export function useQueuedSend({
           } else {
             result = await sendUserMessage(nextItem.text, nextItem.images ?? []);
           }
+          if (result.status === "blocked") {
+            queuedFailureCountByMessageId.current.delete(nextItem.id);
+            setInFlightByThread((prev) => ({ ...prev, [threadId]: null }));
+            setHasStartedByThread((prev) => ({ ...prev, [threadId]: false }));
+            onMessageRejected?.(
+              nextItem.text,
+              nextItem.references ?? [],
+              nextItem.images ?? [],
+            );
+            return;
+          }
           if (result.status !== "sent") {
             throw new Error(`Queued send did not start: ${result.status}`);
           }
@@ -688,6 +703,7 @@ export function useQueuedSend({
     retryWakeVersion,
     runSlashCommand,
     sendUserMessage,
+    onMessageRejected,
   ]);
 
   return {

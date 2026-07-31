@@ -14,6 +14,7 @@ const SELF_DETACH_IGNORE_WINDOW_MS = 10_000;
 
 type ReconnectOptions = {
   runResume?: boolean;
+  attachLive?: boolean;
   reason?: "thread-switch" | "focus" | "detached-recovery" | "connected-recovery";
 };
 
@@ -23,6 +24,7 @@ type UseRemoteThreadLiveConnectionOptions = {
   activeThreadId: string | null;
   activeThreadHasLocalSnapshot?: boolean;
   activeThreadIsProcessing?: boolean;
+  activeThreadNeedsLiveConnection?: boolean;
   refreshThread: (workspaceId: string, threadId: string) => Promise<unknown> | unknown;
   reconnectWorkspace?: (workspace: WorkspaceInfo) => Promise<unknown> | unknown;
 };
@@ -80,6 +82,7 @@ export function useRemoteThreadLiveConnection({
   activeThreadId,
   activeThreadHasLocalSnapshot = true,
   activeThreadIsProcessing = false,
+  activeThreadNeedsLiveConnection = true,
   refreshThread,
   reconnectWorkspace,
 }: UseRemoteThreadLiveConnectionOptions) {
@@ -101,6 +104,7 @@ export function useRemoteThreadLiveConnection({
   const activeThreadIdRef = useRef(activeThreadId);
   const activeThreadHasLocalSnapshotRef = useRef(activeThreadHasLocalSnapshot);
   const activeThreadIsProcessingRef = useRef(activeThreadIsProcessing);
+  const activeThreadNeedsLiveConnectionRef = useRef(activeThreadNeedsLiveConnection);
   const refreshThreadRef = useRef(refreshThread);
   const reconnectWorkspaceRef = useRef(reconnectWorkspace);
   const connectionStateRef = useRef(connectionState);
@@ -120,6 +124,7 @@ export function useRemoteThreadLiveConnection({
     activeThreadIdRef.current = activeThreadId;
     activeThreadHasLocalSnapshotRef.current = activeThreadHasLocalSnapshot;
     activeThreadIsProcessingRef.current = activeThreadIsProcessing;
+    activeThreadNeedsLiveConnectionRef.current = activeThreadNeedsLiveConnection;
     refreshThreadRef.current = refreshThread;
     reconnectWorkspaceRef.current = reconnectWorkspace;
   }, [
@@ -128,6 +133,7 @@ export function useRemoteThreadLiveConnection({
     activeThreadId,
     activeThreadHasLocalSnapshot,
     activeThreadIsProcessing,
+    activeThreadNeedsLiveConnection,
     refreshThread,
     reconnectWorkspace,
   ]);
@@ -187,7 +193,8 @@ export function useRemoteThreadLiveConnection({
       }
 
       const targetKey = keyForThread(workspaceId, threadId);
-      desiredSubscriptionKeyRef.current = targetKey;
+      const shouldAttachLive = options?.attachLive ?? true;
+      desiredSubscriptionKeyRef.current = shouldAttachLive ? targetKey : null;
       const inFlightReconnect = inFlightReconnectRef.current;
       if (inFlightReconnect?.key === targetKey) {
         if (inFlightReconnect.sequence === reconnectSequenceRef.current) {
@@ -209,7 +216,8 @@ export function useRemoteThreadLiveConnection({
             options?.reason === "connected-recovery");
         const shouldResume =
           options?.runResume !== false && !canUseLocalProcessingSnapshot;
-        const shouldKeepLiveState = options?.reason === "thread-switch";
+        const shouldKeepLiveState =
+          shouldAttachLive && options?.reason === "thread-switch";
         if (!workspaceAtStart?.connected) {
           setState("disconnected");
         } else if (shouldResume || !shouldKeepLiveState) {
@@ -219,7 +227,7 @@ export function useRemoteThreadLiveConnection({
         }
 
         try {
-          desiredSubscriptionKeyRef.current = targetKey;
+          desiredSubscriptionKeyRef.current = shouldAttachLive ? targetKey : null;
           const workspaceEntry = activeWorkspaceRef.current;
           if (
             workspaceEntry &&
@@ -238,6 +246,21 @@ export function useRemoteThreadLiveConnection({
           }
           if (sequence !== reconnectSequenceRef.current) {
             return false;
+          }
+
+          if (!shouldAttachLive) {
+            if (activeSubscriptionKeyRef.current === targetKey) {
+              ignoreDetachedEventsUntilRef.current.set(
+                targetKey,
+                Date.now() + SELF_DETACH_IGNORE_WINDOW_MS,
+              );
+              await threadLiveUnsubscribe(workspaceId, threadId).catch(() => {
+                // Best-effort cleanup when a terminal thread no longer needs live updates.
+              });
+              activeSubscriptionKeyRef.current = null;
+            }
+            setState("polling");
+            return true;
           }
 
           if (activeSubscriptionKeyRef.current === targetKey) {
@@ -292,8 +315,13 @@ export function useRemoteThreadLiveConnection({
   );
 
   useEffect(() => {
+    const shouldLoadOrAttachThread =
+      activeThreadNeedsLiveConnection || !activeThreadHasLocalSnapshot;
     const nextKey =
-      backendMode === "remote" && activeWorkspaceId && activeThreadId
+      backendMode === "remote" &&
+      activeWorkspaceId &&
+      activeThreadId &&
+      shouldLoadOrAttachThread
         ? keyForThread(activeWorkspaceId, activeThreadId)
         : null;
     desiredSubscriptionKeyRef.current = nextKey;
@@ -326,10 +354,13 @@ export function useRemoteThreadLiveConnection({
     }
     void reconnectLive(parsed.workspaceId, parsed.threadId, {
       runResume: !activeThreadHasLocalSnapshotRef.current,
+      attachLive: activeThreadNeedsLiveConnectionRef.current,
       reason: "thread-switch",
     });
   }, [
     activeThreadId,
+    activeThreadHasLocalSnapshot,
+    activeThreadNeedsLiveConnection,
     activeWorkspaceConnected,
     activeWorkspaceId,
     backendMode,
@@ -356,8 +387,12 @@ export function useRemoteThreadLiveConnection({
       }
 
       if (method === "codex/connected" && isDocumentVisible()) {
+        if (!activeThreadNeedsLiveConnectionRef.current) {
+          return;
+        }
         void reconnectLive(activeWorkspaceId, selectedThreadId, {
           runResume: false,
+          attachLive: true,
           reason: "connected-recovery",
         });
         return;
@@ -387,9 +422,14 @@ export function useRemoteThreadLiveConnection({
           }
           activeSubscriptionKeyRef.current = null;
           reconcileDisconnectedState();
-          if (isDocumentVisible() && isWindowFocused()) {
+          if (
+            activeThreadNeedsLiveConnectionRef.current &&
+            isDocumentVisible() &&
+            isWindowFocused()
+          ) {
             void reconnectLive(activeWorkspaceId, selectedThreadId, {
               runResume: true,
+              attachLive: true,
               reason: "detached-recovery",
             });
           }
@@ -432,8 +472,12 @@ export function useRemoteThreadLiveConnection({
       if (!workspaceId || !threadId) {
         return;
       }
+      if (!activeThreadNeedsLiveConnectionRef.current) {
+        return;
+      }
       void reconnectLive(workspaceId, threadId, {
         runResume: true,
+        attachLive: true,
         reason: "focus",
       });
     };

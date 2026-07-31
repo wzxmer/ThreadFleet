@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useRef } from "react";
 import type { Dispatch, MutableRefObject } from "react";
 import type {
   AppServerEvent,
@@ -46,6 +46,7 @@ type ThreadEventHandlersOptions = {
   ) => void;
   shouldContinueAfterError?: (threadId: string, turnId: string) => boolean;
   reconcilePlan?: (workspaceId: string, threadId: string) => Promise<void>;
+  executionModelId?: string | null;
   onUserMessageCreated?: (
     workspaceId: string,
     threadId: string,
@@ -73,6 +74,13 @@ type ThreadEventHandlersOptions = {
   pendingInterruptsRef: MutableRefObject<Set<string>>;
 };
 
+type ThreadActivityType = "active" | "started" | "completed";
+type ThreadActivityHandler = (
+  workspaceId: string,
+  threadId: string,
+  activityType?: ThreadActivityType,
+) => void;
+
 export function useThreadEventHandlers({
   activeThreadId,
   dispatch,
@@ -91,6 +99,7 @@ export function useThreadEventHandlers({
   recordTurnActivity,
   shouldContinueAfterError,
   reconcilePlan,
+  executionModelId,
   onUserMessageCreated,
   pushThreadErrorMessage,
   onDebug,
@@ -102,6 +111,18 @@ export function useThreadEventHandlers({
   approvalAllowlistRef,
   pendingInterruptsRef,
 }: ThreadEventHandlersOptions) {
+  const onThreadActivityRef = useRef<ThreadActivityHandler | null>(null);
+  const handleThreadActivity = useCallback(
+    (
+      workspaceId: string,
+      threadId: string,
+      activityType?: ThreadActivityType,
+    ) => {
+      onThreadActivityRef.current?.(workspaceId, threadId, activityType);
+    },
+    [],
+  );
+
   const onApprovalRequest = useThreadApprovalEvents({
     dispatch,
     approvalAllowlistRef,
@@ -174,6 +195,7 @@ export function useThreadEventHandlers({
     onUserMessageCreated,
     onReviewExited,
     onExecutionBindingObserved,
+    onThreadActivity: handleThreadActivity,
   });
 
   const {
@@ -185,6 +207,7 @@ export function useThreadEventHandlers({
     onTurnCompleted,
     onThreadStatusChanged,
     onThreadClosed,
+    onThreadActivity,
     onTurnPlanUpdated,
     onTurnDiffUpdated,
     onThreadTokenUsageUpdated,
@@ -207,7 +230,9 @@ export function useThreadEventHandlers({
     recordThreadActivity,
     shouldContinueAfterError,
     reconcilePlan,
+    executionModelId,
   });
+  onThreadActivityRef.current = onThreadActivity;
 
   const onBackgroundThreadAction = useCallback(
     (workspaceId: string, threadId: string, action: string) => {

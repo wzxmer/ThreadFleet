@@ -102,9 +102,13 @@ subscriptions.
   parsed to infer structured status.
 - A terminal turn with a fully completed structured plan clears that plan.
 - A terminal turn with pending or in-progress steps triggers at most one
-  forced `thread/read` for that workspace, thread, and turn. If no final
-  structured update arrives, ThreadFleet keeps the steps visible and marks
-  them stale; it never changes unfinished steps to completed.
+  forced `thread/read` for that workspace, thread, and turn. Item, message,
+  reasoning, plan-delta, command-output, terminal-input, and file-change
+  activity after the terminal signal keeps the structured plan live and delays
+  stale marking until the thread is quiet and no item is still active. If no
+  final structured update arrives after that quiet point, ThreadFleet keeps the
+  steps visible and marks them stale; it never changes unfinished steps to
+  completed.
 - A completed structured update arriving after terminal state clears the plan.
   A late unfinished update remains visible and stale.
 - Turn start and steer requests include a short `cm.plan-consistency`

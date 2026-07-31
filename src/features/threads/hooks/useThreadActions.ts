@@ -964,6 +964,7 @@ export function useThreadActions({
         sortKey?: ThreadListSortKey;
         maxPages?: number;
         refreshReason?: ThreadListRefreshReason;
+        knownWorkspaces?: WorkspaceInfo[];
       },
     ) => {
       const targets = workspaces.filter((workspace) => workspace.id);
@@ -987,6 +988,7 @@ export function useThreadActions({
       const requestedSortKey = options?.sortKey ?? threadSortKey;
       const maxPages = Math.max(1, options?.maxPages ?? THREAD_LIST_MAX_PAGES_DEFAULT);
       const refreshReason = options?.refreshReason ?? "unknown";
+      const knownWorkspacesFromOptions = options?.knownWorkspaces ?? null;
       const runtimeContext = getThreadListRuntimeContext();
       const { requestId, requestSequence } = beginThreadListRequest(
         requestWorkspaceIds,
@@ -1055,26 +1057,28 @@ export function useThreadActions({
       try {
         const matchingThreadsByWorkspace: Record<string, Record<string, unknown>[]> = {};
         let workspacePathLookup = buildWorkspacePathLookup(targets);
-        let knownWorkspaces: WorkspaceInfo[] = [];
-        let workspaceLookupComplete = false;
-        try {
-          knownWorkspaces = await listWorkspacesService();
-          workspaceLookupComplete = true;
-          if (knownWorkspaces.length > 0) {
-            workspacePathLookup = buildWorkspacePathLookup([
-              ...targets,
-              ...knownWorkspaces,
-            ]);
+        let knownWorkspaces: WorkspaceInfo[] = knownWorkspacesFromOptions ?? [];
+        let workspaceLookupComplete = Boolean(knownWorkspacesFromOptions);
+        if (!knownWorkspacesFromOptions) {
+          try {
+            knownWorkspaces = await listWorkspacesService();
+            workspaceLookupComplete = true;
+          } catch (error) {
+            workspacePathLookup = buildWorkspacePathLookup(targets);
+            onDebug?.({
+              id: `${Date.now()}-client-thread-list-workspace-lookup-error`,
+              timestamp: Date.now(),
+              source: "client",
+              label: "thread/list workspace lookup error",
+              payload: { error: String(error) },
+            });
           }
-        } catch (error) {
-          workspacePathLookup = buildWorkspacePathLookup(targets);
-          onDebug?.({
-            id: `${Date.now()}-client-thread-list-workspace-lookup-error`,
-            timestamp: Date.now(),
-            source: "client",
-            label: "thread/list workspace lookup error",
-            payload: { error: String(error) },
-          });
+        }
+        if (knownWorkspaces.length > 0) {
+          workspacePathLookup = buildWorkspacePathLookup([
+            ...targets,
+            ...knownWorkspaces,
+          ]);
         }
         const uniqueThreadIdsByWorkspace: Record<string, Set<string>> = {};
         const hiddenThreadIdsByWorkspace: Record<string, Set<string>> = {};

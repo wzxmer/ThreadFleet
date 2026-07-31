@@ -325,6 +325,8 @@ export const Composer = memo(function Composer({
   const [text, setText] = useState(draftText);
   const [selectionStart, setSelectionStart] = useState<number | null>(null);
   const [appMentionBindings, setAppMentionBindings] = useState<AppMentionBinding[]>([]);
+  const [headerComposerToolsHost, setHeaderComposerToolsHost] =
+    useState<HTMLElement | null>(null);
   const internalRef = useRef<HTMLTextAreaElement | null>(null);
   const textareaRef = externalTextareaRef ?? internalRef;
   const editorSettings = editorSettingsProp ?? DEFAULT_EDITOR_SETTINGS;
@@ -428,6 +430,17 @@ export const Composer = memo(function Composer({
       });
     },
   });
+
+  useEffect(() => {
+    const syncHeaderComposerToolsHost = () => {
+      setHeaderComposerToolsHost(
+        document.querySelector<HTMLElement>(".main-header-composer-tools"),
+      );
+    };
+    syncHeaderComposerToolsHost();
+    const frame = window.requestAnimationFrame(syncHeaderComposerToolsHost);
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
   useEffect(() => {
     onFileAutocompleteActiveChange?.(fileTriggerActive);
   }, [fileTriggerActive, onFileAutocompleteActiveChange]);
@@ -528,6 +541,7 @@ export const Composer = memo(function Composer({
     disabled,
     onSend,
     recordHistory,
+    references,
     resetHistoryNavigation,
     setComposerText,
     text,
@@ -879,6 +893,7 @@ export const Composer = memo(function Composer({
         </div>
       ) : null}
       <ComposerReferences references={references} onToggle={onToggleReference ?? (() => undefined)} onRemove={onRemoveReference ?? (() => undefined)} onMove={onMoveReference ?? (() => undefined)} />
+      <div className="composer-surface">
       <ComposerInput
         text={text}
         disabled={disabled}
@@ -971,7 +986,9 @@ export const Composer = memo(function Composer({
         autoReconnectPhase={autoReconnectPhase}
         autoReconnectAttempt={autoReconnectAttempt}
         onAutoReconnectChange={onAutoReconnectChange}
+        inputToolsHost={headerComposerToolsHost}
       />
+      </div>
     </footer>
   );
 });

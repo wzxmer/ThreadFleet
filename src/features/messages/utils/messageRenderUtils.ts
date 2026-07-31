@@ -239,7 +239,8 @@ export function normalizeMessageImageSrc(path: string) {
     return path;
   }
   try {
-    return convertFileSrc(path);
+    const normalizedPath = path.replace(/^\/([A-Za-z]:[\\/])/, "$1");
+    return convertFileSrc(normalizedPath);
   } catch {
     return "";
   }

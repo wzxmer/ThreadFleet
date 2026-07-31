@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type { Dispatch, MutableRefObject } from "react";
 import type { RateLimitSnapshot, TurnPlan } from "@/types";
 import { interruptTurn as interruptTurnService } from "@services/tauri";
@@ -42,6 +42,7 @@ type UseThreadTurnEventsOptions = {
   recordThreadActivity: (workspaceId: string, threadId: string, timestamp?: number) => void;
   shouldContinueAfterError?: (threadId: string, turnId: string) => boolean;
   reconcilePlan?: (workspaceId: string, threadId: string) => Promise<void>;
+  executionModelId?: string | null;
 };
 
 function newExecutionId() {
@@ -52,6 +53,7 @@ function newExecutionId() {
 }
 
 const MAX_TRACKED_PLAN_TURNS = 8;
+const TERMINAL_PLAN_STALE_DELAY_MS = 500;
 
 function rememberRecentTurnId(
   store: Record<string, string[]>,
@@ -88,6 +90,7 @@ export function useThreadTurnEvents({
   recordThreadActivity,
   shouldContinueAfterError,
   reconcilePlan,
+  executionModelId,
 }: UseThreadTurnEventsOptions) {
   const immediateActiveTurnIdByThreadRef = useRef<Record<string, string | null>>({});
   const lastReducerActiveTurnIdByThreadRef = useRef<Record<string, string | null>>({});
@@ -98,6 +101,11 @@ export function useThreadTurnEvents({
   const terminalActivityPendingByThreadRef = useRef<Record<string, boolean>>({});
   const terminalPlanTurnIdsByThreadRef = useRef<Record<string, string[]>>({});
   const reconciledPlanTurnIdsByThreadRef = useRef<Record<string, string[]>>({});
+  const terminalPlanActivityAtByThreadRef = useRef<Record<string, number>>({});
+  const activeItemCountByThreadRef = useRef<Record<string, number>>({});
+  const terminalPlanStaleTimersByThreadRef = useRef<
+    Record<string, ReturnType<typeof setTimeout>>
+  >({});
 
   const setPlan = useCallback(
     (threadId: string, plan: TurnPlan | null) => {
@@ -119,6 +127,52 @@ export function useThreadTurnEvents({
       dispatch({ type: "clearThreadPlan", threadId });
     },
     [dispatch, planByThreadRef],
+  );
+
+  const clearTerminalPlanStaleTimer = useCallback((threadId: string) => {
+    const timer = terminalPlanStaleTimersByThreadRef.current[threadId];
+    if (timer) {
+      clearTimeout(timer);
+      delete terminalPlanStaleTimersByThreadRef.current[threadId];
+    }
+  }, []);
+
+  const scheduleTerminalPlanStale = useCallback(
+    (threadId: string, turnId: string) => {
+      if (!turnId) {
+        return;
+      }
+      clearTerminalPlanStaleTimer(threadId);
+      const activityAt = terminalPlanActivityAtByThreadRef.current[threadId] ?? 0;
+      terminalPlanStaleTimersByThreadRef.current[threadId] = setTimeout(() => {
+        if (terminalPlanActivityAtByThreadRef.current[threadId] !== activityAt) {
+          return;
+        }
+        const latestPlan = planByThreadRef.current[threadId];
+        if (
+          !hasRecentTurnId(terminalPlanTurnIdsByThreadRef.current, threadId, turnId) ||
+          !latestPlan ||
+          latestPlan.turnId !== turnId ||
+          latestPlan.steps.length === 0 ||
+          latestPlan.steps.every((step) => step.status === "completed") ||
+          (activeItemCountByThreadRef.current[threadId] ?? 0) > 0
+        ) {
+          return;
+        }
+        setPlan(threadId, { ...latestPlan, syncState: "stale" });
+      }, TERMINAL_PLAN_STALE_DELAY_MS);
+    },
+    [clearTerminalPlanStaleTimer, planByThreadRef, setPlan],
+  );
+
+  useEffect(
+    () => () => {
+      Object.values(terminalPlanStaleTimersByThreadRef.current).forEach((timer) => {
+        clearTimeout(timer);
+      });
+      terminalPlanStaleTimersByThreadRef.current = {};
+    },
+    [],
   );
 
   const getLatestKnownActiveTurnId = useCallback(
@@ -183,6 +237,7 @@ export function useThreadTurnEvents({
       if (!resolvedTurnId) {
         return;
       }
+      terminalPlanActivityAtByThreadRef.current[threadId] = Date.now();
       rememberRecentTurnId(
         terminalPlanTurnIdsByThreadRef.current,
         threadId,
@@ -229,10 +284,49 @@ export function useThreadTurnEvents({
           if (clearCompletedPlan(threadId, resolvedTurnId)) {
             return;
           }
-          setPlan(threadId, { ...latestPlan, syncState: "stale" });
+          scheduleTerminalPlanStale(threadId, resolvedTurnId);
         });
     },
-    [clearCompletedPlan, planByThreadRef, reconcilePlan, setPlan],
+    [clearCompletedPlan, planByThreadRef, reconcilePlan, scheduleTerminalPlanStale, setPlan],
+  );
+
+  const onThreadActivity = useCallback(
+    (
+      _workspaceId: string,
+      threadId: string,
+      activityType: "active" | "started" | "completed" = "active",
+    ) => {
+      if (activityType === "started") {
+        activeItemCountByThreadRef.current[threadId] =
+          (activeItemCountByThreadRef.current[threadId] ?? 0) + 1;
+      } else if (activityType === "completed") {
+        activeItemCountByThreadRef.current[threadId] = Math.max(
+          0,
+          (activeItemCountByThreadRef.current[threadId] ?? 0) - 1,
+        );
+      }
+      const plan = planByThreadRef.current[threadId];
+      if (
+        !plan ||
+        !hasRecentTurnId(
+          terminalPlanTurnIdsByThreadRef.current,
+          threadId,
+          plan.turnId,
+        )
+      ) {
+        return;
+      }
+      terminalPlanActivityAtByThreadRef.current[threadId] = Date.now();
+      if (plan.syncState === "stale" || plan.syncState === "reconciling") {
+        setPlan(threadId, { ...plan, syncState: "live" });
+      }
+      if ((activeItemCountByThreadRef.current[threadId] ?? 0) > 0) {
+        clearTerminalPlanStaleTimer(threadId);
+      } else {
+        scheduleTerminalPlanStale(threadId, plan.turnId);
+      }
+    },
+    [clearTerminalPlanStaleTimer, planByThreadRef, scheduleTerminalPlanStale, setPlan],
   );
 
   const finalizeTerminalTurn = useCallback(
@@ -410,12 +504,14 @@ export function useThreadTurnEvents({
       });
       dispatch({ type: "setThreadTurnDiff", threadId, diff: "" });
       if (turnId) {
+        clearTerminalPlanStaleTimer(threadId);
         dispatch({
           type: "startTurnExecution",
           workspaceId,
           threadId,
           turnId,
           executionId: newExecutionId(),
+          modelId: executionModelId ?? null,
           timestamp,
           continueExecution: continuesExecution,
         });
@@ -447,10 +543,12 @@ export function useThreadTurnEvents({
     },
     [
       dispatch,
+      clearTerminalPlanStaleTimer,
       getActiveTurnId,
       markProcessing,
       pendingInterruptsRef,
       setActiveTurnId,
+      executionModelId,
     ],
   );
 
@@ -632,15 +730,19 @@ export function useThreadTurnEvents({
           nextPlan.steps.length > 0 &&
           nextPlan.steps.every((step) => step.status === "completed")
         ) {
+          clearTerminalPlanStaleTimer(threadId);
           clearPlan(threadId);
           return;
         }
-        setPlan(threadId, { ...nextPlan, syncState: "stale" });
+        terminalPlanActivityAtByThreadRef.current[threadId] = Date.now();
+        setPlan(threadId, { ...nextPlan, syncState: "live" });
+        scheduleTerminalPlanStale(threadId, turnId);
         return;
       }
+      clearTerminalPlanStaleTimer(threadId);
       setPlan(threadId, nextPlan);
     },
-    [clearPlan, dispatch, setPlan],
+    [clearPlan, clearTerminalPlanStaleTimer, dispatch, planByThreadRef, scheduleTerminalPlanStale, setPlan],
   );
 
   const onTurnDiffUpdated = useCallback(
@@ -735,6 +837,7 @@ export function useThreadTurnEvents({
       getLatestKnownActiveTurnId,
       markProcessing,
       markReviewing,
+      pendingInterruptsRef,
       pushThreadErrorMessage,
       safeMessageActivity,
       setActiveTurnId,
@@ -751,6 +854,7 @@ export function useThreadTurnEvents({
     onTurnCompleted,
     onThreadStatusChanged,
     onThreadClosed,
+    onThreadActivity,
     onTurnPlanUpdated,
     onTurnDiffUpdated,
     onThreadTokenUsageUpdated,

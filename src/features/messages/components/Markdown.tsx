@@ -5,6 +5,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type ComponentProps,
   type ComponentPropsWithoutRef,
   type MouseEvent,
   type ReactNode,
@@ -22,6 +23,7 @@ import {
   resolveMessageFileHref,
   toFileLink,
 } from "../utils/messageFileLinks";
+import { normalizeMessageImageSrc } from "../utils/messageRenderUtils";
 import type { ParsedFileLocation } from "../../../utils/fileLinks";
 
 type MarkdownProps = {
@@ -176,7 +178,10 @@ function alignMarkdownTableCells(
   });
 }
 
-const MarkdownTable: NonNullable<Components["table"]> = ({ node, children }) => {
+const MarkdownTable: NonNullable<Components["table"]> = ({
+  node,
+  children,
+}: ComponentProps<"table"> & ExtraProps) => {
   const tableNode = node as MarkdownTableNode;
   const structuredReview = isStructuredReviewTable(tableNode);
   const alignedChildren = alignMarkdownTableCells(
@@ -720,6 +725,13 @@ export function Markdown({
   };
   const components: Components = {
     table: MarkdownTable,
+    img: ({ src, alt }) => {
+      const normalizedSrc = normalizeMessageImageSrc(src ?? "");
+      if (!normalizedSrc) {
+        return null;
+      }
+      return <img src={normalizedSrc} alt={alt ?? ""} loading="lazy" />;
+    },
     a: ({ href, children }) => {
       const url = (href ?? "").trim();
       const threadId = url.startsWith("thread://")

@@ -149,13 +149,18 @@ export function useComposerController({
       delete referenceUndoRef.current[draftKey];
       delete referenceRedoRef.current[draftKey];
     },
-    onMessageRejected: (submittedText, references) => {
+    onMessageRejected: (submittedText, references, images) => {
       if (!draftKey) return;
       const restoredText = stripReferenceText(
         submittedText,
         references.map((reference) => reference.prompt),
       );
       composerDraftsByThreadRef.current[draftKey] = restoredText;
+      setImagesForThread(draftKey, images);
+      setComposerReferencesByDraft((prev) => ({
+        ...prev,
+        [draftKey]: references,
+      }));
       setDraftRevision((revision) => revision + 1);
     },
   });

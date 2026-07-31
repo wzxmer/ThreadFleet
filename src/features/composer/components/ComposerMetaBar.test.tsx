@@ -1,5 +1,5 @@
 /** @vitest-environment jsdom */
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ComposerMetaBar } from "./ComposerMetaBar";
 
@@ -109,7 +109,9 @@ describe("ComposerMetaBar", () => {
     expect(wrapper?.style.getPropertyValue("--composer-control-width")).toBe("153px");
   });
 
-  it("shows full shortcut mappings as hover titles", () => {
+  it("combines input shortcut and trigger mode in one menu", () => {
+    const onSelectComposerSendShortcut = vi.fn();
+    const onSelectComposerTriggerMode = vi.fn();
     render(
       <ComposerMetaBar
         disabled={false}
@@ -127,34 +129,76 @@ describe("ComposerMetaBar", () => {
         accessMode="current"
         onSelectAccessMode={() => {}}
         composerSendShortcut="enter"
-        onSelectComposerSendShortcut={vi.fn()}
+        onSelectComposerSendShortcut={onSelectComposerSendShortcut}
+        composerTriggerMode="default"
+        onSelectComposerTriggerMode={onSelectComposerTriggerMode}
       />,
     );
 
-    const trigger = screen.getByRole("button", { name: "输入快捷键" });
-    expect(trigger.getAttribute("title")).toBe(
-      "发送：Enter；引导：Ctrl+Enter；换行：Shift+Enter",
-    );
+    const trigger = screen.getByRole("button", { name: "输入设置" });
+    expect(trigger.textContent).toContain("输入：聊天 · 默认 / @");
+    expect(trigger.getAttribute("title")).toBe("输入：聊天 · 默认 / @");
 
     fireEvent.click(trigger);
 
-    expect(
-      screen
-        .getByRole("option", { name: "聊天：Enter 发送" })
-        .getAttribute("title"),
-    ).toBe("发送：Enter；引导：Ctrl+Enter；换行：Shift+Enter");
-    expect(
-      screen
-        .getByRole("option", { name: "编辑：Ctrl+Enter 发送" })
-        .getAttribute("title"),
-    ).toBe(
-      "发送：Ctrl+Enter；引导：Shift+Enter；换行：Enter",
+    const chatOption = screen.getByRole("menuitemradio", {
+      name: /聊天：Enter 发送/,
+    });
+    expect(chatOption.getAttribute("title")).toBe(
+      "发送：Enter；引导：Ctrl+Enter；换行：Shift+Enter",
     );
+    expect(chatOption.getAttribute("aria-checked")).toBe("true");
     expect(
       screen
-        .getByRole("option", { name: "引导优先：Enter 引导" })
+        .getByRole("menuitemradio", { name: /编辑：Ctrl\+Enter 发送/ })
+        .getAttribute("title"),
+    ).toBe("发送：Ctrl+Enter；引导：Shift+Enter；换行：Enter");
+    expect(
+      screen
+        .getByRole("menuitemradio", { name: /引导优先：Enter 引导/ })
         .getAttribute("title"),
     ).toBe("发送/引导：Enter；换行：Ctrl+Enter");
+    expect(
+      screen.getByRole("menuitemradio", { name: "默认 / @" }).getAttribute("aria-checked"),
+    ).toBe("true");
+
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "对调 @ /" }));
+    expect(onSelectComposerTriggerMode).toHaveBeenCalledWith("swap-slash-at");
+  });
+
+  it("portals the input settings menu to the main header host", () => {
+    const host = document.createElement("div");
+    host.className = "main-header-composer-tools";
+    document.body.append(host);
+    const view = render(
+      <ComposerMetaBar
+        disabled={false}
+        collaborationModes={[]}
+        selectedCollaborationModeId={null}
+        onSelectCollaborationMode={() => {}}
+        models={[]}
+        selectedModelId={null}
+        onSelectModel={() => {}}
+        reasoningOptions={[]}
+        selectedEffort={null}
+        onSelectEffort={() => {}}
+        selectedServiceTier={null}
+        reasoningSupported={false}
+        accessMode="current"
+        onSelectAccessMode={() => {}}
+        composerSendShortcut="enter"
+        onSelectComposerSendShortcut={vi.fn()}
+        composerTriggerMode="default"
+        onSelectComposerTriggerMode={vi.fn()}
+        inputToolsHost={host}
+      />,
+    );
+
+    const trigger = within(host).getByRole("button", { name: "输入设置" });
+    expect(host.contains(trigger)).toBe(true);
+    expect(view.container.querySelector(".composer-meta-secondary")).toBeNull();
+    view.unmount();
+    host.remove();
   });
 
   it("refreshes models from the model control", () => {

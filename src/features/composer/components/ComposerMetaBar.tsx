@@ -1,5 +1,13 @@
-import { useState, type CSSProperties } from "react";
-import { BrainCog, Link2, RefreshCw, Repeat2, SlidersHorizontal, Zap } from "lucide-react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
+import {
+  BrainCog,
+  ChevronDown,
+  Link2,
+  RefreshCw,
+  SlidersHorizontal,
+  Zap,
+} from "lucide-react";
 import { RoundedSelect } from "@/features/design-system/components/select/RoundedSelect";
 import { useI18n } from "@/features/i18n/I18nProvider";
 import { formatReasoningEffortLabel } from "@/features/models/utils/reasoningEffortLabels";
@@ -44,13 +52,17 @@ type ComposerMetaBarProps = {
   selectedWorkflowGateId?: string | null;
   onSelectWorkflowGateId?: (workflowId: string | null) => void;
   onVerifyWorkflowGate?: (workflowId: string) => Promise<WorkflowGateAdapterStatus>;
+  inputToolsHost?: HTMLElement | null;
 };
 
 const formatComposerModelLabel = (label: string) =>
   label.replace(/\s+\(config\)$/i, "");
 
 const estimateLabelWidth = (label: string) =>
-  [...label].reduce((width, character) => width + (/^[\x00-\x7F]$/.test(character) ? 7 : 12), 0);
+  [...label].reduce(
+    (width, character) => width + ((character.codePointAt(0) ?? 0) <= 0x7f ? 7 : 12),
+    0,
+  );
 
 const getControlWidthStyle = (
   label: string,
@@ -103,9 +115,12 @@ export function ComposerMetaBar({
   selectedWorkflowGateId = null,
   onSelectWorkflowGateId,
   onVerifyWorkflowGate,
+  inputToolsHost = null,
 }: ComposerMetaBarProps) {
   const { t } = useI18n();
   const [workflowGatePromptOpen, setWorkflowGatePromptOpen] = useState(false);
+  const [inputMenuOpen, setInputMenuOpen] = useState(false);
+  const inputMenuRef = useRef<HTMLDivElement | null>(null);
   const workflowGateLabel = selectedWorkflowGateId
     ? t("composer.workflowGate.boundLabel").replace("{workflowId}", selectedWorkflowGateId)
     : t("composer.workflowGate.open");
@@ -150,31 +165,188 @@ export function ComposerMetaBar({
   const sendShortcutOptions: Array<{
     value: ComposerSendShortcut;
     label: string;
+    summaryLabel: string;
     title: string;
   }> = [
     {
       value: "enter",
       label: t("composer.shortcut.chat"),
+      summaryLabel: t("composer.shortcut.chatShort"),
       title: t("composer.shortcut.chatTooltip"),
     },
     {
       value: "ctrl-enter",
       label: t("composer.shortcut.editor"),
+      summaryLabel: t("composer.shortcut.editorShort"),
       title: t("composer.shortcut.editorTooltip"),
     },
     {
       value: "steer-priority",
       label: t("composer.shortcut.steerPriority"),
+      summaryLabel: t("composer.shortcut.steerPriorityShort"),
       title: t("composer.shortcut.steerPriorityTooltip"),
     },
   ];
-  const triggerModeOptions: Array<{ value: ComposerTriggerMode; label: string }> = [
-    { value: "default", label: t("composer.trigger.default") },
-    { value: "swap-slash-at", label: t("composer.trigger.swap") },
+  const triggerModeOptions: Array<{
+    value: ComposerTriggerMode;
+    label: string;
+    summaryLabel: string;
+  }> = [
+    {
+      value: "default",
+      label: t("composer.trigger.default"),
+      summaryLabel: t("composer.trigger.defaultShort"),
+    },
+    {
+      value: "swap-slash-at",
+      label: t("composer.trigger.swap"),
+      summaryLabel: t("composer.trigger.swapShort"),
+    },
   ];
+  const selectedSendShortcut =
+    composerSendShortcut === "enter-and-ctrl-enter"
+      ? "enter"
+      : composerSendShortcut;
+  const inputSummary = t("composer.inputSummary")
+    .replace(
+      "{shortcut}",
+      sendShortcutOptions.find((option) => option.value === selectedSendShortcut)
+        ?.summaryLabel ?? "",
+    )
+    .replace(
+      "{trigger}",
+      triggerModeOptions.find((option) => option.value === composerTriggerMode)
+        ?.summaryLabel ?? "",
+    );
+  const hasInputSettings =
+    Boolean(onSelectComposerSendShortcut) || Boolean(onSelectComposerTriggerMode);
+  const hasSecondaryControls =
+    Boolean(onSelectWorkflowGateId && onVerifyWorkflowGate) || Boolean(onAutoReconnectChange);
+
+  useEffect(() => {
+    if (!inputMenuOpen) {
+      return undefined;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (inputMenuRef.current?.contains(event.target as Node)) {
+        return;
+      }
+      setInputMenuOpen(false);
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [inputMenuOpen]);
+
+  const inputSettingsNode = hasInputSettings ? (
+    <div
+      className={`composer-input-settings${inputToolsHost ? " is-header" : ""}`}
+      ref={inputMenuRef}
+    >
+      <button
+        type="button"
+        className="composer-input-settings-trigger"
+        data-button-elevation="none"
+        disabled={disabled}
+        aria-label={t("composer.inputSettings")}
+        aria-haspopup="menu"
+        aria-expanded={inputMenuOpen}
+        title={inputSummary}
+        onClick={() => setInputMenuOpen((current) => !current)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            setInputMenuOpen(false);
+          }
+        }}
+      >
+        <span className="composer-input-settings-label">{inputSummary}</span>
+        <ChevronDown size={13} strokeWidth={1.8} aria-hidden />
+      </button>
+      {inputMenuOpen && !disabled && (
+        <div
+          className="composer-input-settings-popover"
+          role="menu"
+          aria-label={t("composer.inputSettings")}
+        >
+          {onSelectComposerSendShortcut && (
+            <div
+              className="composer-input-settings-section"
+              role="group"
+              aria-label={t("composer.inputShortcutSection")}
+            >
+              <div className="composer-input-settings-heading">
+                {t("composer.inputShortcutSection")}
+              </div>
+              {sendShortcutOptions.map((option) => {
+                const selected = option.value === selectedSendShortcut;
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={`composer-input-settings-option${
+                      selected ? " is-selected" : ""
+                    }`}
+                    data-button-elevation="none"
+                    role="menuitemradio"
+                    aria-checked={selected}
+                    title={option.title}
+                    onClick={() => {
+                      onSelectComposerSendShortcut(option.value);
+                      setInputMenuOpen(false);
+                    }}
+                  >
+                    <span>{option.label}</span>
+                    <span className="composer-input-settings-option-hint">
+                      {option.title}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {onSelectComposerTriggerMode && (
+            <div
+              className="composer-input-settings-section"
+              role="group"
+              aria-label={t("composer.inputTriggerSection")}
+            >
+              <div className="composer-input-settings-heading">
+                {t("composer.inputTriggerSection")}
+              </div>
+              {triggerModeOptions.map((option) => {
+                const selected = option.value === composerTriggerMode;
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={`composer-input-settings-option${
+                      selected ? " is-selected" : ""
+                    }`}
+                    data-button-elevation="none"
+                    role="menuitemradio"
+                    aria-checked={selected}
+                    onClick={() => {
+                      onSelectComposerTriggerMode(option.value);
+                      setInputMenuOpen(false);
+                    }}
+                  >
+                    <span>{option.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  ) : null;
 
   return (
     <div className="composer-bar">
+      {inputToolsHost && inputSettingsNode
+        ? createPortal(inputSettingsNode, inputToolsHost)
+        : null}
       <div className="composer-meta">
         <div className="composer-meta-primary">
         {collaborationModes.length > 0 && (
@@ -389,80 +561,9 @@ export function ComposerMetaBar({
           />
         </div>
         </div>
+        {(hasSecondaryControls || (!inputToolsHost && inputSettingsNode)) && (
         <div className="composer-meta-secondary">
-        {onSelectComposerSendShortcut && (
-          <div
-            className="composer-select-wrap composer-select-wrap--shortcut"
-            style={getControlWidthStyle(
-              getSelectedLabel(
-                sendShortcutOptions,
-                composerSendShortcut === "enter-and-ctrl-enter"
-                  ? "enter"
-                  : composerSendShortcut,
-              ),
-              64,
-              112,
-              220,
-            )}
-          >
-            <span className="composer-icon" aria-hidden>
-              <svg viewBox="0 0 24 24" fill="none">
-                <path
-                  d="M7 7h10M7 12h7M7 17h4"
-                  stroke="currentColor"
-                  strokeWidth="1.4"
-                  strokeLinecap="round"
-                />
-                <path
-                  d="M16 14l3 3-3 3"
-                  stroke="currentColor"
-                  strokeWidth="1.4"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </span>
-            <RoundedSelect
-              className="composer-select composer-select--shortcut"
-              ariaLabel={t("composer.sendShortcut")}
-              disabled={disabled}
-              value={
-                composerSendShortcut === "enter-and-ctrl-enter"
-                  ? "enter"
-                  : composerSendShortcut
-              }
-              options={sendShortcutOptions}
-              onChange={(nextValue) =>
-                onSelectComposerSendShortcut(nextValue as ComposerSendShortcut)
-              }
-            />
-          </div>
-        )}
-        {onSelectComposerTriggerMode && (
-          <div
-            className="composer-select-wrap composer-select-wrap--trigger"
-            style={getControlWidthStyle(
-              getSelectedLabel(triggerModeOptions, composerTriggerMode),
-              64,
-              84,
-              180,
-            )}
-          >
-            <span className="composer-icon" aria-hidden>
-              <Repeat2 size={14} strokeWidth={1.8} />
-            </span>
-            <RoundedSelect
-              className="composer-select composer-select--shortcut"
-              ariaLabel={t("composer.triggerMode")}
-              disabled={disabled}
-              value={composerTriggerMode}
-              options={triggerModeOptions}
-              onChange={(nextValue) =>
-                onSelectComposerTriggerMode(nextValue as ComposerTriggerMode)
-              }
-            />
-          </div>
-        )}
+        {!inputToolsHost ? inputSettingsNode : null}
         {onSelectWorkflowGateId && onVerifyWorkflowGate && (
           <button
             type="button"
@@ -504,6 +605,7 @@ export function ComposerMetaBar({
           </label>
         ) : null}
         </div>
+        )}
       </div>
       {workflowGatePromptOpen && onSelectWorkflowGateId && onVerifyWorkflowGate && (
         <WorkflowGateBindingPrompt

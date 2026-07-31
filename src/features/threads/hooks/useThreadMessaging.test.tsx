@@ -707,25 +707,6 @@ describe("useThreadMessaging telemetry", () => {
         customPrompts: [],
         threadStatusById: {},
         activeTurnIdByThread: {},
-        tokenUsageByThread: {
-          "thread-1": {
-            total: {
-              totalTokens: 1000,
-              inputTokens: 1000,
-              cachedInputTokens: 0,
-              outputTokens: 0,
-              reasoningOutputTokens: 0,
-            },
-            last: {
-              totalTokens: 0,
-              inputTokens: 0,
-              cachedInputTokens: 0,
-              outputTokens: 0,
-              reasoningOutputTokens: 0,
-            },
-            modelContextWindow: 1000,
-          },
-        },
         rateLimitsByWorkspace: {},
         pendingInterruptsRef: { current: new Set<string>() },
         dispatch: vi.fn(),
@@ -834,7 +815,7 @@ describe("useThreadMessaging telemetry", () => {
   });
 
   it("reuses the computer-control decision id when steering the same active turn", async () => {
-    const renderMessaging = (active: boolean) =>
+    const useMessaging = (active: boolean) =>
       useThreadMessaging({
         activeWorkspace: workspace,
         activeThreadId: "thread-1",
@@ -875,7 +856,7 @@ describe("useThreadMessaging telemetry", () => {
         updateThreadParent: vi.fn(),
       });
     const { result, rerender } = renderHook(
-      ({ active }) => renderMessaging(active),
+      ({ active }) => useMessaging(active),
       { initialProps: { active: false } },
     );
 
@@ -2019,6 +2000,78 @@ describe("useThreadMessaging telemetry", () => {
           attachments: ["/tmp/workspace/docs/notes.md"],
         }),
       }),
+    );
+  });
+
+  it("inlines UTF-8 TSV workspace text attachments before sending", async () => {
+    const dispatch = vi.fn();
+    const tsvContent = [
+      "20260731004453694\treplace\t过窄\tglfh\t+",
+      "20260731004453694\tmove\t国债\tglfhi\t-",
+      "20260731004453694\tdelete\t国债\tglfh\t!",
+    ].join("\n");
+    vi.mocked(readWorkspaceFile).mockResolvedValueOnce({
+      content: tsvContent,
+      truncated: false,
+    });
+    const { result } = renderHook(() =>
+      useThreadMessaging({
+        activeWorkspace: workspace,
+        activeThreadId: "thread-1",
+        accessMode: "current",
+        model: null,
+        effort: null,
+        collaborationMode: null,
+        reviewDeliveryMode: "inline",
+        steerEnabled: false,
+        customPrompts: [],
+        threadStatusById: {},
+        activeTurnIdByThread: {},
+        rateLimitsByWorkspace: {},
+        pendingInterruptsRef: { current: new Set<string>() },
+        dispatch,
+        getCustomName: vi.fn(() => undefined),
+        markProcessing: vi.fn(),
+        markReviewing: vi.fn(),
+        setActiveTurnId: vi.fn(),
+        recordThreadActivity: vi.fn(),
+        safeMessageActivity: vi.fn(),
+        onDebug: vi.fn(),
+        pushThreadErrorMessage: vi.fn(),
+        ensureThreadForActiveWorkspace: vi.fn(async () => "thread-1"),
+        ensureThreadForWorkspace: vi.fn(async () => "thread-1"),
+        refreshThread: vi.fn(async () => null),
+        forkThreadForWorkspace: vi.fn(async () => null),
+        updateThreadParent: vi.fn(),
+      }),
+    );
+
+    await act(async () => {
+      await result.current.sendUserMessageToThread(
+        workspace,
+        "thread-1",
+        "please inspect ops",
+        ["/tmp/workspace/zzc_state/runtime_ops.tsv"],
+      );
+    });
+
+    expect(readWorkspaceFile).toHaveBeenCalledWith(
+      "ws-1",
+      "zzc_state/runtime_ops.tsv",
+    );
+    expect(sendUserMessageService).toHaveBeenCalledWith(
+      "ws-1",
+      "thread-1",
+      expect.stringContaining(
+        '<attached_file path="zzc_state/runtime_ops.tsv" name="runtime_ops.tsv">',
+      ),
+      expect.objectContaining({ images: [] }),
+    );
+    expect(sendUserMessageService).toHaveBeenCalledWith(
+      "ws-1",
+      "thread-1",
+      expect.stringContaining("20260731004453694\treplace\t过窄\tglfh\t+"),
+      expect.objectContaining({ images: [] }),
     );
   });
 

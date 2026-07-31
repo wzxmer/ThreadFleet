@@ -211,6 +211,7 @@ export type ThreadAction =
       threadId: string;
       turnId: string;
       executionId: string;
+      modelId?: string | null;
       timestamp: number;
       continueExecution: boolean;
     }
