@@ -7,10 +7,10 @@
   background: var(--conversation-canvas);
   --conversation-canvas: var(--surface-messages);
   --conversation-user-color: var(--cm-surface-panel-active);
-  --conversation-user-text: #000;
+  --conversation-user-text: #dfe5ea;
   --conversation-assistant-bg: var(--cm-surface-panel-strong);
   --conversation-assistant-accent: var(--border-accent-soft);
-  --conversation-assistant-text: #000;
+  --conversation-assistant-text: #dfe5ea;
   --conversation-assistant-card-bg: color-mix(
     in srgb,
     var(--conversation-assistant-bg) 92%,
@@ -33,6 +33,8 @@
 
 :root:not([data-theme]) .messages-view,
 :root[data-theme="light"] .messages-view {
+  --conversation-user-text: #37414b;
+  --conversation-assistant-text: #37414b;
   --messages-solid-main: var(--cm-light-main-bg);
   --messages-solid-panel: var(--cm-light-panel-bg);
   --messages-solid-control: var(--cm-light-control-bg);
@@ -50,10 +52,10 @@
 .app:is(.layout-desktop, .layout-compact):not(.layout-phone) .messages-view {
   --conversation-canvas: #101419;
   --conversation-user-color: rgba(105, 174, 240, 0.14);
-  --conversation-user-text: #000;
+  --conversation-user-text: #dfe5ea;
   --conversation-assistant-bg: #151a1f;
   --conversation-assistant-accent: rgba(104, 208, 173, 0.24);
-  --conversation-assistant-text: #000;
+  --conversation-assistant-text: #dfe5ea;
   --messages-solid-main: #101419;
   --messages-solid-panel: #151a1f;
   --messages-solid-control: #20262c;
@@ -147,7 +149,7 @@
   .messages-view {
   --conversation-canvas: var(--cm-light-main-bg);
   --conversation-user-color: var(--cm-light-panel-bg);
-  --conversation-user-text: #000;
+  --conversation-user-text: #37414b;
   --conversation-assistant-bg: color-mix(
     in srgb,
     var(--cm-light-panel-bg) 94%,
@@ -158,7 +160,7 @@
     var(--cm-light-accent) 24%,
     transparent
   );
-  --conversation-assistant-text: #000;
+  --conversation-assistant-text: #37414b;
   --conversation-assistant-card-bg: color-mix(
     in srgb,
     var(--cm-light-panel-bg) 96%,

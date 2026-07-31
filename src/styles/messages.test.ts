@@ -205,10 +205,13 @@ describe("message tool group interaction styles", () => {
 
   it("gives native conversations a readable assistant stream and timed user cards", () => {
     expect(messagesCss).toMatch(
-      /\.messages-view\s*\{[^}]*--conversation-user-text:\s*#000;[^}]*--conversation-assistant-text:\s*#000;/s,
+      /\.messages-view\s*\{[^}]*--conversation-user-text:\s*#dfe5ea;[^}]*--conversation-assistant-text:\s*#dfe5ea;/s,
     );
     expect(messagesCss).toMatch(
-      /\.app:is\(\.layout-desktop, \.layout-compact\):not\(\.layout-phone\) \.messages-view\s*\{[^}]*--conversation-user-text:\s*#000;[^}]*--conversation-assistant-text:\s*#000;/s,
+      /\.app:is\(\.layout-desktop, \.layout-compact\):not\(\.layout-phone\) \.messages-view\s*\{[^}]*--conversation-user-text:\s*#dfe5ea;[^}]*--conversation-assistant-text:\s*#dfe5ea;/s,
+    );
+    expect(messagesCss).toMatch(
+      /:root:not\(\[data-theme\]\) \.messages-view,\s*:root\[data-theme="light"\] \.messages-view\s*\{[^}]*--conversation-user-text:\s*#37414b;[^}]*--conversation-assistant-text:\s*#37414b;/s,
     );
     expect(messagesCss).toMatch(
       /\.messages-reading-native \.messages-inner\s*\{[^}]*max-width:\s*min\(100%, var\(--conversation-reading-width, 860px\)\);[^}]*gap:\s*22px;/s,
