@@ -28,5 +28,8 @@ describe("PanelTabs", () => {
       expect(tabs[2].getAttribute("aria-selected")).toBe("true");
       expect(document.activeElement).toBe(tabs[2]);
     });
+
+    expect(tabs.every((tab) => tab.getAttribute("data-button-elevation") === "none"))
+      .toBe(true);
   });
 });

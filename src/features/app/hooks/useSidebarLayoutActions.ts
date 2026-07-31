@@ -113,6 +113,9 @@ export function useSidebarLayoutActions({
   const onSelectThread = useCallback(
     (workspaceId: string, threadId: string) => {
       if (workspaceId === activeWorkspaceId && threadId === activeThreadId) {
+        if (isCompact) {
+          setActiveTab("codex");
+        }
         return;
       }
       exitDiffView();
@@ -120,14 +123,19 @@ export function useSidebarLayoutActions({
       clearDraftState();
       selectWorkspace(workspaceId);
       setActiveThreadId(threadId, workspaceId);
+      if (isCompact) {
+        setActiveTab("codex");
+      }
     },
     [
       activeThreadId,
       activeWorkspaceId,
       clearDraftState,
       exitDiffView,
+      isCompact,
       resetPullRequestSelection,
       selectWorkspace,
+      setActiveTab,
       setActiveThreadId,
     ],
   );

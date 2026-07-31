@@ -3,13 +3,19 @@ import type { MouseEvent, ReactNode } from "react";
 import { DesktopLayout } from "../../layout/components/DesktopLayout";
 import { TabletLayout } from "../../layout/components/TabletLayout";
 import { PhoneLayout } from "../../layout/components/PhoneLayout";
+import type { ActivePanel } from "../../layout/components/panelTypes";
+export type { ActivePanel } from "../../layout/components/panelTypes";
+
 type AppLayoutProps = {
   isPhone: boolean;
   isTablet: boolean;
+  activePanel: ActivePanel;
+  libraryOpen: boolean;
   showHome: boolean;
   showGitDetail: boolean;
   activeTab: "home" | "projects" | "codex" | "git" | "log";
   tabletTab: "codex" | "git" | "log";
+  tabletProjectsOpen: boolean;
   centerMode: "chat" | "diff";
   preloadGitDiffs: boolean;
   splitChatDiffView: boolean;
@@ -33,6 +39,8 @@ type AppLayoutProps = {
   debugPanelNode: ReactNode;
   debugPanelFullNode: ReactNode;
   terminalDockNode: ReactNode;
+  settingsOpen: boolean;
+  settingsNode: ReactNode;
   compactEmptyCodexNode: ReactNode;
   compactEmptyGitNode: ReactNode;
   compactGitBackNode: ReactNode;
@@ -45,10 +53,13 @@ type AppLayoutProps = {
 export const AppLayout = memo(function AppLayout({
   isPhone,
   isTablet,
+  activePanel,
+  libraryOpen,
   showHome,
   showGitDetail,
   activeTab,
   tabletTab,
+  tabletProjectsOpen,
   centerMode,
   preloadGitDiffs,
   splitChatDiffView,
@@ -72,6 +83,8 @@ export const AppLayout = memo(function AppLayout({
   debugPanelNode,
   debugPanelFullNode,
   terminalDockNode,
+  settingsOpen,
+  settingsNode,
   compactEmptyCodexNode,
   compactEmptyGitNode,
   compactGitBackNode,
@@ -86,6 +99,8 @@ export const AppLayout = memo(function AppLayout({
         approvalToastsNode={approvalToastsNode}
         updateToastNode={updateToastNode}
         errorToastsNode={errorToastsNode}
+        settingsOpen={settingsOpen}
+        settingsNode={settingsNode}
         tabBarNode={tabBarNode}
         homeNode={homeNode}
         sidebarNode={sidebarNode}
@@ -113,9 +128,14 @@ export const AppLayout = memo(function AppLayout({
         approvalToastsNode={approvalToastsNode}
         updateToastNode={updateToastNode}
         errorToastsNode={errorToastsNode}
+        settingsOpen={settingsOpen}
+        settingsNode={settingsNode}
+        activePanel={activePanel}
+        libraryOpen={libraryOpen}
         homeNode={homeNode}
         showHome={showHome}
         showWorkspace={activeWorkspace && !showHome}
+        showProjects={tabletProjectsOpen}
         sidebarNode={sidebarNode}
         tabletTab={tabletTab}
         onSidebarResizeStart={onSidebarResizeStart}
@@ -125,6 +145,8 @@ export const AppLayout = memo(function AppLayout({
         composerNode={composerNode}
         gitDiffPanelNode={gitDiffPanelNode}
         gitDiffViewerNode={gitDiffViewerNode}
+        compactEmptyCodexNode={compactEmptyCodexNode}
+        terminalDockNode={terminalDockNode}
         debugPanelNode={debugPanelFullNode}
       />
     );
@@ -132,12 +154,14 @@ export const AppLayout = memo(function AppLayout({
 
   return (
     <DesktopLayout
+      tabletNavNode={tabletNavNode}
       sidebarNode={sidebarNode}
       updateToastNode={updateToastNode}
       approvalToastsNode={approvalToastsNode}
       errorToastsNode={errorToastsNode}
+      activePanel={activePanel}
+      libraryOpen={libraryOpen}
       homeNode={homeNode}
-      showHome={showHome}
       showWorkspace={activeWorkspace && !showHome}
       topbarLeftNode={desktopTopbarLeftNode}
       topbarActionsNode={topbarActionsNode}
@@ -150,7 +174,12 @@ export const AppLayout = memo(function AppLayout({
       planPanelNode={planPanelNode}
       composerNode={composerNode}
       terminalDockNode={terminalDockNode}
+      settingsOpen={settingsOpen}
+      settingsNode={settingsNode}
       debugPanelNode={debugPanelNode}
+      debugPanelFullNode={debugPanelFullNode}
+      compactEmptyCodexNode={compactEmptyCodexNode}
+      compactEmptyGitNode={compactEmptyGitNode}
       hasActivePlan={hasActivePlan}
       onSidebarResizeStart={onSidebarResizeStart}
       onChatDiffSplitPositionResizeStart={onChatDiffSplitPositionResizeStart}

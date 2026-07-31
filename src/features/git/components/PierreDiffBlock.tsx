@@ -25,8 +25,6 @@ type PierreDiffBlockProps = {
 export function PierreDiffBlock({
   diff,
   displayPath,
-  oldLines,
-  newLines,
   diffStyle = "unified",
 }: PierreDiffBlockProps) {
   const poolOptions = useMemo(() => ({ workerFactory }), []);
@@ -53,10 +51,8 @@ export function PierreDiffBlock({
       ...parsed,
       name: normalizedName,
       prevName: normalizedPrevName,
-      oldLines,
-      newLines,
     } satisfies FileDiffMetadata;
-  }, [diff, displayPath, oldLines, newLines]);
+  }, [diff, displayPath]);
 
   const parsedLines = useMemo(() => {
     const parsed = parseDiff(diff);

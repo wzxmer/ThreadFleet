@@ -8,7 +8,6 @@ describe("useCodeCssVars", () => {
   it("applies the selected CJK font globally and ignores legacy message font overrides", () => {
     const settings = {
       appLanguage: "zh",
-      themeAccent: "codex",
       uiFontFamily: "system-ui, sans-serif",
       uiLatinFontFamily: '"Segoe UI", system-ui, sans-serif',
       uiCjkFontFamily: '"LXGW WenKai Screen", sans-serif',

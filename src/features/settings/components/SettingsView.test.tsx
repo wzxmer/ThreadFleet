@@ -19,6 +19,7 @@ import {
   getCodexStatus,
   getConfigModel,
   getExperimentalFeatureList,
+  getWindowsInstallerMigrationCapability,
   getProviderModels,
   isMobileRuntime,
   getModelList,
@@ -51,6 +52,7 @@ vi.mock("@services/tauri", async () => {
     getModelList: vi.fn(),
     getConfigModel: vi.fn(),
     getExperimentalFeatureList: vi.fn(),
+    getWindowsInstallerMigrationCapability: vi.fn(),
     getProviderModels: vi.fn(),
     getAgentsSettings: vi.fn(),
     getCodexStatus: vi.fn(),
@@ -68,6 +70,9 @@ const getAppBuildTypeMock = vi.mocked(getAppBuildType);
 const getConfigModelMock = vi.mocked(getConfigModel);
 const getModelListMock = vi.mocked(getModelList);
 const getExperimentalFeatureListMock = vi.mocked(getExperimentalFeatureList);
+const getWindowsInstallerMigrationCapabilityMock = vi.mocked(
+  getWindowsInstallerMigrationCapability,
+);
 const getProviderModelsMock = vi.mocked(getProviderModels);
 const getAgentsSettingsMock = vi.mocked(getAgentsSettings);
 const getCodexStatusMock = vi.mocked(getCodexStatus);
@@ -80,6 +85,11 @@ const windowsInstallerKindMock = vi.mocked(windowsInstallerKind);
 const openUrlMock = vi.mocked(openUrl);
 connectWorkspaceMock.mockResolvedValue(undefined);
 getAppBuildTypeMock.mockResolvedValue("release");
+getWindowsInstallerMigrationCapabilityMock.mockResolvedValue({
+  platformSupported: true,
+  runtimeEnabled: false,
+  remoteExecutionAllowed: false,
+});
 getConfigModelMock.mockResolvedValue(null);
 isMobileRuntimeMock.mockResolvedValue(false);
 listWorkspacesMock.mockResolvedValue([]);
@@ -164,19 +174,18 @@ const baseSettings: AppSettings = {
   lastComposerReasoningEffort: null,
   uiScale: 1,
   appLanguage: "system",
-  theme: "system",
-  themeAccent: "codex",
+  theme: "light",
   showCodexUsage: true,
   usageShowRemaining: false,
   showMessageFilePath: true,
   messageToolGroupsCollapsedByDefault: false,
   messageReadingStyle: "bubble",
-  messageCanvasColor: "#eef1f6",
-  messageUserBubbleColor: "#d9ebff",
-  messageUserTextColor: "#102033",
-  messageAssistantBubbleColor: "#f7f9fc",
-  messageAssistantAccentColor: "#8aa8d8",
-  messageAssistantTextColor: "#263040",
+  messageCanvasColor: "#f6f8fa",
+  messageUserBubbleColor: "#ffffff",
+  messageUserTextColor: "#0f1720",
+  messageAssistantBubbleColor: "#ffffff",
+  messageAssistantAccentColor: "#127e66",
+  messageAssistantTextColor: "#233141",
   chatHistoryScrollbackItems: 200,
   threadTitleAutogenerationEnabled: false,
   autoArchiveThreadsEnabled: false,
@@ -184,6 +193,7 @@ const baseSettings: AppSettings = {
   autoDeleteArchivedThreadsEnabled: false,
   autoDeleteArchivedThreadsDays: 30,
   automaticAppUpdateChecksEnabled: true,
+  experimentalWindowsInstallerMigrationEnabled: false,
   uiFontFamily:
     'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
   uiLatinFontFamily:
@@ -415,6 +425,7 @@ const renderAboutSection = (
     onToggleAutomaticAppUpdateChecks?: ComponentProps<
       typeof SettingsView
     >["onToggleAutomaticAppUpdateChecks"];
+    updater?: Partial<NonNullable<ComponentProps<typeof SettingsView>["updater"]>>;
   } = {},
 ) => {
   cleanup();
@@ -422,6 +433,14 @@ const renderAboutSection = (
     options.onUpdateAppSettings ?? vi.fn().mockResolvedValue(undefined);
   const onToggleAutomaticAppUpdateChecks =
     options.onToggleAutomaticAppUpdateChecks ?? vi.fn();
+  const updater = {
+    enabled: true,
+    state: { stage: "idle" as const },
+    checkForUpdates: vi.fn(),
+    startUpdate: vi.fn(),
+    dismiss: vi.fn(),
+    ...options.updater,
+  };
   const props: ComponentProps<typeof SettingsView> = {
     reduceTransparency: false,
     onToggleTransparency: vi.fn(),
@@ -429,6 +448,7 @@ const renderAboutSection = (
     openAppIconById: {},
     onUpdateAppSettings,
     onToggleAutomaticAppUpdateChecks,
+    updater,
     workspaceGroups: [],
     groupedWorkspaces: [],
     ungroupedLabel: "Ungrouped",
@@ -455,7 +475,7 @@ const renderAboutSection = (
   render(<SettingsView {...props} />);
   fireEvent.click(screen.getByRole("button", { name: "关于" }));
 
-  return { onUpdateAppSettings, onToggleAutomaticAppUpdateChecks };
+  return { onUpdateAppSettings, onToggleAutomaticAppUpdateChecks, updater };
 };
 
 const renderFeaturesSection = (
@@ -665,6 +685,25 @@ describe("SettingsView About", () => {
 });
 
 describe("SettingsView Display", () => {
+  it("groups navigation by task domain without hiding settings", () => {
+    renderDisplaySection();
+
+    const workspaceGroup = screen.getByRole("region", { name: "工作区" });
+    const experienceGroup = screen.getByRole("region", { name: "使用体验" });
+    const developmentGroup = screen.getByRole("region", { name: "开发" });
+    const applicationGroup = screen.getByRole("region", { name: "应用" });
+
+    expect(within(workspaceGroup).getByRole("button", { name: "项目" })).toBeTruthy();
+    expect(within(experienceGroup).getByRole("button", { name: "显示与通知" })).toBeTruthy();
+    expect(within(developmentGroup).getByRole("button", { name: "命令执行" })).toBeTruthy();
+    expect(within(applicationGroup).getByRole("button", { name: "关于" })).toBeTruthy();
+
+    const navigationButtons = screen.getAllByRole("button").filter((button) =>
+      button.classList.contains("settings-nav"),
+    );
+    expect(navigationButtons.every((button) => button.dataset.buttonElevation === "none")).toBe(true);
+  });
+
   it("opens the session section from the settings navigation", async () => {
     renderDisplaySection();
 
@@ -1013,51 +1052,23 @@ describe("SettingsView About", () => {
     });
   });
 
-  it("shows an up-to-date message after checking app updates", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        tag_name: `v${__APP_VERSION__}`,
-        html_url: `https://github.com/wzxmer/ThreadFleet/releases/tag/v${__APP_VERSION__}`,
-        assets: [],
-      }),
-    } as Response);
-    vi.stubGlobal("fetch", fetchMock);
-    renderAboutSection();
-
-    await waitFor(() => {
-      expect(
-        (screen.getByRole("button", { name: "检查更新" }) as HTMLButtonElement)
-          .disabled,
-      ).toBe(false);
-    });
-
+  it("delegates app update checks to the shared updater owner", () => {
+    const checkForUpdates = vi.fn();
+    renderAboutSection({ updater: { checkForUpdates } });
     fireEvent.click(screen.getByRole("button", { name: "检查更新" }));
-
-    expect(await screen.findByText("已经是最新版本！")).toBeTruthy();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(checkForUpdates).toHaveBeenCalledTimes(1);
   });
 
-  it("shows the mixed-installer safety block without requesting release data", async () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-    windowsInstallerKindMock.mockResolvedValueOnce("mixed");
-    renderAboutSection();
-
-    await waitFor(() => {
-      expect(
-        (screen.getByRole("button", { name: "检查更新" }) as HTMLButtonElement)
-          .disabled,
-      ).toBe(false);
+  it("shows the mixed-installer safety block from shared updater state", async () => {
+    renderAboutSection({
+      updater: {
+        state: { stage: "error", errorCode: "mixedInstaller" },
+      },
     });
-
-    fireEvent.click(screen.getByRole("button", { name: "检查更新" }));
 
     expect(
       await screen.findByText(/检测到 MSI 与 EXE 安装记录并存/),
     ).toBeTruthy();
-    expect(fetchMock).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "查看修复" }));
     expect(
@@ -1065,6 +1076,26 @@ describe("SettingsView About", () => {
     ).toBeTruthy();
     expect(await screen.findByText(/无法验证的旧 \.lnk 快捷方式/)).toBeTruthy();
     expect(previewWindowsInstallerRepairMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders and dismisses migration UI from the shared updater owner", async () => {
+    const dismiss = vi.fn();
+    renderAboutSection({
+      updater: {
+        state: {
+          stage: "migrationReady",
+          version: "9.9.9",
+          migrationRecovery: true,
+        },
+        dismiss,
+      },
+    });
+
+    const dialog = await screen.findByRole("dialog", {
+      name: "迁移 Windows 安装器",
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "关闭" }));
+    expect(dismiss).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -1820,6 +1851,26 @@ describe("SettingsView Codex defaults", () => {
       ).length,
     ).toBeGreaterThan(0);
     expect(screen.queryByPlaceholderText(/倍率/)).toBeNull();
+  });
+
+  it("persists explicit opt-in for experimental Windows installer migration", async () => {
+    const onUpdateAppSettings = vi.fn().mockResolvedValue(undefined);
+    renderAboutSection({
+      onUpdateAppSettings,
+      appSettings: { experimentalWindowsInstallerMigrationEnabled: false },
+    });
+
+    const row = screen
+      .getByText("实验性 Windows 安装器迁移")
+      .closest(".settings-toggle-row") as HTMLElement | null;
+    if (!row) throw new Error("Expected installer migration setting row");
+    fireEvent.click(within(row).getByRole("button"));
+
+    await waitFor(() => {
+      expect(onUpdateAppSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ experimentalWindowsInstallerMigrationEnabled: true }),
+      );
+    });
   });
 
   it("persists independent Provider continuity settings with keyboard-ready controls", async () => {

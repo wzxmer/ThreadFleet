@@ -260,6 +260,24 @@ describe("ThreadList", () => {
     expect(row?.querySelector(".thread-status")?.className).not.toContain("processing");
   });
 
+  it("keeps the execution state before the fixed pin and time lane", () => {
+    const { container } = render(
+      <ThreadList
+        {...baseProps}
+        threadStatusById={{ "thread-1": { isProcessing: true } }}
+      />,
+    );
+
+    const meta = container.querySelector(".thread-meta");
+    const state = container.querySelector(".thread-state-chip");
+    const time = meta?.querySelector(".thread-time");
+    expect(state?.textContent).toBe("运行中");
+    expect(time?.textContent).toBe("2m");
+    expect(state?.nextElementSibling).toBe(meta);
+    expect(meta?.querySelector(".thread-state-chip")).toBeNull();
+    expect(container.querySelector(".thread-details .thread-state-chip")).toBeNull();
+  });
+
   it("toggles sub-agent descendants for parent rows", () => {
     const { getByText, queryByText, getByRole } = render(
       <ThreadList

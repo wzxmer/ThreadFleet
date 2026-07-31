@@ -1,4 +1,5 @@
 import X from "lucide-react/dist/esm/icons/x";
+import type { RefObject } from "react";
 import { useI18n } from "@/features/i18n/I18nProvider";
 
 type SidebarSearchBarProps = {
@@ -6,6 +7,8 @@ type SidebarSearchBarProps = {
   searchQuery: string;
   onSearchQueryChange: (value: string) => void;
   onClearSearch: () => void;
+  inputRef?: RefObject<HTMLInputElement | null>;
+  autoFocus?: boolean;
 };
 
 export function SidebarSearchBar({
@@ -13,19 +16,22 @@ export function SidebarSearchBar({
   searchQuery,
   onSearchQueryChange,
   onClearSearch,
+  inputRef,
+  autoFocus = true,
 }: SidebarSearchBarProps) {
   const { t } = useI18n();
   return (
     <div className={`sidebar-search${isSearchOpen ? " is-open" : ""}`}>
       {isSearchOpen && (
         <input
+          ref={inputRef}
           className="sidebar-search-input"
           value={searchQuery}
           onChange={(event) => onSearchQueryChange(event.target.value)}
           placeholder={t("sidebar.searchThreads")}
           aria-label={t("sidebar.searchThreads")}
           data-tauri-drag-region="false"
-          autoFocus
+          autoFocus={autoFocus}
         />
       )}
       {isSearchOpen && searchQuery.length > 0 && (

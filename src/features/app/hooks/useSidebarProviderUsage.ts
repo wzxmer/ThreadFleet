@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   AppSettings,
+  CodexKeyProfile,
   CodexProviderStatus,
 } from "@/types";
 import type { ThirdPartyKeyUsageSnapshot } from "@app/utils/thirdPartyKeyUsage";
@@ -12,6 +13,7 @@ type UseSidebarProviderUsageArgs = {
   appSettings: AppSettings;
   activeWorkspaceId: string | null;
   homeAccountWorkspaceId: string | null;
+  statusDelayMs?: number;
 };
 
 type ProviderStatusState = {
@@ -25,10 +27,25 @@ type SidebarProviderUsage = {
   thirdPartyProviderUsage: ThirdPartyKeyUsageSnapshot | null;
 };
 
+function profileUsageSignature(profile: CodexKeyProfile | null) {
+  if (!profile) {
+    return "__default__";
+  }
+  return JSON.stringify({
+    id: profile.id,
+    providerKind: profile.providerKind ?? null,
+    baseUrl: profile.baseUrl ?? null,
+    baseUrlEnvVar: profile.baseUrlEnvVar ?? null,
+    key: profile.key ?? null,
+    keyEnvVar: profile.keyEnvVar ?? null,
+  });
+}
+
 export function useSidebarProviderUsage({
   appSettings,
   activeWorkspaceId,
   homeAccountWorkspaceId,
+  statusDelayMs = 0,
 }: UseSidebarProviderUsageArgs): SidebarProviderUsage {
   const workspaceId = activeWorkspaceId ?? homeAccountWorkspaceId;
   const activeProfile = useMemo(
@@ -38,21 +55,10 @@ export function useSidebarProviderUsage({
       ) ?? null,
     [appSettings.activeCodexKeyProfileId, appSettings.codexKeyProfiles],
   );
-  const profileIdentityByObjectRef = useRef(new WeakMap<object, number>());
-  const nextProfileIdentityRef = useRef(1);
-  const activeProfileRevision = useMemo(() => {
-    if (!activeProfile) {
-      return 0;
-    }
-    const cachedIdentity = profileIdentityByObjectRef.current.get(activeProfile);
-    if (cachedIdentity) {
-      return cachedIdentity;
-    }
-    const nextIdentity = nextProfileIdentityRef.current;
-    nextProfileIdentityRef.current += 1;
-    profileIdentityByObjectRef.current.set(activeProfile, nextIdentity);
-    return nextIdentity;
-  }, [activeProfile]);
+  const activeProfileSignature = useMemo(
+    () => profileUsageSignature(activeProfile),
+    [activeProfile],
+  );
   const activeProfileBaseUrl = activeProfile
     ? resolveCodexProviderBaseUrl(activeProfile.providerKind, activeProfile.baseUrl)
     : null;
@@ -61,7 +67,7 @@ export function useSidebarProviderUsage({
         workspaceId,
         appSettings.codexHome ?? "",
         appSettings.activeCodexKeyProfileId ?? "__default__",
-        activeProfileRevision,
+        activeProfileSignature,
         activeProfileBaseUrl ?? "",
       ])
     : null;
@@ -78,33 +84,45 @@ export function useSidebarProviderUsage({
     if (cachedStatus) {
       setStatusState({ requestKey, status: cachedStatus });
     }
-    getProviderStatus(workspaceId)
-      .then((status) => {
-        if (!canceled) {
-          statusCacheRef.current.set(requestKey, status);
-          setStatusState({ requestKey, status });
-        }
-      })
-      .catch((error) => {
-        if (!canceled) {
-          const status: CodexProviderStatus = {
-            providerName: null,
-            baseUrl: null,
-            source: "error",
-            isConfigured: false,
-            isThirdParty: false,
-            autoCompactTokenLimit: null,
-            modelContextWindow: null,
-            error: error instanceof Error ? error.message : String(error),
-          };
-          statusCacheRef.current.set(requestKey, status);
-          setStatusState({ requestKey, status });
-        }
-      });
+    const loadStatus = () => {
+      getProviderStatus(workspaceId)
+        .then((status) => {
+          if (!canceled) {
+            statusCacheRef.current.set(requestKey, status);
+            setStatusState({ requestKey, status });
+          }
+        })
+        .catch((error) => {
+          if (!canceled) {
+            const status: CodexProviderStatus = {
+              providerName: null,
+              baseUrl: null,
+              source: "error",
+              isConfigured: false,
+              isThirdParty: false,
+              autoCompactTokenLimit: null,
+              modelContextWindow: null,
+              error: error instanceof Error ? error.message : String(error),
+            };
+            statusCacheRef.current.set(requestKey, status);
+            setStatusState({ requestKey, status });
+          }
+        });
+    };
+    const timeoutId =
+      statusDelayMs > 0
+        ? window.setTimeout(loadStatus, statusDelayMs)
+        : null;
+    if (timeoutId === null) {
+      loadStatus();
+    }
     return () => {
       canceled = true;
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
     };
-  }, [requestKey, workspaceId]);
+  }, [requestKey, statusDelayMs, workspaceId]);
 
   const codexProviderStatus = requestKey
     ? statusState?.requestKey === requestKey
@@ -118,7 +136,7 @@ export function useSidebarProviderUsage({
       codexProviderStatus.isThirdParty,
     workspaceId,
     profileId: appSettings.activeCodexKeyProfileId,
-    profileRevision: activeProfileRevision,
+    profileRevision: activeProfileSignature,
   });
 
   return {

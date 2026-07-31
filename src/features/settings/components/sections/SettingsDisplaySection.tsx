@@ -38,33 +38,6 @@ import {
 } from "@/features/design-system/components/settings/SettingsPrimitives";
 import { RoundedSelect } from "@/features/design-system/components/select/RoundedSelect";
 import { useI18n } from "@/features/i18n/I18nProvider";
-import { CONVERSATION_STYLE_PRESETS } from "@/features/messages/utils/conversationStylePresets";
-
-const THEME_ACCENT_OPTIONS: Array<{
-  value: AppSettings["themeAccent"];
-  swatch: string;
-}> = [
-  {
-    value: "codex",
-    swatch: "linear-gradient(135deg, #c49aff, #64c8ff)",
-  },
-  {
-    value: "blue",
-    swatch: "linear-gradient(135deg, #8ebaff, #5ca8ff)",
-  },
-  {
-    value: "green",
-    swatch: "linear-gradient(135deg, #80e0be, #5cd2a6)",
-  },
-  {
-    value: "pink",
-    swatch: "linear-gradient(135deg, #ff9ad5, #eb7ebe)",
-  },
-  {
-    value: "orange",
-    swatch: "linear-gradient(135deg, #ffb269, #f5a65c)",
-  },
-];
 
 const FONT_CLARITY_PRESETS: Array<{
   id: string;
@@ -254,13 +227,6 @@ export function SettingsDisplaySection({
         preset.uiCjkFontFamily === appSettings.uiCjkFontFamily &&
         preset.uiFontWeight === appSettings.uiFontWeight,
     )?.id ?? null;
-  const activeStylePresetId =
-    CONVERSATION_STYLE_PRESETS.find((preset) =>
-      Object.entries(preset.settings).every(
-        ([key, value]) => appSettings[key as keyof typeof preset.settings] === value,
-      ),
-    )?.id ?? null;
-
   return (
     <SettingsSection
       title={t("settings.display.title")}
@@ -293,45 +259,6 @@ export function SettingsDisplaySection({
         </div>
       </div>
       <div className="settings-field">
-        <div className="settings-field-label">{t("settings.display.stylePresets")}</div>
-        <div className="settings-style-presets" role="radiogroup" aria-label={t("settings.display.stylePresets")}>
-          {CONVERSATION_STYLE_PRESETS.map((preset) => (
-            <button
-              key={preset.id}
-              type="button"
-              className={`settings-style-preset${
-                activeStylePresetId === preset.id ? " is-selected" : ""
-              }`}
-              role="radio"
-              aria-checked={activeStylePresetId === preset.id}
-              onClick={() =>
-                void onUpdateAppSettings({
-                  ...appSettings,
-                  ...preset.settings,
-                })
-              }
-            >
-              <span
-                className="settings-style-preset-swatch"
-                style={{ background: preset.swatch }}
-                aria-hidden
-              />
-              <span className="settings-style-preset-copy">
-                <span className="settings-style-preset-title">
-                  {t(`settings.display.stylePreset.${preset.id}.title` as any)}
-                </span>
-                <span className="settings-style-preset-subtitle">
-                  {t(`settings.display.stylePreset.${preset.id}.subtitle` as any)}
-                </span>
-              </span>
-            </button>
-          ))}
-        </div>
-        <div className="settings-help">
-          {t("settings.display.stylePresetHelp")}
-        </div>
-      </div>
-      <div className="settings-field">
         <label className="settings-field-label" htmlFor="theme-select">
           {t("settings.display.theme")}
         </label>
@@ -346,45 +273,9 @@ export function SettingsDisplaySection({
             })
           }
         >
-          <option value="system">{t("settings.display.themeSystem")}</option>
           <option value="light">{t("settings.display.themeLight")}</option>
           <option value="dark">{t("settings.display.themeDark")}</option>
-          <option value="dim">{t("settings.display.themeDim")}</option>
         </select>
-      </div>
-      <div className="settings-field">
-        <div className="settings-field-label">{t("settings.display.accent")}</div>
-        <div className="settings-accent-options" role="radiogroup" aria-label={t("settings.display.accent")}>
-          {THEME_ACCENT_OPTIONS.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              className={`settings-accent-option${
-                appSettings.themeAccent === option.value ? " is-selected" : ""
-              }`}
-              role="radio"
-              aria-checked={appSettings.themeAccent === option.value}
-              onClick={() =>
-                void onUpdateAppSettings({
-                  ...appSettings,
-                  themeAccent: option.value,
-                })
-              }
-            >
-              <span
-                className="settings-accent-swatch"
-                style={{ background: option.swatch }}
-                aria-hidden
-              />
-              <span className="settings-accent-label">
-                {t(`settings.display.accent.${option.value}` as any)}
-              </span>
-            </button>
-          ))}
-        </div>
-        <div className="settings-help">
-          {t("settings.display.accentHelp")}
-        </div>
       </div>
       <SettingsToggleRow
         title={t("settings.display.showCodexUsageTitle")}

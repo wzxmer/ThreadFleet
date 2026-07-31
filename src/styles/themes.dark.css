@@ -1,10 +1,23 @@
-:root {
+:root[data-theme="dark"] {
   font-family: var(--ui-font-family);
   color: var(--text-primary);
   background-color: transparent;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   color-scheme: light dark;
+  --cm-chrome-bg: var(--cm-dark-chrome-bg);
+  --cm-main-bg: var(--cm-dark-main-bg);
+  --cm-panel-bg: var(--cm-dark-panel-bg);
+  --cm-panel-border: var(--cm-dark-panel-border);
+  --cm-control-bg: var(--cm-dark-control-bg);
+  --cm-control-bg-hover: var(--cm-dark-control-bg-hover);
+  --cm-caption-hover-bg: var(--cm-dark-caption-hover-bg);
+  --cm-caption-text: var(--cm-dark-caption-text);
+  --cm-text-primary: var(--cm-dark-text-primary);
+  --cm-text-strong: var(--cm-dark-text-strong);
+  --cm-control-border: var(--cm-dark-control-border);
+  --cm-control-border-hover: var(--cm-dark-control-border-hover);
+  --cm-elevation-shadow: var(--cm-dark-elevation-shadow);
   --ui-font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;
   --ui-font-size: 13px;

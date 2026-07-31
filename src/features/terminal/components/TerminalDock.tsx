@@ -1,5 +1,7 @@
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import MonitorUp from "lucide-react/dist/esm/icons/monitor-up";
+import Plus from "lucide-react/dist/esm/icons/plus";
+import X from "lucide-react/dist/esm/icons/x";
 import type { TerminalTab } from "../hooks/useTerminalTabs";
 
 type TerminalDockProps = {
@@ -48,6 +50,7 @@ export function TerminalDock({
               className={`terminal-tab${
                 tab.id === activeTerminalId ? " active" : ""
               }`}
+              data-button-elevation="none"
               type="button"
               role="tab"
               aria-selected={tab.id === activeTerminalId}
@@ -63,22 +66,24 @@ export function TerminalDock({
                   onCloseTerminal(tab.id);
                 }}
               >
-                ×
+                <X aria-hidden />
               </span>
             </button>
           ))}
           <button
             className="terminal-tab-add"
+            data-button-elevation="none"
             type="button"
             onClick={onNewTerminal}
             aria-label="新建终端"
             title="新建终端"
           >
-            +
+            <Plus aria-hidden />
           </button>
         </div>
         <button
           className="terminal-external-button"
+          data-button-elevation="none"
           type="button"
           onClick={onOpenExternalTerminal}
           aria-label="在系统终端打开"

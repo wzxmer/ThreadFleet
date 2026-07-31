@@ -9,10 +9,9 @@ import { resolveRuntimeThemeAppearance } from "@app/utils/runtimeThemeAppearance
 export function useAppBootstrap() {
   const appSettingsState = useAppSettingsController();
   const runtimeThemeAppearance = resolveRuntimeThemeAppearance(
-    appSettingsState.appSettings,
     appSettingsState.resolvedTheme,
   );
-  useCodeCssVars(appSettingsState.appSettings, runtimeThemeAppearance.themeAccent);
+  useCodeCssVars(appSettingsState.appSettings);
 
   const dictationState = useDictationController(appSettingsState.appSettings);
   const debugState = useDebugLog();

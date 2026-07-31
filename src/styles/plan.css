@@ -2,11 +2,11 @@
   background: transparent;
   border: none;
   border-radius: 0;
-  margin: 0 12px;
+  margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 0;
   -webkit-app-region: no-drag;
   height: 100%;
   min-height: 0;
@@ -17,18 +17,22 @@
   justify-content: space-between;
   align-items: center;
   font-size: 12px;
-  letter-spacing: 0.08em;
+  letter-spacing: 0;
   text-transform: uppercase;
   color: var(--text-subtle);
+  min-height: 34px;
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .plan-progress {
   font-size: 11px;
-  letter-spacing: 0.02em;
+  letter-spacing: 0;
   color: var(--text-faint);
 }
 
 .plan-explanation {
+  padding: 8px 2px;
+  border-bottom: 1px solid var(--border-subtle);
   font-size: 12px;
   color: var(--text-muted);
   white-space: pre-wrap;
@@ -49,6 +53,12 @@
 }
 
 .plan-empty {
+  display: grid;
+  flex: 1;
+  min-height: 80px;
+  place-items: center;
+  padding: 12px 4px;
+  text-align: center;
   font-size: 12px;
   color: var(--text-faint);
 }
@@ -67,7 +77,7 @@
 .plan-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 0;
   overflow-y: auto;
   min-height: 0;
   padding-right: 2px;
@@ -80,15 +90,30 @@
   display: flex;
   gap: 8px;
   align-items: flex-start;
+  min-height: 32px;
+  padding: 7px 2px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-subtle) 72%, transparent);
   font-size: 12px;
   color: var(--text-emphasis);
 }
 
 .plan-step-status {
-  font-family: var(--code-font-family);
-  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
   color: var(--text-faint);
   flex: 0 0 auto;
+}
+
+.plan-step-status svg {
+  width: 13px;
+  height: 13px;
+}
+
+.plan-step-status .is-spinning {
+  animation: spin var(--ds-spinner-dur) linear infinite;
 }
 
 .plan-step.inProgress .plan-step-status {

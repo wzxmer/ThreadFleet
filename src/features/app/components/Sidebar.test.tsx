@@ -11,9 +11,9 @@ import {
 import { Sidebar } from "./Sidebar";
 import { SessionManagerProvider } from "@/features/sessions/context/SessionManagerContext";
 
-function render(element: ReactElement) {
+function render(element: ReactElement, options: { sessionManagerActive?: boolean } = {}) {
   function Wrapper() {
-    const [active, setActive] = useState(false);
+    const [active, setActive] = useState(options.sessionManagerActive ?? false);
     return <SessionManagerProvider active={active} onActiveChange={setActive} onResumeSession={async () => false} onDeriveSession={() => {}}>{element}</SessionManagerProvider>;
   }
   return testingRender(<Wrapper />);
@@ -41,10 +41,10 @@ const baseProps = {
   threadListCursorByWorkspace: {},
   pinnedThreadsVersion: 0,
   threadListSortKey: "updated_at" as const,
-  onSetThreadListSortKey: vi.fn(),
   threadListOrganizeMode: "by_project" as const,
-  onSetThreadListOrganizeMode: vi.fn(),
   onRefreshAllThreads: vi.fn(),
+  canCollapseSidebar: true,
+  onCollapseSidebar: vi.fn(),
   activeWorkspaceId: null,
   activeThreadId: null,
   accountRateLimits: null,
@@ -56,13 +56,6 @@ const baseProps = {
   codexKeyProfiles: [],
   activeCodexKeyProfileId: null,
   onSelectCodexKeyProfile: vi.fn(),
-  accountInfo: null,
-  onSwitchAccount: vi.fn(),
-  onCancelSwitchAccount: vi.fn(),
-  accountSwitching: false,
-  onOpenSettings: vi.fn(),
-  onOpenDebug: vi.fn(),
-  showDebugButton: false,
   onAddWorkspace: vi.fn(),
   onSelectHome: vi.fn(),
   onSelectWorkspace: vi.fn(),
@@ -94,69 +87,107 @@ const baseProps = {
 };
 
 describe("Sidebar", () => {
-  it("hides usage without removing bottom actions", () => {
+  it("collapses the threads sidebar from its header", () => {
+    const onCollapseSidebar = vi.fn();
+    render(<Sidebar {...baseProps} onCollapseSidebar={onCollapseSidebar} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "隐藏会话列表" }));
+
+    expect(onCollapseSidebar).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides the collapse action when the responsive layout owns sidebar visibility", () => {
+    render(<Sidebar {...baseProps} canCollapseSidebar={false} />);
+
+    expect(screen.queryByRole("button", { name: "隐藏会话列表" })).toBeNull();
+  });
+
+  it("shows the object sidebar title without project update summaries", () => {
+    render(
+      <Sidebar
+        {...baseProps}
+        workspaces={[
+          {
+            id: "ws-1",
+            name: "CodexMonitor",
+            path: "D:/Project/CodexMonitor",
+            connected: true,
+            settings: { sidebarCollapsed: false },
+          },
+        ]}
+        groupedWorkspaces={[
+          {
+            id: null,
+            name: "Projects",
+            workspaces: [
+              {
+                id: "ws-1",
+                name: "CodexMonitor",
+                path: "D:/Project/CodexMonitor",
+                connected: true,
+                settings: { sidebarCollapsed: false },
+              },
+            ],
+          },
+        ]}
+        threadsByWorkspace={{
+          "ws-1": [{ id: "thread-1", name: "Active thread", updatedAt: Date.now() }],
+        }}
+      />,
+    );
+
+    expect(screen.queryByText("PROJECTS")).toBeNull();
+    expect(screen.queryByText("本地项目")).toBeNull();
+    expect(screen.queryByText(/更新于/)).toBeNull();
+    expect(
+      document.querySelector(".workspace-toggle")?.getAttribute("data-button-elevation"),
+    ).toBe("none");
+  });
+
+  it("hides usage without rendering duplicate sidebar-owned utility actions", () => {
     render(<Sidebar {...baseProps} showCodexUsage={false} />);
 
     expect(screen.queryByText("用量")).toBeNull();
-    expect(screen.getByRole("button", { name: "打开设置" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "打开设置" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "打开调试日志" })).toBeNull();
   });
 
-  it("toggles the search bar from the header icon", () => {
+  it("does not duplicate settings or debug entries in the object sidebar bottom rail", () => {
+    const { container } = render(<Sidebar {...baseProps} />);
+
+    expect(screen.queryByText("用量")).toBeNull();
+    expect(screen.queryByText("设置")).toBeNull();
+    expect(container.querySelector(".sidebar-utility-actions")).toBeNull();
+    expect(screen.queryByRole("button", { name: "打开调试日志" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "打开设置" })).toBeNull();
+  });
+
+  it("keeps the search field inline and focuses it from the header icon", () => {
     render(<Sidebar {...baseProps} />);
 
-    const toggleButton = screen.getByRole("button", { name: "切换搜索" });
-    expect(screen.queryByLabelText("搜索会话")).toBeNull();
-
-    fireEvent.click(toggleButton);
+    const searchButton = screen.getByRole("button", { name: "定位到搜索" });
     const input = screen.getByLabelText("搜索会话") as HTMLInputElement;
     expect(input).toBeTruthy();
 
     fireEvent.change(input, { target: { value: "alpha" } });
     expect(input.value).toBe("alpha");
 
-    fireEvent.click(toggleButton);
-    expect(screen.queryByLabelText("搜索会话")).toBeNull();
+    fireEvent.click(searchButton);
+    expect(document.activeElement).toBe(input);
 
-    fireEvent.click(toggleButton);
-    const reopened = screen.getByLabelText("搜索会话") as HTMLInputElement;
-    expect(reopened.value).toBe("");
+    fireEvent.click(screen.getByRole("button", { name: "清空搜索" }));
+    expect(input.value).toBe("");
   });
 
-  it("switches session manager mode without losing workspace search", () => {
+  it("removes duplicate session manager and sorting entries from the sidebar header", () => {
     render(<Sidebar {...baseProps} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "切换搜索" }));
-    fireEvent.change(screen.getByLabelText("搜索会话"), { target: { value: "alpha" } });
-    fireEvent.click(screen.getByRole("button", { name: "本地会话管理" }));
-
-    expect(screen.getByLabelText("搜索本地会话")).toBeTruthy();
-    expect(screen.queryByLabelText("搜索会话")).toBeNull();
-
-    fireEvent.click(screen.getByRole("button", { name: "本地会话管理" }));
-    expect((screen.getByLabelText("搜索会话") as HTMLInputElement).value).toBe("alpha");
-  });
-
-  it("restores the session manager scroll position after switching modes", async () => {
-    render(<Sidebar {...baseProps} />);
-
-    const toggle = screen.getByRole("button", { name: "本地会话管理" });
-    fireEvent.click(toggle);
-    const body = document.querySelector<HTMLElement>(".sidebar-body");
-    expect(body).not.toBeNull();
-
-    body!.scrollTop = 320;
-    fireEvent.scroll(body!);
-    fireEvent.click(toggle);
-    await waitFor(() => expect(body!.scrollTop).toBe(0));
-
-    fireEvent.click(toggle);
-    await waitFor(() => expect(body!.scrollTop).toBe(320));
+    expect(screen.queryByRole("button", { name: "本地会话管理" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "整理和排序会话" })).toBeNull();
   });
 
   it("keeps the session manager scrollbar on an unmasked stable layer", () => {
-    render(<Sidebar {...baseProps} />);
-
-    fireEvent.click(screen.getByRole("button", { name: "本地会话管理" }));
+    render(<Sidebar {...baseProps} />, { sessionManagerActive: true });
     const body = document.querySelector<HTMLElement>(".sidebar-body");
 
     expect(body?.classList.contains("is-session-manager")).toBe(true);
@@ -165,11 +196,8 @@ describe("Sidebar", () => {
   });
 
   it("clears the local session search from its clear button", () => {
-    render(<Sidebar {...baseProps} />);
+    render(<Sidebar {...baseProps} />, { sessionManagerActive: true });
 
-    const sessionManagerToggle = document.querySelector<HTMLButtonElement>(".sidebar-title-group button[aria-pressed]");
-    expect(sessionManagerToggle).not.toBeNull();
-    fireEvent.click(sessionManagerToggle!);
     const input = document.querySelector<HTMLInputElement>(".session-manager-search-field input");
     expect(input).not.toBeNull();
     expect(document.querySelector(".session-manager-search-field button")).toBeNull();
@@ -183,55 +211,17 @@ describe("Sidebar", () => {
     expect(document.querySelector(".session-manager-search-field button")).toBeNull();
   });
 
-  it("keeps session manager open when a thread is already active", () => {
+  it("keeps session manager rendering when a thread is already active", () => {
     render(
       <Sidebar
         {...baseProps}
         activeWorkspaceId="workspace-1"
         activeThreadId="thread-1"
       />,
+      { sessionManagerActive: true },
     );
-
-    fireEvent.click(screen.getByRole("button", { name: "本地会话管理" }));
 
     expect(screen.getByLabelText("搜索本地会话")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "本地会话管理" }).getAttribute("aria-pressed")).toBe("true");
-  });
-  it("opens thread sort menu from the header filter button", () => {
-    const onSetThreadListSortKey = vi.fn();
-    render(
-      <Sidebar
-        {...baseProps}
-        threadListSortKey="updated_at"
-        onSetThreadListSortKey={onSetThreadListSortKey}
-      />,
-    );
-
-    const button = screen.getByRole("button", { name: "整理和排序会话" });
-    expect(screen.queryByRole("menu")).toBeNull();
-
-    fireEvent.click(button);
-    const option = screen.getByRole("menuitemradio", { name: "创建时间" });
-    fireEvent.click(option);
-
-    expect(onSetThreadListSortKey).toHaveBeenCalledWith("created_at");
-    expect(screen.queryByRole("menu")).toBeNull();
-  });
-
-  it("changes organize mode from the header filter menu", () => {
-    const onSetThreadListOrganizeMode = vi.fn();
-    render(
-      <Sidebar
-        {...baseProps}
-        threadListOrganizeMode="by_project"
-        onSetThreadListOrganizeMode={onSetThreadListOrganizeMode}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "整理和排序会话" }));
-    fireEvent.click(screen.getByRole("menuitemradio", { name: "会话列表" }));
-
-    expect(onSetThreadListOrganizeMode).toHaveBeenCalledWith("threads_only");
   });
 
   it("renders available credits in the footer when present", () => {
@@ -489,31 +479,23 @@ describe("Sidebar", () => {
       />,
     );
 
-    const groupSelect = screen.getByLabelText("分组") as HTMLSelectElement;
+    const groupSelect = screen.getByLabelText("服务商") as HTMLSelectElement;
     expect(groupSelect.value).toBe("discount");
 
     fireEvent.change(groupSelect, { target: { value: "code" } });
     expect(onSelectCodexKeyProfile).toHaveBeenCalledWith("code");
   });
 
-  it("opens the account menu from the bottom rail", () => {
+  it("does not duplicate the account entry in the object sidebar bottom rail", () => {
     render(
       <Sidebar
         {...baseProps}
         activeWorkspaceId="ws-1"
-        accountInfo={{
-          email: "dimillian@example.com",
-          type: "chatgpt",
-          planType: "pro",
-          requiresOpenaiAuth: false,
-        }}
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "账号" }));
-
-    expect(screen.getByText("dimillian@example.com")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "切换账号" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "账号" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "切换账号" })).toBeNull();
   });
 
   it("renders threads-only mode as a global chronological list", () => {
@@ -627,7 +609,7 @@ describe("Sidebar", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "切换搜索" }));
+    fireEvent.click(screen.getByRole("button", { name: "定位到搜索" }));
     fireEvent.change(screen.getByLabelText("搜索会话"), {
       target: { value: "restore" },
     });
@@ -679,7 +661,7 @@ describe("Sidebar", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "切换搜索" }));
+    fireEvent.click(screen.getByRole("button", { name: "定位到搜索" }));
     fireEvent.change(screen.getByLabelText("搜索会话"), {
       target: { value: "delta" },
     });
@@ -727,7 +709,7 @@ describe("Sidebar", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "切换搜索" }));
+    fireEvent.click(screen.getByRole("button", { name: "定位到搜索" }));
     fireEvent.change(screen.getByLabelText("搜索会话"), {
       target: { value: "historical" },
     });
@@ -850,7 +832,7 @@ describe("Sidebar", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "切换搜索" }));
+    fireEvent.click(screen.getByRole("button", { name: "定位到搜索" }));
     fireEvent.change(screen.getByLabelText("搜索会话"), {
       target: { value: "routing fix" },
     });
@@ -919,7 +901,7 @@ describe("Sidebar", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "切换搜索" }));
+    fireEvent.click(screen.getByRole("button", { name: "定位到搜索" }));
     fireEvent.change(screen.getByLabelText("搜索会话"), {
       target: { value: "clone search bug" },
     });
@@ -1423,7 +1405,7 @@ describe("Sidebar", () => {
     expect(screen.getByRole("button", { name: "展开 ThreadFleet" })).toBeTruthy();
     expect(screen.getByText("Rime visible session")).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "切换搜索" }));
+    fireEvent.click(screen.getByRole("button", { name: "定位到搜索" }));
     fireEvent.change(screen.getByLabelText("搜索会话"), {
       target: { value: "collapsed" },
     });
@@ -1585,7 +1567,7 @@ describe("Sidebar", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "切换搜索" }));
+    fireEvent.click(screen.getByRole("button", { name: "定位到搜索" }));
     fireEvent.change(screen.getByLabelText("搜索会话"), {
       target: { value: "threadfleet" },
     });
@@ -1637,7 +1619,7 @@ describe("Sidebar", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "切换搜索" }));
+    fireEvent.click(screen.getByRole("button", { name: "定位到搜索" }));
     fireEvent.change(screen.getByLabelText("搜索会话"), {
       target: { value: "older-only-match" },
     });

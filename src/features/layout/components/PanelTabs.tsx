@@ -74,6 +74,7 @@ export function PanelTabs({ active, onSelect, tabs = defaultTabs }: PanelTabsPro
             key={tab.id}
             type="button"
             className={`panel-tab${isActive ? " is-active" : ""}`}
+            data-button-elevation="none"
             onClick={() => onSelect(tab.id)}
             onKeyDown={(event) => handleKeyDown(event, index)}
             ref={(element) => {

@@ -16,7 +16,7 @@ type UseAccountSwitchingArgs = {
 type UseAccountSwitchingResult = {
   activeAccount: AccountSnapshot | null;
   accountSwitching: boolean;
-  handleSwitchAccount: () => Promise<void>;
+  handleSwitchAccount: (workspaceIdOverride?: string | null) => Promise<void>;
   handleCancelSwitchAccount: () => Promise<void>;
 };
 
@@ -142,11 +142,12 @@ export function useAccountSwitching({
     };
   }, []);
 
-  const handleSwitchAccount = useCallback(async () => {
-    if (!activeWorkspaceId || accountSwitching) {
+  const handleSwitchAccount = useCallback(async (workspaceIdOverride?: string | null) => {
+    const targetWorkspaceId = workspaceIdOverride ?? activeWorkspaceId;
+    if (!targetWorkspaceId || accountSwitching) {
       return;
     }
-    const workspaceId = activeWorkspaceId;
+    const workspaceId = targetWorkspaceId;
     accountSwitchCanceledRef.current = false;
     setAccountSwitching(true);
     loginIdRef.current = null;

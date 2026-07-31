@@ -1,4 +1,7 @@
 import type { TurnPlan } from "../../../types";
+import Check from "lucide-react/dist/esm/icons/check";
+import Circle from "lucide-react/dist/esm/icons/circle";
+import LoaderCircle from "lucide-react/dist/esm/icons/loader-circle";
 import { CoordinationPanel } from "@/features/threads/components/CoordinationPanel";
 import { useI18n } from "@/features/i18n/I18nProvider";
 
@@ -21,14 +24,14 @@ function formatProgress(plan: TurnPlan) {
   return `${completed}/${total}`;
 }
 
-function statusLabel(status: TurnPlan["steps"][number]["status"]) {
+function statusIcon(status: TurnPlan["steps"][number]["status"]) {
   if (status === "completed") {
-    return "[x]";
+    return <Check aria-hidden />;
   }
   if (status === "inProgress") {
-    return "[>]";
+    return <LoaderCircle className="is-spinning" aria-hidden />;
   }
-  return "[ ]";
+  return <Circle aria-hidden />;
 }
 
 export function PlanPanel({
@@ -84,7 +87,7 @@ export function PlanPanel({
           {steps.map((step, index) => (
             <li key={`${step.step}-${index}`} className={`plan-step ${step.status}`}>
               <span className="plan-step-status" aria-hidden>
-                {statusLabel(step.status)}
+                {statusIcon(step.status)}
               </span>
               <span className="plan-step-text">{step.step}</span>
             </li>

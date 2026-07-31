@@ -1,5 +1,4 @@
 import type {
-  AccountSnapshot,
   RequestUserInputRequest,
   RateLimitSnapshot,
   ThreadTokenUsage,
@@ -13,7 +12,6 @@ import type { MouseEvent, RefObject } from "react";
 import { FolderOpen } from "lucide-react";
 import { SidebarBottomRail } from "./SidebarBottomRail";
 import { SidebarHeader } from "./SidebarHeader";
-import { SidebarSearchBar } from "./SidebarSearchBar";
 import { SidebarThreadsOnlySection } from "./SidebarThreadsOnlySection";
 import { SidebarWorkspaceGroups } from "./SidebarWorkspaceGroups";
 import { PinnedThreadList } from "./PinnedThreadList";
@@ -180,10 +178,10 @@ type SidebarProps = {
   threadListCursorByWorkspace: Record<string, string | null>;
   pinnedThreadsVersion: number;
   threadListSortKey: ThreadListSortKey;
-  onSetThreadListSortKey: (sortKey: ThreadListSortKey) => void;
   threadListOrganizeMode: ThreadListOrganizeMode;
-  onSetThreadListOrganizeMode: (organizeMode: ThreadListOrganizeMode) => void;
   onRefreshAllThreads: () => void;
+  canCollapseSidebar: boolean;
+  onCollapseSidebar: () => void;
   activeWorkspaceId: string | null;
   activeThreadId: string | null;
   userInputRequests?: RequestUserInputRequest[];
@@ -197,13 +195,6 @@ type SidebarProps = {
   activeCodexKeyProfileId: string | null;
   onSelectCodexKeyProfile: (profileId: string) => void;
   usageConfigurationWarning?: string | null;
-  accountInfo: AccountSnapshot | null;
-  onSwitchAccount: () => void;
-  onCancelSwitchAccount: () => void;
-  accountSwitching: boolean;
-  onOpenSettings: () => void;
-  onOpenDebug: () => void;
-  showDebugButton: boolean;
   onAddWorkspace: () => void;
   onSelectHome: () => void;
   onSelectWorkspace: (id: string) => void;
@@ -251,10 +242,10 @@ export const Sidebar = memo(function Sidebar({
   threadListCursorByWorkspace,
   pinnedThreadsVersion,
   threadListSortKey,
-  onSetThreadListSortKey,
   threadListOrganizeMode,
-  onSetThreadListOrganizeMode,
   onRefreshAllThreads,
+  canCollapseSidebar,
+  onCollapseSidebar,
   activeWorkspaceId,
   activeThreadId,
   userInputRequests = [],
@@ -268,13 +259,6 @@ export const Sidebar = memo(function Sidebar({
   activeCodexKeyProfileId,
   onSelectCodexKeyProfile,
   usageConfigurationWarning = null,
-  accountInfo,
-  onSwitchAccount,
-  onCancelSwitchAccount,
-  accountSwitching,
-  onOpenSettings,
-  onOpenDebug,
-  showDebugButton,
   onAddWorkspace,
   onSelectHome,
   onSelectWorkspace,
@@ -318,7 +302,7 @@ export const Sidebar = memo(function Sidebar({
     new Set<string>(),
   );
   const [searchQuery, setSearchQuery] = useState("");
-  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [addMenuAnchor, setAddMenuAnchor] =
     useState<SidebarWorkspaceAddMenuAnchor | null>(null);
   const [allThreadsAddMenuAnchor, setAllThreadsAddMenuAnchor] =
@@ -534,16 +518,6 @@ export const Sidebar = memo(function Sidebar({
     [normalizedQuery],
   );
 
-  const accountEmail = accountInfo?.email?.trim() ?? "";
-  const accountButtonLabel = accountEmail
-    ? accountEmail
-    : accountInfo?.type === "apikey"
-      ? "API key"
-      : t("sidebar.loginCodex");
-  const accountActionLabel = accountEmail ? t("sidebar.switchAccount") : t("sidebar.login");
-  const showAccountSwitcher = Boolean(activeWorkspaceId);
-  const accountSwitchDisabled = accountSwitching || !activeWorkspaceId;
-  const accountCancelDisabled = !accountSwitching || !activeWorkspaceId;
   const refreshDisabled = workspaces.length === 0 || workspaces.every((workspace) => !workspace.connected);
   const refreshInProgress = workspaces.some(
     (workspace) => threadListLoadingByWorkspace[workspace.id] ?? false,
@@ -1068,12 +1042,6 @@ export const Sidebar = memo(function Sidebar({
     };
   }, [allThreadsAddMenuAnchor]);
 
-  useEffect(() => {
-    if (!isSearchOpen && searchQuery) {
-      setSearchQuery("");
-    }
-  }, [isSearchOpen, searchQuery]);
-
   const switchSidebarMode = useCallback(
     (nextMode: "workspaces" | "sessionManager") => {
       const node = sidebarBodyRef.current;
@@ -1117,9 +1085,13 @@ export const Sidebar = memo(function Sidebar({
     onSelectHome();
   };
 
+  const handleFocusSearch = useCallback(() => {
+    searchInputRef.current?.focus();
+  }, []);
+
   return (
     <aside
-      className={`sidebar${sidebarMode === "workspaces" && isSearchOpen ? " search-open" : ""}${sidebarMode === "sessionManager" ? " is-session-manager" : ""}`}
+      className={`sidebar${sidebarMode === "workspaces" ? " search-open" : ""}${sidebarMode === "sessionManager" ? " is-session-manager" : ""}`}
       ref={workspaceDropTargetRef}
       onDragOver={onWorkspaceDragOver}
       onDragEnter={onWorkspaceDragEnter}
@@ -1130,24 +1102,18 @@ export const Sidebar = memo(function Sidebar({
       <SidebarHeader
         onSelectHome={handleSelectHome}
         sessionManagerActive={sidebarMode === "sessionManager"}
-        onToggleSessionManager={() => switchSidebarMode(sidebarMode === "sessionManager" ? "workspaces" : "sessionManager")}
         onAddWorkspace={onAddWorkspace}
-        onToggleSearch={() => setIsSearchOpen((prev) => !prev)}
-        isSearchOpen={isSearchOpen}
-        threadListSortKey={threadListSortKey}
-        onSetThreadListSortKey={onSetThreadListSortKey}
-        threadListOrganizeMode={threadListOrganizeMode}
-        onSetThreadListOrganizeMode={onSetThreadListOrganizeMode}
+        canCollapseSidebar={canCollapseSidebar}
+        onCollapseSidebar={onCollapseSidebar}
+        onFocusSearch={handleFocusSearch}
+        searchQuery={searchQuery}
+        onSearchQueryChange={setSearchQuery}
+        onClearSearch={() => setSearchQuery("")}
+        searchInputRef={searchInputRef}
         onRefreshAllThreads={sidebarMode === "sessionManager" ? sessionManager.refresh : onRefreshAllThreads}
         refreshDisabled={sidebarMode === "sessionManager" ? sessionManager.loading : refreshDisabled || refreshInProgress}
         refreshInProgress={sidebarMode === "sessionManager" ? sessionManager.loading : refreshInProgress}
       />
-      {sidebarMode === "workspaces" && <SidebarSearchBar
-        isSearchOpen={isSearchOpen}
-        searchQuery={searchQuery}
-        onSearchQueryChange={setSearchQuery}
-        onClearSearch={() => setSearchQuery("")}
-      />}
       {sidebarMode === "sessionManager" && <SessionManagerToolbar manager={sessionManager} />}
       {sidebarMode === "sessionManager" && <SessionManagerBatchBar />}
       <div
@@ -1313,17 +1279,6 @@ export const Sidebar = memo(function Sidebar({
         codexKeyProfiles={codexKeyProfiles}
         activeCodexKeyProfileId={activeCodexKeyProfileId}
         onSelectCodexKeyProfile={onSelectCodexKeyProfile}
-        onOpenSettings={onOpenSettings}
-        onOpenDebug={onOpenDebug}
-        showDebugButton={showDebugButton}
-        showAccountSwitcher={showAccountSwitcher}
-        accountLabel={accountButtonLabel}
-        accountActionLabel={accountActionLabel}
-        accountDisabled={accountSwitchDisabled}
-        accountSwitching={accountSwitching}
-        accountCancelDisabled={accountCancelDisabled}
-        onSwitchAccount={onSwitchAccount}
-        onCancelSwitchAccount={onCancelSwitchAccount}
       />
     </aside>
   );

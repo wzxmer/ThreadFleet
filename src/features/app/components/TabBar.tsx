@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import FolderKanban from "lucide-react/dist/esm/icons/folder-kanban";
 import GitBranch from "lucide-react/dist/esm/icons/git-branch";
 import House from "lucide-react/dist/esm/icons/house";
 import MessagesSquare from "lucide-react/dist/esm/icons/messages-square";
@@ -13,9 +12,8 @@ type TabBarProps = {
   onSelect: (tab: TabKey) => void;
 };
 
-const tabs: { id: TabKey; labelKey: "nav.home" | "nav.projects" | "nav.chat" | "nav.git" | "nav.log"; icon: ReactNode }[] = [
+const tabs: { id: TabKey; labelKey: "nav.home" | "nav.chat" | "nav.git" | "nav.log"; icon: ReactNode }[] = [
   { id: "home", labelKey: "nav.home", icon: <House className="tabbar-icon" /> },
-  { id: "projects", labelKey: "nav.projects", icon: <FolderKanban className="tabbar-icon" /> },
   { id: "codex", labelKey: "nav.chat", icon: <MessagesSquare className="tabbar-icon" /> },
   { id: "git", labelKey: "nav.git", icon: <GitBranch className="tabbar-icon" /> },
   { id: "log", labelKey: "nav.log", icon: <TerminalSquare className="tabbar-icon" /> },

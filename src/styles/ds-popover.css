@@ -34,8 +34,6 @@
 .ds-popover-item.is-active {
   background: var(--surface-hover);
   color: var(--ds-popover-item-text-active, var(--text-stronger));
-  transform: none;
-  box-shadow: none;
 }
 
 .ds-popover-item-icon {

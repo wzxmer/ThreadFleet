@@ -1,35 +1,23 @@
-import ArrowDownUp from "lucide-react/dist/esm/icons/arrow-down-up";
-import BetweenHorizontalStart from "lucide-react/dist/esm/icons/between-horizontal-start";
-import Calendar from "lucide-react/dist/esm/icons/calendar";
 import FolderPlus from "lucide-react/dist/esm/icons/folder-plus";
 import House from "lucide-react/dist/esm/icons/house";
-import FolderTree from "lucide-react/dist/esm/icons/folder-tree";
-import ListFilter from "lucide-react/dist/esm/icons/list-filter";
-import ListTree from "lucide-react/dist/esm/icons/list-tree";
+import PanelLeftClose from "lucide-react/dist/esm/icons/panel-left-close";
 import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw";
 import Search from "lucide-react/dist/esm/icons/search";
-import Library from "lucide-react/dist/esm/icons/library";
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { ThreadListOrganizeMode, ThreadListSortKey } from "../../../types";
-import {
-  MenuTrigger,
-  PopoverMenuItem,
-  PopoverSurface,
-} from "../../design-system/components/popover/PopoverPrimitives";
+import type { RefObject } from "react";
 import { useI18n } from "@/features/i18n/I18nProvider";
-import { useMenuController } from "../hooks/useMenuController";
+import { SidebarSearchBar } from "./SidebarSearchBar";
 
 type SidebarHeaderProps = {
   onSelectHome: () => void;
   sessionManagerActive: boolean;
-  onToggleSessionManager: () => void;
   onAddWorkspace: () => void;
-  onToggleSearch: () => void;
-  isSearchOpen: boolean;
-  threadListSortKey: ThreadListSortKey;
-  onSetThreadListSortKey: (sortKey: ThreadListSortKey) => void;
-  threadListOrganizeMode: ThreadListOrganizeMode;
-  onSetThreadListOrganizeMode: (organizeMode: ThreadListOrganizeMode) => void;
+  canCollapseSidebar: boolean;
+  onCollapseSidebar: () => void;
+  onFocusSearch: () => void;
+  searchQuery: string;
+  onSearchQueryChange: (value: string) => void;
+  onClearSearch: () => void;
+  searchInputRef: RefObject<HTMLInputElement | null>;
   onRefreshAllThreads: () => void;
   refreshDisabled?: boolean;
   refreshInProgress?: boolean;
@@ -38,104 +26,33 @@ type SidebarHeaderProps = {
 export function SidebarHeader({
   onSelectHome,
   sessionManagerActive,
-  onToggleSessionManager,
   onAddWorkspace,
-  onToggleSearch,
-  isSearchOpen,
-  threadListSortKey,
-  onSetThreadListSortKey,
-  threadListOrganizeMode,
-  onSetThreadListOrganizeMode,
+  canCollapseSidebar,
+  onCollapseSidebar,
+  onFocusSearch,
+  searchQuery,
+  onSearchQueryChange,
+  onClearSearch,
+  searchInputRef,
   onRefreshAllThreads,
   refreshDisabled = false,
   refreshInProgress = false,
 }: SidebarHeaderProps) {
   const { t } = useI18n();
-  const sortMenu = useMenuController();
-  const { isOpen: sortMenuOpen, containerRef: sortMenuRef } = sortMenu;
-  const sortMenuPopoverRef = useRef<HTMLDivElement | null>(null);
-  const [sortMenuShift, setSortMenuShift] = useState<{ x: number; y: number }>({
-    x: 0,
-    y: 0,
-  });
-
-  const recalculateSortMenuPosition = useCallback(() => {
-    const popover = sortMenuPopoverRef.current;
-    if (!popover || typeof window === "undefined") {
-      return;
-    }
-    const popoverRect = popover.getBoundingClientRect();
-    const sidebarRect = sortMenuRef.current
-      ?.closest(".sidebar")
-      ?.getBoundingClientRect();
-    const minLeft = sidebarRect ? sidebarRect.left + 8 : 8;
-    const maxRight = sidebarRect
-      ? Math.min(window.innerWidth - 8, sidebarRect.right - 8)
-      : window.innerWidth - 8;
-    const minTop = 8;
-    const maxBottom = window.innerHeight - 8;
-
-    let shiftX = 0;
-    if (popoverRect.left < minLeft) {
-      shiftX += minLeft - popoverRect.left;
-    }
-    if (popoverRect.right + shiftX > maxRight) {
-      shiftX -= popoverRect.right + shiftX - maxRight;
-    }
-
-    let shiftY = 0;
-    if (popoverRect.bottom > maxBottom) {
-      shiftY -= popoverRect.bottom - maxBottom;
-    }
-    if (popoverRect.top + shiftY < minTop) {
-      shiftY += minTop - (popoverRect.top + shiftY);
-    }
-
-    setSortMenuShift((current) =>
-      current.x === shiftX && current.y === shiftY
-        ? current
-        : { x: shiftX, y: shiftY },
-    );
-  }, [sortMenuRef]);
-
-  useEffect(() => {
-    if (!sortMenuOpen) {
-      setSortMenuShift({ x: 0, y: 0 });
-      return;
-    }
-    recalculateSortMenuPosition();
-    const onWindowChange = () => recalculateSortMenuPosition();
-    window.addEventListener("resize", onWindowChange);
-    window.addEventListener("scroll", onWindowChange, true);
-    return () => {
-      window.removeEventListener("resize", onWindowChange);
-      window.removeEventListener("scroll", onWindowChange, true);
-    };
-  }, [recalculateSortMenuPosition, sortMenuOpen]);
-
-  const handleSelectSort = (sortKey: ThreadListSortKey) => {
-    sortMenu.close();
-    if (sortKey === threadListSortKey) {
-      return;
-    }
-    onSetThreadListSortKey(sortKey);
-  };
-
-  const handleSelectOrganize = (organizeMode: ThreadListOrganizeMode) => {
-    sortMenu.close();
-    if (organizeMode === threadListOrganizeMode) {
-      return;
-    }
-    onSetThreadListOrganizeMode(organizeMode);
-  };
 
   return (
     <div className="sidebar-header">
       <div className="sidebar-header-title">
+        {sessionManagerActive && (
+          <div className="sidebar-object-title" aria-hidden="true">
+            <strong>{t("sidebar.sessionsTitle")}</strong>
+          </div>
+        )}
         <div className="sidebar-title-group">
           <button
             className="sidebar-title-add ds-tooltip-trigger"
             onClick={onAddWorkspace}
+            data-button-elevation="none"
             data-tauri-drag-region="false"
             aria-label={t("sidebar.addProject")}
             data-tooltip={t("sidebar.addProject")}
@@ -146,8 +63,28 @@ export function SidebarHeader({
             <FolderPlus aria-hidden />
           </button>
           <button
+            className="ghost sidebar-refresh-toggle ds-tooltip-trigger"
+            onClick={onRefreshAllThreads}
+            data-button-elevation="none"
+            data-tauri-drag-region="false"
+            aria-label={sessionManagerActive ? t("sessionManager.refresh") : t("sidebar.refreshThreads")}
+            type="button"
+            title={sessionManagerActive ? t("sessionManager.refresh") : t("sidebar.refreshThreads")}
+            data-tooltip={sessionManagerActive ? t("sessionManager.refresh") : t("sidebar.refreshThreads")}
+            data-tooltip-align="start"
+            data-tooltip-placement="bottom"
+            disabled={refreshDisabled}
+            aria-busy={refreshInProgress}
+          >
+            <RefreshCw
+              className={refreshInProgress ? "sidebar-refresh-icon spinning" : "sidebar-refresh-icon"}
+              aria-hidden
+            />
+          </button>
+          <button
             className="sidebar-home-toggle ds-tooltip-trigger"
             onClick={onSelectHome}
+            data-button-elevation="none"
             data-tauri-drag-region="false"
             aria-label={t("sidebar.openHome")}
             data-tooltip={t("sidebar.home")}
@@ -158,138 +95,50 @@ export function SidebarHeader({
           >
             <House aria-hidden />
           </button>
-          <button
-            className={`sidebar-home-toggle ds-tooltip-trigger${sessionManagerActive ? " is-active" : ""}`}
-            onClick={onToggleSessionManager}
-            aria-label={t("sessionManager.title")}
-            data-tooltip={t("sessionManager.title")}
-            data-tooltip-placement="bottom"
-            aria-pressed={sessionManagerActive}
-            type="button"
-          >
-            <Library aria-hidden />
-          </button>
         </div>
       </div>
       <div className="sidebar-header-actions">
-        {!sessionManagerActive && <div className="sidebar-sort-menu" ref={sortMenuRef}>
-          <MenuTrigger
-            isOpen={sortMenuOpen}
-            activeClassName="is-active"
-            className="ghost sidebar-sort-toggle ds-tooltip-trigger"
-            onClick={sortMenu.toggle}
+        {!sessionManagerActive && (
+          <SidebarSearchBar
+            isSearchOpen
+            searchQuery={searchQuery}
+            onSearchQueryChange={onSearchQueryChange}
+            onClearSearch={onClearSearch}
+            inputRef={searchInputRef}
+            autoFocus={false}
+          />
+        )}
+        {!sessionManagerActive && (
+          <button
+            className={`ghost sidebar-search-toggle ds-tooltip-trigger${searchQuery.trim() ? " is-active" : ""}`}
+            onClick={onFocusSearch}
+            data-button-elevation="none"
             data-tauri-drag-region="false"
-            aria-label={t("sidebar.organizeAndSort")}
-            title={t("sidebar.organizeAndSort")}
-            data-tooltip={t("sidebar.organizeAndSort")}
+            aria-label={t("sidebar.focusSearch")}
+            data-tooltip={t("sidebar.searchThreads")}
             data-tooltip-align="end"
             data-tooltip-placement="bottom"
+            type="button"
           >
-            <ListFilter aria-hidden />
-          </MenuTrigger>
-          {sortMenuOpen && (
-            <PopoverSurface
-              className="sidebar-sort-dropdown"
-              role="menu"
-              ref={sortMenuPopoverRef}
-              style={
-                sortMenuShift.x !== 0 || sortMenuShift.y !== 0
-                  ? { transform: `translate(${sortMenuShift.x}px, ${sortMenuShift.y}px)` }
-                  : undefined
-              }
-            >
-              <div className="sidebar-sort-section-label">{t("sidebar.organize")}</div>
-              <PopoverMenuItem
-                className="sidebar-sort-option"
-                role="menuitemradio"
-                aria-checked={threadListOrganizeMode === "by_project"}
-                onClick={() => handleSelectOrganize("by_project")}
-                data-tauri-drag-region="false"
-                icon={<FolderTree aria-hidden />}
-                active={threadListOrganizeMode === "by_project"}
-              >
-                {t("sidebar.byProject")}
-              </PopoverMenuItem>
-              <PopoverMenuItem
-                className="sidebar-sort-option"
-                role="menuitemradio"
-                aria-checked={threadListOrganizeMode === "by_project_activity"}
-                onClick={() => handleSelectOrganize("by_project_activity")}
-                data-tauri-drag-region="false"
-                icon={<BetweenHorizontalStart aria-hidden />}
-                active={threadListOrganizeMode === "by_project_activity"}
-              >
-                {t("sidebar.byProjectActivity")}
-              </PopoverMenuItem>
-              <PopoverMenuItem
-                className="sidebar-sort-option"
-                role="menuitemradio"
-                aria-checked={threadListOrganizeMode === "threads_only"}
-                onClick={() => handleSelectOrganize("threads_only")}
-                data-tauri-drag-region="false"
-                icon={<ListTree aria-hidden />}
-                active={threadListOrganizeMode === "threads_only"}
-              >
-                {t("sidebar.threadsOnly")}
-              </PopoverMenuItem>
-              <div className="sidebar-sort-divider" aria-hidden />
-              <div className="sidebar-sort-section-label">{t("sidebar.sort")}</div>
-              <PopoverMenuItem
-                className="sidebar-sort-option"
-                role="menuitemradio"
-                aria-checked={threadListSortKey === "updated_at"}
-                onClick={() => handleSelectSort("updated_at")}
-                data-tauri-drag-region="false"
-                icon={<ArrowDownUp aria-hidden />}
-                active={threadListSortKey === "updated_at"}
-              >
-                {t("sidebar.recentlyUpdated")}
-              </PopoverMenuItem>
-              <PopoverMenuItem
-                className="sidebar-sort-option"
-                role="menuitemradio"
-                aria-checked={threadListSortKey === "created_at"}
-                onClick={() => handleSelectSort("created_at")}
-                data-tauri-drag-region="false"
-                icon={<Calendar aria-hidden />}
-                active={threadListSortKey === "created_at"}
-              >
-                {t("sidebar.createdAt")}
-              </PopoverMenuItem>
-            </PopoverSurface>
-          )}
-        </div>}
-        <button
-          className="ghost sidebar-refresh-toggle ds-tooltip-trigger"
-          onClick={onRefreshAllThreads}
-          data-tauri-drag-region="false"
-          aria-label={sessionManagerActive ? t("sessionManager.refresh") : t("sidebar.refreshThreads")}
-          type="button"
-          title={sessionManagerActive ? t("sessionManager.refresh") : t("sidebar.refreshThreads")}
-          data-tooltip={sessionManagerActive ? t("sessionManager.refresh") : t("sidebar.refreshThreads")}
-          data-tooltip-align="end"
-          data-tooltip-placement="bottom"
-          disabled={refreshDisabled}
-          aria-busy={refreshInProgress}
-        >
-          <RefreshCw
-            className={refreshInProgress ? "sidebar-refresh-icon spinning" : "sidebar-refresh-icon"}
-            aria-hidden
-          />
-        </button>
-        {!sessionManagerActive && <button
-          className={`ghost sidebar-search-toggle ds-tooltip-trigger${isSearchOpen ? " is-active" : ""}`}
-          onClick={onToggleSearch}
-          data-tauri-drag-region="false"
-          aria-label={t("sidebar.toggleSearch")}
-          data-tooltip={isSearchOpen ? t("sidebar.closeSearch") : t("sidebar.searchThreads")}
-          data-tooltip-align="end"
-          data-tooltip-placement="bottom"
-          aria-pressed={isSearchOpen}
-          type="button"
-        >
-          <Search aria-hidden />
-        </button>}
+            <Search aria-hidden />
+          </button>
+        )}
+        {canCollapseSidebar && (
+          <button
+            className="ghost sidebar-collapse-toggle ds-tooltip-trigger"
+            onClick={onCollapseSidebar}
+            data-button-elevation="none"
+            data-tauri-drag-region="false"
+            aria-label={t("sidebar.hideThreadsSidebar")}
+            title={t("sidebar.hideThreadsSidebar")}
+            data-tooltip={t("sidebar.hideThreadsSidebar")}
+            data-tooltip-align="end"
+            data-tooltip-placement="bottom"
+            type="button"
+          >
+            <PanelLeftClose aria-hidden />
+          </button>
+        )}
       </div>
     </div>
   );

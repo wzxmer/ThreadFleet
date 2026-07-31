@@ -1,4 +1,5 @@
 import { useEffect, useRef, type MouseEvent, type ReactNode } from "react";
+import type { ActivePanel } from "./panelTypes";
 import { MainTopbar } from "../../app/components/MainTopbar";
 import { ChatPane } from "./ChatPane";
 
@@ -55,12 +56,14 @@ function setLayerInert(
 }
 
 type DesktopLayoutProps = {
+  tabletNavNode: ReactNode;
   sidebarNode: ReactNode;
   updateToastNode: ReactNode;
   approvalToastsNode: ReactNode;
   errorToastsNode: ReactNode;
+  activePanel: ActivePanel;
+  libraryOpen: boolean;
   homeNode: ReactNode;
-  showHome: boolean;
   showWorkspace: boolean;
   topbarLeftNode: ReactNode;
   topbarActionsNode?: ReactNode;
@@ -73,7 +76,12 @@ type DesktopLayoutProps = {
   planPanelNode: ReactNode;
   composerNode: ReactNode;
   terminalDockNode: ReactNode;
+  settingsOpen: boolean;
+  settingsNode: ReactNode;
   debugPanelNode: ReactNode;
+  debugPanelFullNode: ReactNode;
+  compactEmptyCodexNode: ReactNode;
+  compactEmptyGitNode: ReactNode;
   hasActivePlan: boolean;
   onSidebarResizeStart: (event: MouseEvent<HTMLDivElement>) => void;
   onChatDiffSplitPositionResizeStart: (event: MouseEvent<HTMLDivElement>) => void;
@@ -82,12 +90,14 @@ type DesktopLayoutProps = {
 };
 
 export function DesktopLayout({
+  tabletNavNode,
   sidebarNode,
   updateToastNode,
   approvalToastsNode,
   errorToastsNode,
+  activePanel,
+  libraryOpen,
   homeNode,
-  showHome,
   showWorkspace,
   topbarLeftNode,
   topbarActionsNode,
@@ -100,7 +110,12 @@ export function DesktopLayout({
   planPanelNode,
   composerNode,
   terminalDockNode,
+  settingsOpen,
+  settingsNode,
   debugPanelNode,
+  debugPanelFullNode,
+  compactEmptyCodexNode,
+  compactEmptyGitNode,
   hasActivePlan,
   onSidebarResizeStart,
   onRightPanelResizeStart,
@@ -117,6 +132,14 @@ export function DesktopLayout({
     preloadGitDiffs,
     centerMode,
   });
+  const showSessionsPanel = activePanel === "sessions";
+  const showLibraryPanel = libraryOpen || activePanel === "library";
+  const showHomePanel = activePanel === "home" || showLibraryPanel;
+  const showGitPanel = activePanel === "git";
+  const showTerminalPanel = activePanel === "terminal";
+  const showActivityPanel = activePanel === "activity";
+  const showSettingsPanel = settingsOpen || activePanel === "settings";
+  const showSidebarPanel = showSessionsPanel || showLibraryPanel;
 
   useEffect(() => {
     const diffLayer = diffLayerRef.current;
@@ -141,21 +164,50 @@ export function DesktopLayout({
 
   return (
     <>
-      {sidebarNode}
-      <div
-        className="sidebar-resizer"
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize sidebar"
-        onMouseDown={onSidebarResizeStart}
-      />
+      {tabletNavNode}
+      {showSidebarPanel ? (
+        <>
+          {sidebarNode}
+          <div
+            className="sidebar-resizer"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize sidebar"
+            onMouseDown={onSidebarResizeStart}
+          />
+        </>
+      ) : null}
 
       <section className="main">
         {updateToastNode}
         {errorToastsNode}
-        {showHome && homeNode}
+        {showSettingsPanel ? (
+          <div className="settings-surface-host">{settingsNode}</div>
+        ) : null}
+        {!showSettingsPanel && showHomePanel && homeNode}
+        {!showSettingsPanel && showGitPanel && (
+          <div className="desktop-git-surface">
+            {showWorkspace ? (
+              <>
+                <div className="desktop-git-sidebar">{gitDiffPanelNode}</div>
+                <div className="desktop-git-viewer">{gitDiffViewerNode}</div>
+              </>
+            ) : (
+              compactEmptyGitNode
+            )}
+          </div>
+        )}
+        {!showSettingsPanel && showTerminalPanel && (
+          <div className="desktop-terminal-surface">{terminalDockNode}</div>
+        )}
+        {!showSettingsPanel && showActivityPanel && (
+          <div className="desktop-activity-surface">{debugPanelFullNode}</div>
+        )}
+        {!showSettingsPanel && showSessionsPanel && !showWorkspace && (
+          <div className="desktop-empty-session-surface">{compactEmptyCodexNode}</div>
+        )}
 
-        {showWorkspace && (
+        {!showSettingsPanel && showSessionsPanel && showWorkspace && (
           <>
             <MainTopbar leftNode={topbarLeftNode} actionsNode={topbarActionsNode} />
             {approvalToastsNode}
@@ -238,9 +290,9 @@ export function DesktopLayout({
               <div className="right-panel-bottom">{planPanelNode}</div>
             </div>
             {terminalDockNode}
-            {debugPanelNode}
           </>
         )}
+        {showSessionsPanel ? debugPanelNode : null}
       </section>
     </>
   );

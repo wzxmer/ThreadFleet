@@ -3,10 +3,7 @@ import type { AppSettings } from "../../../types";
 import { resolveAppLanguage } from "@/features/i18n/appLanguage";
 import { composeContentFontFamily, composeUiFontFamily } from "@utils/fonts";
 
-export function useCodeCssVars(
-  appSettings: AppSettings,
-  themeAccent: AppSettings["themeAccent"] = appSettings.themeAccent,
-) {
+export function useCodeCssVars(appSettings: AppSettings) {
   useEffect(() => {
     if (typeof document === "undefined") {
       return;
@@ -43,7 +40,6 @@ export function useCodeCssVars(
       `${appSettings.uiFontWeight}`,
     );
     root.style.setProperty("--code-font-size", `${appSettings.codeFontSize}px`);
-    root.dataset.themeAccent = themeAccent;
     const resolvedLanguage = resolveAppLanguage(appSettings.appLanguage);
     root.dataset.appLanguage = resolvedLanguage;
     root.lang = resolvedLanguage === "zh" ? "zh-CN" : "en";
@@ -53,7 +49,6 @@ export function useCodeCssVars(
     appSettings.codeFontSize,
     appSettings.messageFontSize,
     appSettings.processFontSize,
-    themeAccent,
     appSettings.uiCjkFontFamily,
     appSettings.uiFontFamily,
     appSettings.uiFontSize,

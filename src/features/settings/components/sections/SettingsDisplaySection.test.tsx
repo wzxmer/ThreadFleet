@@ -24,22 +24,12 @@ describe("SettingsDisplaySection", () => {
     vi.clearAllMocks();
   });
 
-  it("applies a color preset without changing the reading style", () => {
-    const onUpdateAppSettings = vi.fn(async (_next: AppSettings) => {});
-
+  it("does not expose removed conversation color presets", () => {
     render(
       <SettingsDisplaySection
         appSettings={
           ({
-            theme: "system",
-            themeAccent: "codex",
-            messageReadingStyle: "bubble",
-            messageCanvasColor: "#ffffff",
-            messageUserBubbleColor: "#ffffff",
-            messageUserTextColor: "#102033",
-            messageAssistantBubbleColor: "#ffffff",
-            messageAssistantAccentColor: "#7dadff",
-            messageAssistantTextColor: "#263040",
+            theme: "light",
             usageShowRemaining: false,
             showMessageFilePath: true,
             threadTitleAutogenerationEnabled: false,
@@ -56,7 +46,7 @@ describe("SettingsDisplaySection", () => {
         scaleDraft="100%"
         codeFontDraft=""
         codeFontSizeDraft={11}
-        onUpdateAppSettings={onUpdateAppSettings}
+        onUpdateAppSettings={vi.fn(async () => {})}
         onToggleTransparency={vi.fn()}
         onSetScaleDraft={vi.fn() as any}
         onCommitScale={vi.fn(async () => {})}
@@ -70,84 +60,8 @@ describe("SettingsDisplaySection", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("radio", { name: /黑橙/ }));
-
-    expect(onUpdateAppSettings).toHaveBeenCalledWith(
-      expect.objectContaining({
-        messageCanvasColor: "#111315",
-        messageUserBubbleColor: "#3a2a1d",
-        messageUserTextColor: "#fff3df",
-        messageAssistantBubbleColor: "#1b1b1c",
-        messageAssistantAccentColor: "#ff9f43",
-      }),
-    );
-    const presetSettings = onUpdateAppSettings.mock.calls[0]?.[0];
-    expect(presetSettings).toEqual(
-      expect.objectContaining({
-        theme: "dark",
-        themeAccent: "orange",
-        messageReadingStyle: "bubble",
-      }),
-    );
-  });
-
-  it("applies a pure white canvas preset", () => {
-    const onUpdateAppSettings = vi.fn(async () => {});
-
-    render(
-      <SettingsDisplaySection
-        appSettings={
-          ({
-            theme: "system",
-            themeAccent: "codex",
-            messageReadingStyle: "bubble",
-            messageCanvasColor: "#fffaf5",
-            messageUserBubbleColor: "#fff4e8",
-            messageUserTextColor: "#332519",
-            messageAssistantBubbleColor: "#fffaf5",
-            messageAssistantAccentColor: "#f28b3c",
-            messageAssistantTextColor: "#2d241d",
-            usageShowRemaining: false,
-            showMessageFilePath: true,
-            threadTitleAutogenerationEnabled: false,
-            uiFontFamily: "",
-            codeFontFamily: "",
-            codeFontSize: 11,
-            notificationSoundsEnabled: true,
-            systemNotificationsEnabled: true,
-          } as unknown) as AppSettings
-        }
-        reduceTransparency={false}
-        scaleShortcutTitle=""
-        scaleShortcutText=""
-        scaleDraft="100%"
-        codeFontDraft=""
-        codeFontSizeDraft={11}
-        onUpdateAppSettings={onUpdateAppSettings}
-        onToggleTransparency={vi.fn()}
-        onSetScaleDraft={vi.fn() as any}
-        onCommitScale={vi.fn(async () => {})}
-        onResetScale={vi.fn(async () => {})}
-        onSetCodeFontDraft={vi.fn() as any}
-        onCommitCodeFont={vi.fn(async () => {})}
-        onSetCodeFontSizeDraft={vi.fn() as any}
-        onCommitCodeFontSize={vi.fn(async () => {})}
-        onTestNotificationSound={vi.fn()}
-        onTestSystemNotification={vi.fn()}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole("radio", { name: /纯白/ }));
-
-    expect(onUpdateAppSettings).toHaveBeenCalledWith(
-      expect.objectContaining({
-        theme: "light",
-        themeAccent: "orange",
-        messageReadingStyle: "bubble",
-        messageCanvasColor: "#ffffff",
-        messageAssistantBubbleColor: "#ffffff",
-      }),
-    );
+    expect(screen.queryByText("配色方案")).toBeNull();
+    expect(screen.queryByRole("radio", { name: /黑橙/ })).toBeNull();
   });
 
   it("applies font clarity presets", () => {
@@ -160,7 +74,7 @@ describe("SettingsDisplaySection", () => {
       <SettingsDisplaySection
         appSettings={
           ({
-            theme: "system",
+            theme: "light",
             usageShowRemaining: false,
             showMessageFilePath: true,
             chatHistoryScrollbackItems: 200,
@@ -227,7 +141,7 @@ describe("SettingsDisplaySection", () => {
       <SettingsDisplaySection
         appSettings={
           ({
-            theme: "system",
+            theme: "light",
             usageShowRemaining: false,
             showMessageFilePath: true,
             chatHistoryScrollbackItems: 200,
@@ -273,7 +187,7 @@ describe("SettingsDisplaySection", () => {
       <SettingsDisplaySection
         appSettings={
           ({
-            theme: "system",
+            theme: "light",
             usageShowRemaining: false,
             showMessageFilePath: true,
             chatHistoryScrollbackItems: 200,
@@ -323,7 +237,7 @@ describe("SettingsDisplaySection", () => {
       <SettingsDisplaySection
         appSettings={
           ({
-            theme: "system",
+            theme: "light",
             usageShowRemaining: false,
             showMessageFilePath: true,
             chatHistoryScrollbackItems: 200,
@@ -369,7 +283,7 @@ describe("SettingsDisplaySection", () => {
       <SettingsDisplaySection
         appSettings={
           ({
-            theme: "system",
+            theme: "light",
             showCodexUsage: false,
             usageShowRemaining: false,
             showMessageFilePath: true,
@@ -415,7 +329,7 @@ describe("SettingsDisplaySection", () => {
       <SettingsDisplaySection
         appSettings={
           ({
-            theme: "system",
+            theme: "light",
             usageShowRemaining: false,
             showMessageFilePath: true,
             chatHistoryScrollbackItems: 200,

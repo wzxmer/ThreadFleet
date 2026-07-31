@@ -1,5 +1,7 @@
 import type { MouseEvent } from "react";
+import ChevronRight from "lucide-react/dist/esm/icons/chevron-right";
 import Ellipsis from "lucide-react/dist/esm/icons/ellipsis";
+import Folder from "lucide-react/dist/esm/icons/folder";
 import Plus from "lucide-react/dist/esm/icons/plus";
 
 import type { WorkspaceInfo } from "../../../types";
@@ -8,6 +10,7 @@ import { useI18n } from "@/features/i18n/I18nProvider";
 type WorkspaceCardProps = {
   workspace: WorkspaceInfo;
   workspaceName?: React.ReactNode;
+  threadCount?: number;
   summary?: string | null;
   isActive: boolean;
   isCollapsed: boolean;
@@ -32,6 +35,7 @@ type WorkspaceCardProps = {
 export function WorkspaceCard({
   workspace,
   workspaceName,
+  threadCount,
   summary = null,
   isActive,
   isCollapsed,
@@ -71,9 +75,9 @@ export function WorkspaceCard({
         <div className="workspace-copy">
           <div className="workspace-name-row">
             <div className="workspace-title">
-              <span className="workspace-name">{workspaceName ?? workspace.name}</span>
               <button
                 className={`workspace-toggle ${isCollapsed ? "" : "expanded"}`}
+                data-button-elevation="none"
                 onClick={(event) => {
                   event.stopPropagation();
                   toggleWorkspace();
@@ -82,8 +86,15 @@ export function WorkspaceCard({
                 aria-label={isCollapsed ? t("sidebar.showAgents") : t("sidebar.hideAgents")}
                 aria-expanded={!isCollapsed}
               >
-                <span className="workspace-toggle-icon">›</span>
+                <ChevronRight className="workspace-toggle-icon" aria-hidden />
               </button>
+              <Folder className="workspace-folder-icon" aria-hidden />
+              <span className="workspace-name">{workspaceName ?? workspace.name}</span>
+              {typeof threadCount === "number" && (
+                <span className="workspace-thread-count" aria-hidden>
+                  {threadCount}
+                </span>
+              )}
             </div>
           </div>
           {summary && <div className="workspace-summary">{summary}</div>}

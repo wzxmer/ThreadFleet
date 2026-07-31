@@ -1,4 +1,4 @@
-import { lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import successSoundUrl from "@/assets/success-notification.mp3";
 import errorSoundUrl from "@/assets/error-notification.mp3";
 import { MainAppShell } from "@app/components/MainAppShell";
@@ -41,7 +41,6 @@ import { getActivePlanStream } from "@/features/plan/planStream";
 import { useThreadRows } from "@app/hooks/useThreadRows";
 import { useInterruptShortcut } from "@app/hooks/useInterruptShortcut";
 import { useArchiveShortcut } from "@app/hooks/useArchiveShortcut";
-import { useCopyThread } from "@threads/hooks/useCopyThread";
 import { useTerminalController } from "@/features/terminal/hooks/useTerminalController";
 import { useWorkspaceLaunchScript } from "@app/hooks/useWorkspaceLaunchScript";
 import { useWorkspaceLaunchScripts } from "@app/hooks/useWorkspaceLaunchScripts";
@@ -211,7 +210,6 @@ export default function MainApp() {
     debugOpen,
     setDebugOpen,
     debugEntries,
-    showDebugButton,
     addDebugEntry,
     handleCopyDebug,
     clearDebugEntries,
@@ -239,7 +237,6 @@ export default function MainApp() {
     threadListSortKey,
     setThreadListSortKey,
     threadListOrganizeMode,
-    setThreadListOrganizeMode,
   } = useThreadListSortKey();
   const [activeTab, setActiveTab] = useState<
     "home" | "projects" | "codex" | "git" | "log"
@@ -396,6 +393,12 @@ export default function MainApp() {
     isPhone,
     sidebarCollapsed,
     rightPanelCollapsed,
+    autoSidebarCollapsed,
+    autoRightPanelCollapsed,
+    sidebarOverlayOpen,
+    tabletProjectsOpen,
+    revealSidebar,
+    hideSidebar,
     collapseSidebar,
     expandSidebar,
     collapseRightPanel,
@@ -412,10 +415,23 @@ export default function MainApp() {
     toggleDebugPanelShortcut: appSettings.toggleDebugPanelShortcut,
     toggleTerminalShortcut: appSettings.toggleTerminalShortcut,
   });
+  const handleSessionManagerActiveChange = useCallback(
+    (active: boolean) => {
+      setSessionManagerOpen(active);
+      if (active) {
+        revealSidebar();
+      } else {
+        hideSidebar();
+      }
+    },
+    [hideSidebar, revealSidebar],
+  );
   const sidebarToggleProps = {
     isCompact,
     sidebarCollapsed,
     rightPanelCollapsed,
+    autoSidebarCollapsed,
+    autoRightPanelCollapsed,
     onCollapseSidebar: collapseSidebar,
     onExpandSidebar: expandSidebar,
     onCollapseRightPanel: collapseRightPanel,
@@ -837,12 +853,9 @@ export default function MainApp() {
     threadSortKey: threadListSortKey,
     onThreadCodexMetadataDetected: handleThreadCodexMetadataDetected,
   });
-  const selectedWorkflowGateId = useMemo(
-    () => projectActiveWorkspace && activeThreadId
-      ? getWorkflowGateId(projectActiveWorkspace.id, activeThreadId)
-      : null,
-    [activeThreadId, getWorkflowGateId, projectActiveWorkspace, threadCodexParamsVersion],
-  );
+  const selectedWorkflowGateId = projectActiveWorkspace && activeThreadId
+    ? getWorkflowGateId(projectActiveWorkspace.id, activeThreadId)
+    : null;
   const handleSelectWorkflowGateId = useCallback(
     (workflowId: string | null) => {
       if (!projectActiveWorkspace || !activeThreadId) {
@@ -891,6 +904,43 @@ export default function MainApp() {
   );
   const activeThreadIsProcessing = Boolean(
     activeThreadId && threadStatusById[activeThreadId]?.isProcessing,
+  );
+  const activeThreadHasPendingApproval = Boolean(
+    activeThreadId &&
+      activeWorkspaceId &&
+      approvals.some((approval) => {
+        if (approval.workspace_id !== activeWorkspaceId) {
+          return false;
+        }
+        const params = approval.params;
+        const threadId = String(params.threadId ?? params.thread_id ?? "").trim();
+        return threadId === activeThreadId;
+      }),
+  );
+  const activeThreadHasPendingUserInput = Boolean(
+    activeThreadId &&
+      activeWorkspaceId &&
+      userInputRequests.some(
+        (request) =>
+          request.workspace_id === activeWorkspaceId &&
+          request.params.thread_id === activeThreadId,
+      ),
+  );
+  const activeThreadCurrentTurnId = activeThreadId
+    ? activeTurnIdByThread[activeThreadId] ?? null
+    : null;
+  const activeThreadExecutionSummary = activeThreadId
+    ? turnExecutionSummaryByThread[activeThreadId] ?? null
+    : null;
+  const activeThreadNeedsBackgroundRefresh = Boolean(
+    activeThreadId &&
+      (activeThreadIsProcessing ||
+        threadStatusById[activeThreadId]?.isReviewing ||
+        activeThreadCurrentTurnId ||
+        activeThreadHasPendingApproval ||
+        activeThreadHasPendingUserInput ||
+        !activeThreadExecutionSummary ||
+        activeThreadExecutionSummary.status === "active"),
   );
   const hasAnyProcessingThread = Object.values(threadStatusById).some(
     (status) => status?.isProcessing,
@@ -966,6 +1016,7 @@ export default function MainApp() {
       activeThreadId,
       activeThreadHasLocalSnapshot: hasLocalThreadSnapshot(activeThreadId),
       activeThreadIsProcessing,
+      activeThreadNeedsLiveConnection: activeThreadNeedsBackgroundRefresh,
       refreshThread,
       reconnectWorkspace: connectWorkspace,
     });
@@ -981,6 +1032,7 @@ export default function MainApp() {
   const {
     updaterState,
     startUpdate,
+    checkForUpdates,
     dismissUpdate,
     postUpdateNotice,
     dismissPostUpdateNotice,
@@ -990,6 +1042,8 @@ export default function MainApp() {
     enabled: updaterEnabled,
     autoCheckOnMount:
       !appSettingsLoading && appSettings.automaticAppUpdateChecksEnabled,
+    experimentalWindowsInstallerMigrationEnabled:
+      appSettings.experimentalWindowsInstallerMigrationEnabled,
     notificationSoundsEnabled: appSettings.notificationSoundsEnabled,
     systemNotificationsEnabled: appSettings.systemNotificationsEnabled,
     subagentSystemNotificationsEnabled:
@@ -1133,16 +1187,15 @@ export default function MainApp() {
     selectedCodexArgsOverride,
   });
 
-  const { handleSetThreadListSortKey, handleRefreshAllWorkspaceThreads } =
-    useThreadListActions({
-      threadListSortKey,
-      setThreadListSortKey,
-      workspaces,
-      refreshWorkspaces,
-      connectWorkspace,
-      listThreadsForWorkspaces,
-      resetWorkspaceThreads,
-    });
+  const { handleRefreshAllWorkspaceThreads } = useThreadListActions({
+    threadListSortKey,
+    setThreadListSortKey,
+    workspaces,
+    refreshWorkspaces,
+    connectWorkspace,
+    listThreadsForWorkspaces,
+    resetWorkspaceThreads,
+  });
   useResponseRequiredNotificationsController({
     systemNotificationsEnabled: appSettings.systemNotificationsEnabled,
     subagentSystemNotificationsEnabled:
@@ -1158,7 +1211,6 @@ export default function MainApp() {
     activeAccount,
     accountSwitching,
     handleSwitchAccount,
-    handleCancelSwitchAccount,
   } = useAccountSwitching({
     activeWorkspaceId,
     accountByWorkspace,
@@ -1195,11 +1247,6 @@ export default function MainApp() {
     setCenterMode,
     setSelectedDiffPath,
     setActiveTab,
-  });
-
-  const { handleCopyThread } = useCopyThread({
-    activeItems,
-    onDebug: addDebugEntry,
   });
 
   const {
@@ -1596,6 +1643,13 @@ export default function MainApp() {
       openAppIconById,
       queueSaveSettings,
       handleToggleAutomaticAppUpdateChecks,
+      updater: {
+        enabled: updaterEnabled,
+        state: updaterState,
+        checkForUpdates,
+        startUpdate,
+        dismiss: dismissUpdate,
+      },
       doctor,
       codexUpdate,
       updateWorkspaceSettings,
@@ -1679,6 +1733,7 @@ export default function MainApp() {
     accountByWorkspace,
     refreshAccountInfo,
     refreshAccountRateLimits,
+    refreshDelayMs: showHome ? 800 : 0,
   });
   const activeTokenUsage = activeThreadId
     ? tokenUsageByThread[activeThreadId] ?? null
@@ -1841,6 +1896,7 @@ export default function MainApp() {
     activeWorkspace,
     activeThreadId,
     threadStatusById,
+    activeThreadNeedsBackgroundRefresh,
     remoteThreadConnectionState,
     refreshThread,
   });
@@ -1880,7 +1936,7 @@ export default function MainApp() {
     } catch (error) {
       alertError(error instanceof Error ? error.message : String(error));
     }
-  }, [activeThreadId, activeWorkspace, alertError, composerWorkspaceState.addComposerReferenceForDraft, exitDiffView, isCompact, selectWorkspace, setActiveTab, setActiveThreadId, startThreadForWorkspace, t, threadDerivations]);
+  }, [activeThreadId, activeWorkspace, alertError, composerWorkspaceState, exitDiffView, isCompact, selectWorkspace, setActiveTab, setActiveThreadId, startThreadForWorkspace, t, threadDerivations]);
 
   const handleInstallManagedCodex = useCallback(async () => {
     setCodexInstallStage("downloading");
@@ -2174,6 +2230,8 @@ export default function MainApp() {
     isCompact,
     isPhone,
     isTablet,
+    tabletProjectsOpen,
+    sidebarOverlayOpen,
     sidebarCollapsed,
     rightPanelCollapsed: sessionManagerOpen || rightPanelCollapsed,
     shouldReduceTransparency,
@@ -2379,14 +2437,14 @@ export default function MainApp() {
     threadListCursorByWorkspace,
     pinnedThreadsVersion,
     threadListSortKey,
-    onSetThreadListSortKey: handleSetThreadListSortKey,
     threadListOrganizeMode,
-    onSetThreadListOrganizeMode: setThreadListOrganizeMode,
     onRefreshAllThreads: handleRefreshAllWorkspaceThreadsFromSidebar,
+    onCollapseSidebar: collapseSidebar,
     activeWorkspace,
     activeWorkspaceId,
     activeThreadId,
     activeItems,
+    agentMdContent,
     threadHistoryPageByThread,
     onLoadOlderThreadHistory: loadOlderThreadHistory,
     itemsByThread,
@@ -2399,7 +2457,6 @@ export default function MainApp() {
     homeAccountWorkspaceId,
     accountSwitching,
     onSwitchAccount: handleSwitchAccount,
-    onCancelSwitchAccount: handleCancelSwitchAccount,
     onDecision: handleApprovalDecision,
     onRemember: handleApprovalRemember,
     onUserInputSubmit: handleUserInputSubmit,
@@ -2485,8 +2542,9 @@ export default function MainApp() {
     handleSelectLocalCodexThread,
     handleOpenThreadLink,
     handleSelectOpenAppId,
-    handleCopyThread,
     handleToggleTerminalWithFocus,
+    handleOpenTerminalWithFocus: openTerminalWithFocus,
+    onCloseTerminalPanel: closeTerminalPanel,
     launchScriptState,
     launchScriptsState,
     models,
@@ -2567,10 +2625,21 @@ export default function MainApp() {
     onResizeTerminal: onTerminalPanelResizeStart,
     isCompact,
     isPhone,
+    rightPanelCollapsed,
+    onCollapseRightPanel: collapseRightPanel,
+    onExpandRightPanel: expandRightPanel,
     activeTab,
     setActiveTab,
     tabletTab,
+    sessionManagerOpen,
+    onToggleSessionManager: () => {
+      handleSessionManagerActiveChange(!sessionManagerOpen);
+    },
+    onRevealSidebar: revealSidebar,
+    onHideSidebar: hideSidebar,
     showMobilePollingFetchStatus,
+    appModalsSettingsOpen: appModalsProps.settingsOpen,
+    onCloseSettings: appModalsProps.onCloseSettings,
     appModalsAboutOpen:
       appModalsProps.settingsOpen && appModalsProps.settingsSection === 'about',
     updaterState,
@@ -2580,8 +2649,8 @@ export default function MainApp() {
     dismissPostUpdateNotice,
     errorToasts,
     dismissErrorToast,
-    showDebugButton,
     handleDebugClick,
+    onCloseActivity: () => setDebugOpen(false),
   });
 
   const {
@@ -2608,6 +2677,31 @@ export default function MainApp() {
   } = useMainAppLayoutNodes(layoutSurfaces);
 
   const mainMessagesNode = showWorkspaceHome ? workspaceHomeNode : messagesNode;
+  const SettingsSurfaceComponent = appModalsProps.SettingsViewComponent;
+  const settingsNode = appModalsProps.settingsOpen ? (
+    <Suspense fallback={null}>
+      <SettingsSurfaceComponent
+        {...appModalsProps.settingsProps}
+        onClose={appModalsProps.onCloseSettings}
+        initialSection={appModalsProps.settingsSection ?? undefined}
+        variant="surface"
+      />
+    </Suspense>
+  ) : null;
+  const activePanel =
+    appModalsProps.settingsOpen
+      ? "settings"
+      : sessionManagerOpen
+        ? "library"
+        : terminalOpen
+          ? "terminal"
+          : debugOpen || activeTab === "log"
+            ? "activity"
+            : activeTab === "home"
+              ? "home"
+              : activeTab === "git"
+                ? "git"
+                : "sessions";
   const compactThreadConnectionState: "live" | "polling" | "disconnected" =
     !activeWorkspace?.connected
       ? "disconnected"
@@ -2638,10 +2732,13 @@ export default function MainApp() {
     appLayout: {
       isPhone,
       isTablet,
+      activePanel,
+      libraryOpen: sessionManagerOpen,
       showHome: showHome || sessionManagerOpen,
       showGitDetail,
       activeTab,
       tabletTab,
+      tabletProjectsOpen,
       centerMode,
       preloadGitDiffs: appSettings.preloadGitDiffs,
       splitChatDiffView: appSettings.splitChatDiffView,
@@ -2663,6 +2760,8 @@ export default function MainApp() {
       debugPanelNode,
       debugPanelFullNode,
       terminalDockNode,
+      settingsOpen: appModalsProps.settingsOpen,
+      settingsNode,
       compactEmptyCodexNode,
       compactEmptyGitNode,
       compactGitBackNode,
@@ -2672,7 +2771,6 @@ export default function MainApp() {
       onPlanPanelResizeStart,
     },
     topbar: {
-      isCompact,
       desktopTopbarLeftNode,
       hasActiveWorkspace: Boolean(activeWorkspace),
       backendMode: appSettings.backendMode,
@@ -2682,7 +2780,7 @@ export default function MainApp() {
 
   return (
     <I18nProvider preference={appSettings.appLanguage}>
-      <SessionManagerProvider active={sessionManagerOpen} onActiveChange={setSessionManagerOpen} onResumeSession={handleResumeManagedSession} onDeriveSession={handleDeriveManagedSession} onDeriveSessions={handleDeriveManagedSessions} currentWorkspace={projectActiveWorkspace ? { name: projectActiveWorkspace.name, path: projectActiveWorkspace.path } : null}>
+      <SessionManagerProvider active={sessionManagerOpen} onActiveChange={handleSessionManagerActiveChange} onResumeSession={handleResumeManagedSession} onDeriveSession={handleDeriveManagedSession} onDeriveSessions={handleDeriveManagedSessions} currentWorkspace={projectActiveWorkspace ? { name: projectActiveWorkspace.name, path: projectActiveWorkspace.path } : null}>
         <MainAppShell {...mainAppShellProps} />
         <CodexInstallPrompt
           open={codexInstallPromptOpen}

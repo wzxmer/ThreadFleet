@@ -89,6 +89,7 @@ export function PanelNavItem({
       type="button"
       className={joinClassNames("ds-panel-nav-item", active && "is-active", className)}
       {...props}
+      data-button-elevation="none"
     >
       <span className="ds-panel-nav-item-main">
         {icon ? (

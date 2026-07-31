@@ -376,6 +376,7 @@ function LocalCodexProjectThreadGroups({
               className={`sidebar-section-header local-codex-project-header local-codex-project-toggle${
                 isProjectCollapsed ? "" : " expanded"
               }`}
+              data-button-elevation="none"
               aria-expanded={!isProjectCollapsed}
               aria-label={`${
                 isProjectCollapsed ? t("sidebar.expand") : t("sidebar.collapse")
@@ -502,6 +503,7 @@ function LocalCodexWorkspaceEntry({
       <button
         type="button"
         className={`local-codex-history-header${isExpanded ? " expanded" : ""}`}
+        data-button-elevation="none"
         aria-expanded={isExpanded}
         aria-label={`${isExpanded ? t("sidebar.collapse") : t("sidebar.expand")} ${
           LOCAL_CODEX_WORKSPACE_NAME
@@ -736,13 +738,8 @@ function SidebarWorkspaceEntry({
     <WorkspaceCard
       workspace={workspace}
       workspaceName={renderHighlightedName(workspace.name)}
-      summary={
-        displayThreadRootCount > 0
-          ? `${displayThreadRootCount} ${t("sidebar.threadCountSuffix")}${
-              threads[0] ? ` · ${t("sidebar.updatedAt")} ${getThreadTime(threads[0])}` : ""
-            }`
-          : t("sidebar.noThreads")
-      }
+      threadCount={displayThreadRootCount}
+      summary={displayThreadRootCount > 0 ? null : t("sidebar.noThreads")}
       isActive={workspace.id === activeWorkspaceId}
       isCollapsed={isCollapsed}
       isPinned={isWorkspaceFolderPinned(workspace.id)}

@@ -51,8 +51,16 @@ export function MainAppShell({
   showMobileSetupWizard,
   mobileSetupWizardProps,
 }: MainAppShellProps) {
+  const mainSurfaceOpen =
+    appLayoutProps.activePanel !== "sessions" &&
+    appLayoutProps.activePanel !== "library";
+  const resolvedAppClassName = `${appClassName}${
+    appModalsProps.settingsOpen ? " settings-surface-open" : ""
+  }${mainSurfaceOpen ? " main-surface-open" : ""
+  }${isResizing ? " is-resizing" : ""}`;
+
   return (
-    <div className={`${appClassName}${isResizing ? " is-resizing" : ""}`} style={appStyle} ref={appRef}>
+    <div className={resolvedAppClassName} style={appStyle} ref={appRef}>
       <div className="drag-strip" id="titlebar" data-tauri-drag-region />
       <TitlebarExpandControls {...sidebarToggleProps} />
       <WindowCaptionControls />

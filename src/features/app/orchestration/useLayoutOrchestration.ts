@@ -7,6 +7,8 @@ type UseAppShellOrchestrationOptions = {
   isCompact: boolean;
   isPhone: boolean;
   isTablet: boolean;
+  tabletProjectsOpen: boolean;
+  sidebarOverlayOpen: boolean;
   sidebarCollapsed: boolean;
   rightPanelCollapsed: boolean;
   shouldReduceTransparency: boolean;
@@ -39,6 +41,8 @@ export function useAppShellOrchestration({
   isCompact,
   isPhone,
   isTablet,
+  tabletProjectsOpen,
+  sidebarOverlayOpen,
   sidebarCollapsed,
   rightPanelCollapsed,
   shouldReduceTransparency,
@@ -72,6 +76,8 @@ export function useAppShellOrchestration({
   const appClassName = `app ${isCompact ? "layout-compact" : "layout-desktop"}${
     isPhone ? " layout-phone" : ""
   }${isTablet ? " layout-tablet" : ""}${
+    isTablet && tabletProjectsOpen ? " tablet-projects-open" : ""
+  }${!isCompact && sidebarOverlayOpen ? " sidebar-overlay-open" : ""}${
     shouldReduceTransparency ? " reduced-transparency" : ""
   }${!isCompact && sidebarCollapsed ? " sidebar-collapsed" : ""}${
     !isCompact && rightPanelCollapsed ? " right-panel-collapsed" : ""
@@ -80,6 +86,9 @@ export function useAppShellOrchestration({
   const appStyle = useMemo<CSSProperties>(
     () => ({
       "--sidebar-width": `${isCompact ? sidebarWidth : sidebarCollapsed ? 0 : sidebarWidth}px`,
+      "--sidebar-overlay-width": `${sidebarWidth}px`,
+      "--tablet-sidebar-effective-width":
+        isTablet && tabletProjectsOpen ? `min(${sidebarWidth}px, 34vw)` : "0px",
       "--right-panel-width": `${
         isCompact ? rightPanelWidth : rightPanelCollapsed ? 0 : rightPanelWidth
       }px`,
@@ -113,10 +122,10 @@ export function useAppShellOrchestration({
             "--window-drag-strip-pointer-events": "auto",
             "--window-drag-strip-left": isCompact
               ? "64px"
-              : "var(--sidebar-width, 280px)",
+              : "calc(var(--app-rail-width, 52px) + var(--sidebar-width, 280px))",
             "--window-drag-strip-right":
               "calc(var(--window-caption-width, 138px) + var(--window-caption-gap, 10px))",
-            "--titlebar-inset-left": "0px",
+            "--titlebar-inset-left": isCompact ? "0px" : "var(--app-rail-width, 52px)",
             "--titlebar-collapsed-left-extra": "0px",
             "--titlebar-toggle-size": "32px",
             "--titlebar-toggle-side-gap": "14px",
@@ -136,11 +145,13 @@ export function useAppShellOrchestration({
       debugPanelHeight,
       isWindows,
       isCompact,
+      isTablet,
       planPanelHeight,
       rightPanelCollapsed,
       rightPanelWidth,
       sidebarCollapsed,
       sidebarWidth,
+      tabletProjectsOpen,
       terminalPanelHeight,
       uiFontFamily,
     ],

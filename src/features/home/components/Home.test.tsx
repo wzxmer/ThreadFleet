@@ -30,7 +30,33 @@ const baseProps = {
 };
 
 describe("Home", () => {
-  it("renders latest agent runs and lets you open a thread", () => {
+  it("keeps the primary home actions and token usage entry points", () => {
+    const onStartNoProjectChat = vi.fn();
+    const onAddWorkspace = vi.fn();
+    const onAddWorkspaceFromUrl = vi.fn();
+
+    render(
+      <Home
+        {...baseProps}
+        onStartNoProjectChat={onStartNoProjectChat}
+        onAddWorkspace={onAddWorkspace}
+        onAddWorkspaceFromUrl={onAddWorkspaceFromUrl}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "无项目对话" }));
+    fireEvent.click(screen.getByRole("button", { name: "添加项目" }));
+    fireEvent.click(screen.getByRole("button", { name: "从 URL 添加项目" }));
+
+    expect(onStartNoProjectChat).toHaveBeenCalledTimes(1);
+    expect(onAddWorkspace).toHaveBeenCalledTimes(1);
+    expect(onAddWorkspaceFromUrl).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("命令工作台")).toBeTruthy();
+    expect(screen.getByText("Token 与 Agent 用量")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "了解 ThreadFleet" })).toBeTruthy();
+  });
+
+  it("omits the latest agent panel from the focused usage dashboard", () => {
     const onSelectThread = vi.fn();
     render(
       <Home
@@ -50,27 +76,10 @@ describe("Home", () => {
       />,
     );
 
-    expect(screen.getByText("最新 Agent")).toBeTruthy();
-    expect(screen.getByText("Example Project")).toBeTruthy();
-    expect(screen.getByText("Frontend")).toBeTruthy();
-    const message = screen.getByText("Ship the dashboard refresh");
-    const card = message.closest("button");
-    expect(card).toBeTruthy();
-    if (!card) {
-      throw new Error("Expected latest agent card button");
-    }
-    fireEvent.click(card);
-    expect(onSelectThread).toHaveBeenCalledWith("workspace-1", "thread-1");
-    expect(screen.getByText("运行中")).toBeTruthy();
-  });
-
-  it("shows the empty state when there are no latest runs", () => {
-    render(<Home {...baseProps} />);
-
-    expect(screen.getByText("暂无 Agent 活动")).toBeTruthy();
-    expect(
-      screen.getByText("开始一个会话后，这里会显示最新回复。"),
-    ).toBeTruthy();
+    expect(screen.queryByText("最新 Agent")).toBeNull();
+    expect(screen.queryByText("Example Project")).toBeNull();
+    expect(screen.queryByText("Ship the dashboard refresh")).toBeNull();
+    expect(onSelectThread).not.toHaveBeenCalled();
   });
 
   it("renders usage cards in time mode", () => {

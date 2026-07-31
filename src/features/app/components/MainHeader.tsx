@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Check from "lucide-react/dist/esm/icons/check";
 import Copy from "lucide-react/dist/esm/icons/copy";
-import Terminal from "lucide-react/dist/esm/icons/terminal";
+import Folder from "lucide-react/dist/esm/icons/folder";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import type { BranchInfo, OpenAppTarget, WorkspaceInfo } from "../../../types";
 import type { ReactNode } from "react";
@@ -36,11 +36,6 @@ type MainHeaderProps = {
   branches: BranchInfo[];
   onCheckoutBranch: (name: string) => Promise<void> | void;
   onCreateBranch: (name: string) => Promise<void> | void;
-  canCopyThread?: boolean;
-  onCopyThread?: () => void | Promise<void>;
-  onToggleTerminal: () => void;
-  isTerminalOpen: boolean;
-  showTerminalButton?: boolean;
   showWorkspaceTools?: boolean;
   extraActionsNode?: ReactNode;
   launchScript?: string | null;
@@ -76,8 +71,6 @@ type MainHeaderProps = {
 
 export function MainHeader({
   workspace,
-  titleOverride = null,
-  parentName = null,
   worktreeLabel = null,
   disableBranchMenu = false,
   parentPath = null,
@@ -90,11 +83,6 @@ export function MainHeader({
   branches,
   onCheckoutBranch,
   onCreateBranch,
-  canCopyThread = false,
-  onCopyThread,
-  onToggleTerminal,
-  isTerminalOpen,
-  showTerminalButton = true,
   showWorkspaceTools = true,
   extraActionsNode,
   launchScript = null,
@@ -113,8 +101,6 @@ export function MainHeader({
   const { t } = useI18n();
   const [branchQuery, setBranchQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [copyFeedback, setCopyFeedback] = useState(false);
-  const copyTimeoutRef = useRef<number | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const renameConfirmRef = useRef<HTMLButtonElement | null>(null);
   const renameOnCancel = worktreeRename?.onCancel;
@@ -155,7 +141,6 @@ export function MainHeader({
     () => `cd "${relativeWorktreePath}"`,
     [relativeWorktreePath],
   );
-  const title = titleOverride?.trim() || parentName || workspace.name;
 
   useEffect(() => {
     if (!infoOpen && renameOnCancel) {
@@ -163,41 +148,16 @@ export function MainHeader({
     }
   }, [infoOpen, renameOnCancel]);
 
-  useEffect(() => {
-    return () => {
-      if (copyTimeoutRef.current) {
-        window.clearTimeout(copyTimeoutRef.current);
-      }
-    };
-  }, []);
-
-  const handleCopyClick = async () => {
-    if (!onCopyThread) {
-      return;
-    }
-    try {
-      await onCopyThread();
-      setCopyFeedback(true);
-      if (copyTimeoutRef.current) {
-        window.clearTimeout(copyTimeoutRef.current);
-      }
-      copyTimeoutRef.current = window.setTimeout(() => {
-        setCopyFeedback(false);
-      }, 1200);
-    } catch {
-      // Errors are handled upstream in the copy handler.
-    }
-  };
-
   return (
     <header className="main-header" data-tauri-drag-region>
       <div className="workspace-header">
-        <div className="workspace-title-line">
-          <span className="workspace-title">
-            {title}
-          </span>
-          <span className="workspace-separator" aria-hidden>
-            ›
+        <div className="workspace-context-chips">
+          <span
+            className="workspace-context-chip workspace-context-chip-project"
+            title={workspace.name}
+          >
+            <Folder size={12} aria-hidden />
+            <span>{workspace.name}</span>
           </span>
           {disableBranchMenu ? (
             <div className="workspace-branch-static-row" ref={infoRef}>
@@ -485,6 +445,16 @@ export function MainHeader({
         </div>
       </div>
       <div className="main-header-actions">
+        <div
+          id="main-header-message-tools"
+          className="main-header-message-tools"
+          data-tauri-drag-region="false"
+        />
+        <div
+          id="main-header-composer-tools"
+          className="main-header-composer-tools"
+          data-tauri-drag-region="false"
+        />
         {showWorkspaceTools &&
           onRunLaunchScript &&
           onOpenLaunchScriptEditor &&
@@ -547,36 +517,6 @@ export function MainHeader({
             iconById={openAppIconById}
           />
         ) : null}
-        {showTerminalButton && (
-          <button
-            type="button"
-            className={`ghost main-header-action ds-tooltip-trigger${isTerminalOpen ? " is-active" : ""}`}
-            onClick={onToggleTerminal}
-            data-tauri-drag-region="false"
-            aria-label={t("mainHeader.toggleTerminal")}
-            title={t("mainHeader.terminal")}
-            data-tooltip={t("mainHeader.terminal")}
-            data-tooltip-placement="bottom"
-          >
-            <Terminal size={14} aria-hidden />
-          </button>
-        )}
-        <button
-          type="button"
-          className={`ghost main-header-action ds-tooltip-trigger${copyFeedback ? " is-copied" : ""}`}
-          onClick={handleCopyClick}
-          disabled={!canCopyThread || !onCopyThread}
-          data-tauri-drag-region="false"
-          aria-label={t("mainHeader.copyThread")}
-          title={t("mainHeader.copyThread")}
-          data-tooltip={t("mainHeader.copyThread")}
-          data-tooltip-placement="bottom"
-        >
-          <span className="main-header-icon" aria-hidden>
-            <Copy className="main-header-icon-copy" size={14} />
-            <Check className="main-header-icon-check" size={14} />
-          </span>
-        </button>
         {extraActionsNode}
       </div>
     </header>

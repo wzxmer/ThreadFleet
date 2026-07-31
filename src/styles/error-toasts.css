@@ -20,6 +20,10 @@
   --ds-toast-enter-duration: 0.18s;
 }
 
+.error-toast .ds-toast-header {
+  align-items: flex-start;
+}
+
 .error-toast-title {
   font-weight: 600;
   font-size: 13px;

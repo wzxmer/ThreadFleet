@@ -1,5 +1,6 @@
 import ChevronLeft from "lucide-react/dist/esm/icons/chevron-left";
 import X from "lucide-react/dist/esm/icons/x";
+import type { ReactNode } from "react";
 import type {
   AppSettings,
   CodexDoctorResult,
@@ -20,6 +21,15 @@ import type { CodexSection } from "./settingsTypes";
 import { SettingsSectionContainers } from "./sections/SettingsSectionContainers";
 import type { SettingsWorkflowSectionProps } from "./sections/SettingsWorkflowSection";
 import type { ProviderSessionDiagnostics } from "@settings/utils/providerSessionDiagnostics";
+import type { UpdateState } from "@/features/update/hooks/useUpdater";
+
+export type SettingsUpdaterControls = {
+  enabled: boolean;
+  state: UpdateState;
+  checkForUpdates: () => void;
+  startUpdate: () => void;
+  dismiss: () => void;
+};
 
 export type SettingsViewProps = {
   workspaceGroups: WorkspaceGroup[];
@@ -46,6 +56,7 @@ export type SettingsViewProps = {
   openAppIconById: Record<string, string>;
   onUpdateAppSettings: (next: AppSettings) => Promise<void>;
   onToggleAutomaticAppUpdateChecks?: () => void;
+  updater?: SettingsUpdaterControls;
   onRunDoctor: (
     codexBin: string | null,
     codexArgs: string | null,
@@ -73,6 +84,7 @@ export type SettingsViewProps = {
   >;
   providerSessionDiagnostics?: ProviderSessionDiagnostics | null;
   initialSection?: CodexSection;
+  variant?: "modal" | "surface";
 };
 
 export function SettingsView({
@@ -93,6 +105,7 @@ export function SettingsView({
   openAppIconById,
   onUpdateAppSettings,
   onToggleAutomaticAppUpdateChecks,
+  updater,
   onRunDoctor,
   onRunCodexUpdate,
   onUpdateWorkspaceSettings,
@@ -108,6 +121,7 @@ export function SettingsView({
   workflowSectionProps,
   providerSessionDiagnostics,
   initialSection,
+  variant = "modal",
 }: SettingsViewProps) {
   const { t } = useI18n();
   const resolvedWorkflowSectionProps = workflowSectionProps ?? {
@@ -157,6 +171,7 @@ export function SettingsView({
     openAppIconById,
     onUpdateAppSettings,
     onToggleAutomaticAppUpdateChecks,
+    updater,
     onRunDoctor,
     onRunCodexUpdate,
     onUpdateWorkspaceSettings,
@@ -187,25 +202,23 @@ export function SettingsView({
     useMobileMasterDetail ? " settings-body-mobile-master-detail" : ""
   }${useMobileMasterDetail && showMobileDetail ? " is-detail-visible" : ""}`;
 
-  return (
-    <ModalShell
-      className="settings-overlay"
-      cardClassName="settings-window"
-      onBackdropClick={onClose}
-      ariaLabelledBy="settings-modal-title"
-    >
+  const titleId = variant === "surface" ? "settings-surface-title" : "settings-modal-title";
+  const settingsContent: ReactNode = (
+    <>
       <div className="settings-titlebar">
-        <div className="settings-title" id="settings-modal-title">
+        <div className="settings-title" id={titleId}>
           {t("settings.title")}
         </div>
-        <button
-          type="button"
-          className="ghost icon-button settings-close"
-          onClick={onClose}
-          aria-label={t("settings.close")}
-        >
-          <X aria-hidden />
-        </button>
+        {variant === "modal" ? (
+          <button
+            type="button"
+            className="ghost icon-button settings-close"
+            onClick={onClose}
+            aria-label={t("settings.close")}
+          >
+            <X aria-hidden />
+          </button>
+        ) : null}
       </div>
       <div className={settingsBodyClassName}>
         {(!useMobileMasterDetail || !showMobileDetail) && (
@@ -234,14 +247,38 @@ export function SettingsView({
               </div>
             )}
             <div className="settings-content">
-              <SettingsSectionContainers
-                activeSection={activeSection}
-                orchestration={orchestration}
-              />
+              <div className="settings-content-inner">
+                <SettingsSectionContainers
+                  activeSection={activeSection}
+                  orchestration={orchestration}
+                />
+              </div>
             </div>
           </div>
         )}
       </div>
+    </>
+  );
+
+  if (variant === "surface") {
+    return (
+      <section
+        className="settings-window settings-surface"
+        aria-labelledby={titleId}
+      >
+        {settingsContent}
+      </section>
+    );
+  }
+
+  return (
+    <ModalShell
+      className="settings-overlay"
+      cardClassName="settings-window"
+      onBackdropClick={onClose}
+      ariaLabelledBy={titleId}
+    >
+      {settingsContent}
     </ModalShell>
   );
 }

@@ -2,7 +2,7 @@
   position: absolute;
   bottom: 36px;
   right: 20px;
-  width: min(360px, calc(100vw - 40px));
+  width: min(400px, calc(100vw - 40px));
   z-index: 5;
   pointer-events: none;
   -webkit-app-region: no-drag;
@@ -13,7 +13,7 @@
 }
 
 .update-toast-header {
-  margin-bottom: 6px;
+  margin-bottom: 8px;
 }
 
 .update-toast-title {
@@ -24,11 +24,12 @@
 
 .update-toast-version {
   font-size: 12px;
-  color: var(--text-faint);
+  color: color-mix(in srgb, var(--cm-text-primary) 62%, transparent);
 }
 
 .update-toast-body {
   font-size: 13px;
+  line-height: 1.5;
   margin-bottom: 10px;
 }
 
@@ -41,7 +42,7 @@
 .update-toast-progress-bar {
   height: 6px;
   border-radius: 999px;
-  background: var(--surface-card-muted);
+  background: color-mix(in srgb, var(--cm-control-bg) 76%, transparent);
   overflow: hidden;
 }
 
@@ -53,7 +54,7 @@
 
 .update-toast-progress-meta {
   font-size: 11px;
-  color: var(--text-muted);
+  color: color-mix(in srgb, var(--cm-text-primary) 72%, transparent);
 }
 
 .update-toast-error {
@@ -75,9 +76,9 @@
   margin-bottom: 10px;
   max-height: min(44vh, 280px);
   overflow: auto;
-  border-radius: 8px;
-  border: 1px solid var(--border-strong);
-  background: var(--surface-card-muted);
+  border-radius: 12px;
+  border: 1px solid var(--cm-panel-border);
+  background: color-mix(in srgb, var(--cm-main-bg) 84%, var(--cm-panel-bg) 16%);
   padding: 10px;
 }
 
@@ -125,17 +126,78 @@
 .update-toast-notes code {
   font-family: var(--code-font-family);
   font-size: 11px;
-  border-radius: 4px;
-  background: var(--surface-card-strong);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--cm-control-bg) 78%, transparent);
   padding: 0 4px;
 }
 
 .update-toast-notes pre {
   margin: 0 0 8px;
   padding: 8px;
-  border-radius: 6px;
-  background: var(--surface-card-strong);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--cm-control-bg) 78%, var(--cm-main-bg) 22%);
   overflow: auto;
+}
+
+.update-toast-actions button {
+  min-height: 30px;
+  border-radius: 10px;
+  padding: 6px 11px;
+}
+
+.update-toast-actions .secondary {
+  border: 1px solid var(--cm-control-border);
+  background: var(--cm-control-bg);
+  color: var(--cm-text-primary);
+}
+
+.update-toast-actions .secondary:hover:not(:disabled) {
+  border-color: var(--cm-control-border-hover);
+  background: var(--cm-control-bg-hover);
+  color: var(--cm-text-strong);
+}
+
+.update-dialog-card {
+  width: min(560px, calc(100vw - 40px));
+  max-height: min(680px, calc(100vh - 40px));
+  overflow: hidden;
+}
+
+.update-dialog-content {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-height: inherit;
+  overflow-y: auto;
+  padding: 18px;
+}
+
+.update-migration-dialog-content {
+  width: min(520px, calc(100vw - 40px));
+}
+
+.update-dialog-card .ds-modal-subtitle,
+.update-dialog-card .settings-help {
+  color: color-mix(in srgb, var(--cm-text-primary) 82%, transparent);
+  line-height: 1.5;
+}
+
+.update-dialog-card .settings-label {
+  color: color-mix(in srgb, var(--cm-text-primary) 64%, transparent);
+}
+
+.update-dialog-card code {
+  border: 1px solid var(--cm-panel-border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--cm-control-bg) 72%, transparent);
+  color: var(--cm-text-strong);
+  padding: 1px 5px;
+}
+
+.update-dialog-card input[type="checkbox"] {
+  accent-color: #4fe3a3;
 }
 
 @media (max-width: 960px) {
@@ -144,5 +206,15 @@
     bottom: 96px;
     left: 50%;
     transform: translateX(-50%);
+  }
+
+  .update-dialog-card {
+    width: min(520px, calc(100vw - 28px));
+    max-height: min(640px, calc(100vh - 28px));
+  }
+
+  .update-dialog-content,
+  .update-migration-dialog-content {
+    width: 100%;
   }
 }

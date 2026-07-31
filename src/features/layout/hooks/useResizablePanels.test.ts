@@ -80,7 +80,7 @@ describe("useResizablePanels", () => {
     const hook = renderResizablePanels();
 
     expect(hook.result.sidebarWidth).toBe(420);
-    expect(hook.result.rightPanelWidth).toBe(270);
+    expect(hook.result.rightPanelWidth).toBe(300);
     expect(hook.result.planPanelHeight).toBe(220);
 
     hook.unmount();

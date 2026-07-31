@@ -1,9 +1,7 @@
 .branch-switcher-modal .ds-modal-card {
   width: min(480px, calc(100vw - 48px));
   max-height: calc(100vh - 120px);
-  border-radius: 12px;
-  display: flex;
-  flex-direction: column;
+  padding: 0;
   overflow: hidden;
 }
 

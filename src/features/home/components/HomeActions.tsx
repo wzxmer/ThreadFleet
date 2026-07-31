@@ -1,3 +1,6 @@
+import FolderPlus from "lucide-react/dist/esm/icons/folder-plus";
+import Link from "lucide-react/dist/esm/icons/link";
+import MessageSquarePlus from "lucide-react/dist/esm/icons/message-square-plus";
 import { useI18n } from "../../i18n/I18nProvider";
 
 type HomeActionsProps = {
@@ -19,9 +22,7 @@ export function HomeActions({
         onClick={onStartNoProjectChat}
         data-tauri-drag-region="false"
       >
-        <span className="home-icon" aria-hidden>
-          ↵
-        </span>
+        <MessageSquarePlus className="home-icon" aria-hidden />
         {t("home.actions.noProjectChat")}
       </button>
       <button
@@ -29,9 +30,7 @@ export function HomeActions({
         onClick={onAddWorkspace}
         data-tauri-drag-region="false"
       >
-        <span className="home-icon" aria-hidden>
-          +
-        </span>
+        <FolderPlus className="home-icon" aria-hidden />
         {t("home.actions.addWorkspace")}
       </button>
       <button
@@ -39,9 +38,7 @@ export function HomeActions({
         onClick={onAddWorkspaceFromUrl}
         data-tauri-drag-region="false"
       >
-        <span className="home-icon" aria-hidden>
-          ⤓
-        </span>
+        <Link className="home-icon" aria-hidden />
         {t("home.actions.addWorkspaceFromUrl")}
       </button>
     </div>

@@ -14,9 +14,11 @@ import Bot from "lucide-react/dist/esm/icons/bot";
 import Workflow from "lucide-react/dist/esm/icons/workflow";
 import KeyRound from "lucide-react/dist/esm/icons/key-round";
 import Info from "lucide-react/dist/esm/icons/info";
+import type { ComponentType } from "react";
 import { PanelNavItem, PanelNavList } from "@/features/design-system/components/panel/PanelPrimitives";
 import { useI18n } from "@/features/i18n/I18nProvider";
 import { SETTINGS_SECTION_LABEL_KEYS } from "@/features/i18n/settingsSectionLabels";
+import type { I18nKey } from "@/features/i18n/strings";
 import type { CodexSection } from "./settingsTypes";
 
 type SettingsNavProps = {
@@ -24,6 +26,56 @@ type SettingsNavProps = {
   onSelectSection: (section: CodexSection) => void;
   showDisclosure?: boolean;
 };
+
+type SettingsNavItem = {
+  section: CodexSection;
+  Icon: ComponentType<{ "aria-hidden"?: boolean }>;
+};
+
+type SettingsNavGroup = {
+  label: I18nKey;
+  items: SettingsNavItem[];
+};
+
+const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
+  {
+    label: "settings.navGroup.workspace",
+    items: [
+      { section: "projects", Icon: LayoutGrid },
+      { section: "environments", Icon: Layers },
+      { section: "session", Icon: Archive },
+    ],
+  },
+  {
+    label: "settings.navGroup.experience",
+    items: [
+      { section: "display", Icon: SlidersHorizontal },
+      { section: "composer", Icon: FileText },
+      { section: "dictation", Icon: Mic },
+      { section: "shortcuts", Icon: Keyboard },
+      { section: "open-apps", Icon: ExternalLink },
+    ],
+  },
+  {
+    label: "settings.navGroup.development",
+    items: [
+      { section: "git", Icon: GitBranch },
+      { section: "server", Icon: ServerCog },
+      { section: "agents", Icon: Bot },
+      { section: "workflow", Icon: Workflow },
+      { section: "command-execution", Icon: TerminalSquare },
+      { section: "codex", Icon: TerminalSquare },
+      { section: "providers", Icon: KeyRound },
+    ],
+  },
+  {
+    label: "settings.navGroup.application",
+    items: [
+      { section: "features", Icon: FlaskConical },
+      { section: "about", Icon: Info },
+    ],
+  },
+];
 
 export function SettingsNav({
   activeSection,
@@ -34,159 +86,25 @@ export function SettingsNav({
   return (
     <aside className="settings-sidebar">
       <PanelNavList className="settings-nav-list">
-        <PanelNavItem
-          className="settings-nav"
-          icon={<LayoutGrid aria-hidden />}
-          active={activeSection === "projects"}
-          showDisclosure={showDisclosure}
-          onClick={() => onSelectSection("projects")}
-        >
-          {t(SETTINGS_SECTION_LABEL_KEYS.projects)}
-        </PanelNavItem>
-        <PanelNavItem
-          className="settings-nav"
-          icon={<Layers aria-hidden />}
-          active={activeSection === "environments"}
-          showDisclosure={showDisclosure}
-          onClick={() => onSelectSection("environments")}
-        >
-          {t(SETTINGS_SECTION_LABEL_KEYS.environments)}
-        </PanelNavItem>
-        <PanelNavItem
-          className="settings-nav"
-          icon={<Archive aria-hidden />}
-          active={activeSection === "session"}
-          showDisclosure={showDisclosure}
-          onClick={() => onSelectSection("session")}
-        >
-          {t(SETTINGS_SECTION_LABEL_KEYS.session)}
-        </PanelNavItem>
-        <PanelNavItem
-          className="settings-nav"
-          icon={<SlidersHorizontal aria-hidden />}
-          active={activeSection === "display"}
-          showDisclosure={showDisclosure}
-          onClick={() => onSelectSection("display")}
-        >
-          {t(SETTINGS_SECTION_LABEL_KEYS.display)}
-        </PanelNavItem>
-        <PanelNavItem
-          className="settings-nav"
-          icon={<FileText aria-hidden />}
-          active={activeSection === "composer"}
-          showDisclosure={showDisclosure}
-          onClick={() => onSelectSection("composer")}
-        >
-          {t(SETTINGS_SECTION_LABEL_KEYS.composer)}
-        </PanelNavItem>
-        <PanelNavItem
-          className="settings-nav"
-          icon={<Mic aria-hidden />}
-          active={activeSection === "dictation"}
-          showDisclosure={showDisclosure}
-          onClick={() => onSelectSection("dictation")}
-        >
-          {t(SETTINGS_SECTION_LABEL_KEYS.dictation)}
-        </PanelNavItem>
-        <PanelNavItem
-          className="settings-nav"
-          icon={<Keyboard aria-hidden />}
-          active={activeSection === "shortcuts"}
-          showDisclosure={showDisclosure}
-          onClick={() => onSelectSection("shortcuts")}
-        >
-          {t(SETTINGS_SECTION_LABEL_KEYS.shortcuts)}
-        </PanelNavItem>
-        <PanelNavItem
-          className="settings-nav"
-          icon={<ExternalLink aria-hidden />}
-          active={activeSection === "open-apps"}
-          showDisclosure={showDisclosure}
-          onClick={() => onSelectSection("open-apps")}
-        >
-          {t(SETTINGS_SECTION_LABEL_KEYS["open-apps"])}
-        </PanelNavItem>
-        <PanelNavItem
-          className="settings-nav"
-          icon={<GitBranch aria-hidden />}
-          active={activeSection === "git"}
-          showDisclosure={showDisclosure}
-          onClick={() => onSelectSection("git")}
-        >
-          {t(SETTINGS_SECTION_LABEL_KEYS.git)}
-        </PanelNavItem>
-        <PanelNavItem
-          className="settings-nav"
-          icon={<ServerCog aria-hidden />}
-          active={activeSection === "server"}
-          showDisclosure={showDisclosure}
-          onClick={() => onSelectSection("server")}
-        >
-          {t(SETTINGS_SECTION_LABEL_KEYS.server)}
-        </PanelNavItem>
-        <PanelNavItem
-          className="settings-nav"
-          icon={<Bot aria-hidden />}
-          active={activeSection === "agents"}
-          showDisclosure={showDisclosure}
-          onClick={() => onSelectSection("agents")}
-        >
-          {t(SETTINGS_SECTION_LABEL_KEYS.agents)}
-        </PanelNavItem>
-        <PanelNavItem
-          className="settings-nav"
-          icon={<Workflow aria-hidden />}
-          active={activeSection === "workflow"}
-          showDisclosure={showDisclosure}
-          onClick={() => onSelectSection("workflow")}
-        >
-          {t(SETTINGS_SECTION_LABEL_KEYS.workflow)}
-        </PanelNavItem>
-        <PanelNavItem
-          className="settings-nav"
-          icon={<TerminalSquare aria-hidden />}
-          active={activeSection === "command-execution"}
-          showDisclosure={showDisclosure}
-          onClick={() => onSelectSection("command-execution")}
-        >
-          {t(SETTINGS_SECTION_LABEL_KEYS["command-execution"])}
-        </PanelNavItem>
-        <PanelNavItem
-          className="settings-nav"
-          icon={<TerminalSquare aria-hidden />}
-          active={activeSection === "codex"}
-          showDisclosure={showDisclosure}
-          onClick={() => onSelectSection("codex")}
-        >
-          {t(SETTINGS_SECTION_LABEL_KEYS.codex)}
-        </PanelNavItem>
-        <PanelNavItem
-          className="settings-nav"
-          icon={<KeyRound aria-hidden />}
-          active={activeSection === "providers"}
-          showDisclosure={showDisclosure}
-          onClick={() => onSelectSection("providers")}
-        >
-          {t(SETTINGS_SECTION_LABEL_KEYS.providers)}
-        </PanelNavItem>
-        <PanelNavItem
-          className="settings-nav"
-          icon={<FlaskConical aria-hidden />}
-          active={activeSection === "features"}
-          showDisclosure={showDisclosure}
-          onClick={() => onSelectSection("features")}
-        >
-          {t(SETTINGS_SECTION_LABEL_KEYS.features)}
-        </PanelNavItem>
-        <PanelNavItem
-          className="settings-nav"
-          icon={<Info aria-hidden />}
-          active={activeSection === "about"}
-          showDisclosure={showDisclosure}
-          onClick={() => onSelectSection("about")}
-        >
-          {t(SETTINGS_SECTION_LABEL_KEYS.about)}
-        </PanelNavItem>
+        {SETTINGS_NAV_GROUPS.map((group) => (
+          <section className="settings-nav-group" key={group.label} aria-label={t(group.label)}>
+            <div className="settings-nav-group-label">{t(group.label)}</div>
+            <div className="settings-nav-group-items">
+              {group.items.map(({ section, Icon }) => (
+                <PanelNavItem
+                  className="settings-nav"
+                  icon={<Icon aria-hidden />}
+                  active={activeSection === section}
+                  key={section}
+                  showDisclosure={showDisclosure}
+                  onClick={() => onSelectSection(section)}
+                >
+                  {t(SETTINGS_SECTION_LABEL_KEYS[section])}
+                </PanelNavItem>
+              ))}
+            </div>
+          </section>
+        ))}
       </PanelNavList>
     </aside>
   );

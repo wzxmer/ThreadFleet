@@ -1,4 +1,54 @@
 :root {
+  /* Theme primitives: concrete palettes. Semantic shell tokens below map to active theme. */
+  --cm-dark-chrome-bg: #0e1216;
+  --cm-dark-main-bg: #101419;
+  --cm-dark-panel-bg: #15191e;
+  --cm-dark-panel-border: rgba(255, 255, 255, 0.075);
+  --cm-dark-control-bg: #20262c;
+  --cm-dark-control-bg-hover: #273038;
+  --cm-dark-caption-hover-bg: rgba(255, 255, 255, 0.08);
+  --cm-dark-caption-text: rgba(223, 229, 234, 0.9);
+  --cm-dark-text-primary: #dfe5ea;
+  --cm-dark-text-strong: #ffffff;
+  --cm-dark-control-border: rgba(255, 255, 255, 0.12);
+  --cm-dark-control-border-hover: rgba(255, 255, 255, 0.18);
+  --cm-dark-elevation-shadow: 0 22px 64px rgba(0, 0, 0, 0.42);
+
+  --cm-light-chrome-bg: #ffffff;
+  --cm-light-main-bg: #ffffff;
+  --cm-light-panel-bg: #ffffff;
+  --cm-light-panel-border: rgba(36, 90, 132, 0.13);
+  --cm-light-control-bg: #edf5fb;
+  --cm-light-control-bg-hover: #e1effa;
+  --cm-light-accent: #2791d3;
+  --cm-light-accent-text: #186fa6;
+  --cm-light-caption-hover-bg: rgba(36, 90, 132, 0.08);
+  --cm-light-caption-text: rgba(38, 49, 61, 0.76);
+  --cm-light-text-primary: #26313d;
+  --cm-light-text-strong: #0f1720;
+  --cm-light-control-border: rgba(36, 90, 132, 0.14);
+  --cm-light-control-border-hover: rgba(36, 90, 132, 0.24);
+  --cm-light-elevation-shadow: 0 20px 46px rgba(32, 86, 126, 0.11);
+
+  --cm-chrome-bg: var(--cm-light-chrome-bg);
+  --cm-main-bg: var(--cm-light-main-bg);
+  --cm-panel-bg: var(--cm-light-panel-bg);
+  --cm-panel-border: var(--cm-light-panel-border);
+  --cm-control-bg: var(--cm-light-control-bg);
+  --cm-control-bg-hover: var(--cm-light-control-bg-hover);
+  --cm-caption-hover-bg: var(--cm-light-caption-hover-bg);
+  --cm-caption-text: var(--cm-light-caption-text);
+  --cm-text-primary: var(--cm-light-text-primary);
+  --cm-text-strong: var(--cm-light-text-strong);
+  --cm-control-border: var(--cm-light-control-border);
+  --cm-control-border-hover: var(--cm-light-control-border-hover);
+  --cm-elevation-shadow: var(--cm-light-elevation-shadow);
+
+  --cm-radius-pane: 16px;
+  --cm-radius-card: 12px;
+  --cm-radius-control: 10px;
+  --cm-radius-dense: 8px;
+
   --ds-surface-overlay: var(--surface-context-core);
   --ds-surface-card: var(--surface-card-strong);
   --ds-surface-muted: var(--surface-card-muted);
@@ -17,11 +67,11 @@
   --ds-modal-card-border: var(--ds-border-strong);
   --ds-modal-focus-ring: color-mix(in srgb, var(--border-accent) 70%, transparent);
 
-  --ds-toast-bg: var(--ds-surface-overlay);
-  --ds-toast-border: var(--ds-border-subtle);
-  --ds-toast-shadow: 0 16px 32px rgba(0, 0, 0, 0.25);
-  --ds-toast-title: var(--ds-text-subtle);
-  --ds-toast-body: var(--text);
+  --ds-toast-bg: color-mix(in srgb, var(--cm-panel-bg) 92%, var(--cm-main-bg) 8%);
+  --ds-toast-border: var(--cm-panel-border);
+  --ds-toast-shadow: var(--cm-elevation-shadow);
+  --ds-toast-title: var(--cm-text-strong);
+  --ds-toast-body: var(--cm-text-primary);
 
   --ds-panel-gap: 8px;
   --ds-panel-header-min-height: 26px;

@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { render, screen } from "@testing-library/react";
+import { render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { MainHeader } from "./MainHeader";
 import type { BranchInfo, OpenAppTarget, WorkspaceInfo } from "@/types";
@@ -37,9 +37,6 @@ function renderHeader(overrides: Partial<Parameters<typeof MainHeader>[0]> = {})
       branches={branches}
       onCheckoutBranch={vi.fn()}
       onCreateBranch={vi.fn()}
-      onToggleTerminal={vi.fn()}
-      isTerminalOpen={false}
-      showTerminalButton={false}
       showWorkspaceTools={false}
       {...overrides}
     />,
@@ -47,16 +44,51 @@ function renderHeader(overrides: Partial<Parameters<typeof MainHeader>[0]> = {})
 }
 
 describe("MainHeader", () => {
-  it("uses the active thread title above the workspace name", () => {
-    renderHeader({ titleOverride: "Fix Windows colors" });
+  it("does not render the active thread title in the compact header", () => {
+    const { container } = renderHeader({ titleOverride: "Fix Windows colors" });
 
-    expect(screen.getByText("Fix Windows colors")).toBeTruthy();
-    expect(screen.queryByText("ThreadFleet")).toBeNull();
+    expect(container.querySelector(".session-header-title")).toBeNull();
+    expect(container.textContent).not.toContain("Fix Windows colors");
+    expect(container.querySelector(".workspace-context-chip-project")?.textContent).toBe(
+      "ThreadFleet",
+    );
   });
 
-  it("falls back to the workspace name when no thread title exists", () => {
-    renderHeader({ titleOverride: "   " });
+  it("does not duplicate the workspace name as a header title", () => {
+    const { container } = renderHeader({ titleOverride: "   " });
 
-    expect(screen.getByText("ThreadFleet")).toBeTruthy();
+    expect(container.querySelector(".session-header-title")).toBeNull();
+    expect(container.querySelectorAll(".workspace-context-chip-project")).toHaveLength(1);
+  });
+
+  it("keeps the session header focused on project and branch context", () => {
+    const { container } = renderHeader({ titleOverride: "Inspect responsive spacing" });
+
+    const chips = container.querySelector(".workspace-context-chips");
+    expect(chips?.textContent).toContain("ThreadFleet");
+    expect(chips?.textContent).toContain("main");
+    expect(container.querySelector(".workspace-context-chip-usage")).toBeNull();
+    expect(container.querySelector(".workspace-context-chip-compactions")).toBeNull();
+  });
+
+  it("provides header hosts for conversation and input tools before workspace actions", () => {
+    const { container } = renderHeader({
+      showWorkspaceTools: true,
+    });
+
+    const actions = container.querySelector(".main-header-actions");
+    const messageHost = actions?.querySelector(".main-header-message-tools");
+    const composerHost = actions?.querySelector(".main-header-composer-tools");
+    expect(messageHost).toBeTruthy();
+    expect(composerHost).toBeTruthy();
+    expect(actions?.children[0]).toBe(messageHost);
+    expect(actions?.children[1]).toBe(composerHost);
+  });
+
+  it("keeps terminal and copy-thread actions out of the session topbar", () => {
+    const { container } = renderHeader({ showWorkspaceTools: true });
+
+    expect(container.querySelector('[aria-label="Toggle terminal panel"]')).toBeNull();
+    expect(container.querySelector('[aria-label="Copy thread"]')).toBeNull();
   });
 });

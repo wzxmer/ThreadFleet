@@ -16,6 +16,7 @@ type UseHomeAccountArgs = {
   accountByWorkspace: Record<string, AccountSnapshot | null | undefined>;
   refreshAccountInfo: (workspaceId: string) => Promise<void> | void;
   refreshAccountRateLimits: (workspaceId: string) => Promise<void> | void;
+  refreshDelayMs?: number;
 };
 
 type ResolveHomeAccountWorkspaceIdArgs = Pick<
@@ -209,6 +210,7 @@ export function useHomeAccount({
   accountByWorkspace,
   refreshAccountInfo,
   refreshAccountRateLimits,
+  refreshDelayMs = 0,
 }: UseHomeAccountArgs) {
   const refreshAccountInfoRef = useRef(refreshAccountInfo);
   const refreshAccountRateLimitsRef = useRef(refreshAccountRateLimits);
@@ -331,10 +333,24 @@ export function useHomeAccount({
     if (!showHome || !stableHomeAccountWorkspaceId || !homeAccountWorkspace?.connected) {
       return;
     }
-    void refreshAccountInfoRef.current(stableHomeAccountWorkspaceId);
-    void refreshAccountRateLimitsRef.current(stableHomeAccountWorkspaceId);
+    let timeoutId: ReturnType<typeof window.setTimeout> | null = null;
+    const refreshNow = () => {
+      void refreshAccountInfoRef.current(stableHomeAccountWorkspaceId);
+      void refreshAccountRateLimitsRef.current(stableHomeAccountWorkspaceId);
+    };
+    if (refreshDelayMs > 0) {
+      timeoutId = window.setTimeout(refreshNow, refreshDelayMs);
+    } else {
+      refreshNow();
+    }
+    return () => {
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+    };
   }, [
     homeAccountWorkspace?.connected,
+    refreshDelayMs,
     showHome,
     stableHomeAccountWorkspaceId,
   ]);

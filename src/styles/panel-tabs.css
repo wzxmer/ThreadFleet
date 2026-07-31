@@ -1,33 +1,34 @@
 .panel-tabs {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px;
-  border-radius: 999px;
-  background: var(--surface-control);
-  border: 1px solid var(--border-subtle);
+  gap: 2px;
+  padding: 2px;
+  border-radius: 7px;
+  background: var(--right-panel-control-bg, var(--surface-control));
+  border: 1px solid var(--right-panel-control-border, var(--border-subtle));
 }
 
 .panel-tab {
   display: inline-flex;
   align-items: center;
   gap: 0;
-  padding: 6px 8px;
-  border-radius: 999px;
+  width: 28px;
+  height: 28px;
+  justify-content: center;
+  padding: 0;
+  border-radius: 5px;
   background: transparent;
   color: var(--text-subtle);
-  box-shadow: none;
   transition: background 160ms ease, color 160ms ease;
 }
 
 .panel-tab:hover:not(:disabled) {
-  transform: none;
-  box-shadow: none;
+  background: var(--right-panel-control-bg-hover, var(--surface-control-hover));
   color: var(--text-emphasis);
 }
 
 .panel-tab.is-active {
-  background: var(--surface-control-hover);
+  background: var(--right-panel-control-bg-active, var(--surface-control-hover));
   color: var(--text-emphasis);
 }
 
@@ -42,6 +43,6 @@
 }
 
 .panel-tab-icon svg {
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
 }

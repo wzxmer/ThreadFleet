@@ -15,12 +15,76 @@ const emptyState: LocalUsageState = {
 };
 
 const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+const DEFAULT_INITIAL_DELAY_MS = 0;
+const AGGREGATE_USAGE_CACHE_KEY = "__all__";
+const PERSISTENT_USAGE_CACHE_PREFIX = "codex-monitor:local-usage:v1:";
+const localUsageCache = new Map<string, LocalUsageSnapshot>();
 
-export function useLocalUsage(enabled: boolean, workspacePath: string | null) {
-  const [state, setState] = useState<LocalUsageState>(emptyState);
+function usageCacheKey(workspacePath: string | null) {
+  return workspacePath ?? AGGREGATE_USAGE_CACHE_KEY;
+}
+
+function persistentUsageCacheKey(workspacePath: string | null) {
+  return `${PERSISTENT_USAGE_CACHE_PREFIX}${usageCacheKey(workspacePath)}`;
+}
+
+function readPersistentUsageCache(workspacePath: string | null) {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  try {
+    const raw = window.localStorage.getItem(persistentUsageCacheKey(workspacePath));
+    return raw ? (JSON.parse(raw) as LocalUsageSnapshot) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writePersistentUsageCache(
+  workspacePath: string | null,
+  snapshot: LocalUsageSnapshot,
+) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.localStorage.setItem(
+      persistentUsageCacheKey(workspacePath),
+      JSON.stringify(snapshot),
+    );
+  } catch {
+    // Local storage can be unavailable or quota-limited. In-memory cache still works.
+  }
+}
+
+function readUsageCache(workspacePath: string | null) {
+  const cacheKey = usageCacheKey(workspacePath);
+  const memorySnapshot = localUsageCache.get(cacheKey);
+  if (memorySnapshot) {
+    return memorySnapshot;
+  }
+  const persistentSnapshot = readPersistentUsageCache(workspacePath);
+  if (persistentSnapshot) {
+    localUsageCache.set(cacheKey, persistentSnapshot);
+  }
+  return persistentSnapshot;
+}
+
+export function useLocalUsage(
+  enabled: boolean,
+  workspacePath: string | null,
+  options?: {
+    initialDelayMs?: number;
+  },
+) {
+  const [state, setState] = useState<LocalUsageState>(() => ({
+    ...emptyState,
+    snapshot: readUsageCache(workspacePath),
+  }));
   const requestIdRef = useRef(0);
   const enabledRef = useRef(enabled);
   const workspaceRef = useRef(workspacePath);
+  const initialDelayMs = options?.initialDelayMs ?? DEFAULT_INITIAL_DELAY_MS;
 
   useEffect(() => {
     enabledRef.current = enabled;
@@ -31,6 +95,12 @@ export function useLocalUsage(enabled: boolean, workspacePath: string | null) {
 
   useEffect(() => {
     workspaceRef.current = workspacePath;
+    const cachedSnapshot = readUsageCache(workspacePath);
+    setState((prev) => ({
+      ...prev,
+      snapshot: cachedSnapshot,
+      error: null,
+    }));
   }, [workspacePath]);
 
   const refresh = useCallback(() => {
@@ -39,12 +109,16 @@ export function useLocalUsage(enabled: boolean, workspacePath: string | null) {
     }
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
+    const requestWorkspacePath = workspaceRef.current;
+    const cacheKey = usageCacheKey(requestWorkspacePath);
     setState((prev) => ({ ...prev, isLoading: true, error: null }));
-    return localUsageSnapshot(30, workspaceRef.current ?? undefined)
+    return localUsageSnapshot(30, requestWorkspacePath ?? undefined)
       .then((snapshot) => {
         if (requestIdRef.current !== requestId || !enabledRef.current) {
           return;
         }
+        localUsageCache.set(cacheKey, snapshot);
+        writePersistentUsageCache(requestWorkspacePath, snapshot);
         setState({ snapshot, isLoading: false, error: null });
       })
       .catch((err) => {
@@ -60,14 +134,28 @@ export function useLocalUsage(enabled: boolean, workspacePath: string | null) {
     if (!enabled) {
       return;
     }
-    refresh()?.catch(() => {});
-    const interval = window.setInterval(() => {
+    let timeoutId: ReturnType<typeof window.setTimeout> | null = null;
+    let intervalId: ReturnType<typeof window.setInterval> | null = null;
+    const startRefreshLoop = () => {
       refresh()?.catch(() => {});
-    }, REFRESH_INTERVAL_MS);
-    return () => {
-      window.clearInterval(interval);
+      intervalId = window.setInterval(() => {
+        refresh()?.catch(() => {});
+      }, REFRESH_INTERVAL_MS);
     };
-  }, [enabled, refresh, workspacePath]);
+    if (initialDelayMs > 0) {
+      timeoutId = window.setTimeout(startRefreshLoop, initialDelayMs);
+    } else {
+      startRefreshLoop();
+    }
+    return () => {
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+      if (intervalId !== null) {
+        window.clearInterval(intervalId);
+      }
+    };
+  }, [enabled, initialDelayMs, refresh, workspacePath]);
 
   return { ...state, refresh };
 }

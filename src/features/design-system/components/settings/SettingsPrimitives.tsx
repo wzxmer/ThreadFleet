@@ -81,6 +81,7 @@ export function SettingsToggleSwitch({
       className={joinClassNames("settings-toggle", pressed && "on", className)}
       aria-pressed={pressed}
       {...props}
+      data-button-elevation="none"
     >
       <span className="settings-toggle-knob" />
     </button>

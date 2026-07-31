@@ -1,4 +1,3 @@
-import { SidebarCollapseButton } from "@/features/layout/components/SidebarToggleControls";
 import type { ComponentProps } from "react";
 import { MainAppShell } from "@app/components/MainAppShell";
 
@@ -18,7 +17,6 @@ type UseMainAppShellPropsArgs = {
   gitHubPanelDataProps: ComponentProps<typeof MainAppShell>["gitHubPanelDataProps"];
   appLayout: Omit<ComponentProps<typeof MainAppShell>["appLayoutProps"], "desktopTopbarLeftNode" | "topbarActionsNode">;
   topbar: {
-    isCompact: boolean;
     desktopTopbarLeftNode: ComponentProps<typeof MainAppShell>["appLayoutProps"]["desktopTopbarLeftNode"];
     hasActiveWorkspace: boolean;
     backendMode: "local" | "remote";
@@ -59,21 +57,12 @@ export function useMainAppShellProps({
     </span>
   ) : null;
 
-  const desktopTopbarLeftNodeWithToggle = !topbar.isCompact ? (
-    <div className="topbar-leading">
-      <SidebarCollapseButton {...shell.sidebarToggleProps} />
-      {topbar.desktopTopbarLeftNode}
-    </div>
-  ) : (
-    topbar.desktopTopbarLeftNode
-  );
-
   return {
     ...shell,
     gitHubPanelDataProps,
     appLayoutProps: {
       ...appLayout,
-      desktopTopbarLeftNode: desktopTopbarLeftNodeWithToggle,
+      desktopTopbarLeftNode: topbar.desktopTopbarLeftNode,
       topbarActionsNode,
     },
   };

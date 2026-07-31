@@ -121,6 +121,51 @@ describe("useAccountSwitching", () => {
     expect(unlisten).toHaveBeenCalledTimes(1);
   });
 
+  it("can start login for an explicit workspace when Home is active", async () => {
+    vi.mocked(runCodexLogin).mockResolvedValue({
+      loginId: "login-home",
+      authUrl: "https://example.com/home-auth",
+    });
+
+    const refreshAccountInfo = vi.fn();
+    const refreshAccountRateLimits = vi.fn();
+    const alertError = vi.fn();
+
+    const { root } = await mount({
+      activeWorkspaceId: null,
+      accountByWorkspace: { "ws-home": makeAccount() },
+      refreshAccountInfo,
+      refreshAccountRateLimits,
+      alertError,
+    });
+
+    await act(async () => {
+      await latest?.handleSwitchAccount("ws-home");
+    });
+
+    expect(runCodexLogin).toHaveBeenCalledWith("ws-home");
+    expect(openUrl).toHaveBeenCalledWith("https://example.com/home-auth");
+    expect(latest?.accountSwitching).toBe(true);
+
+    act(() => {
+      listener?.({
+        workspace_id: "ws-home",
+        message: {
+          method: "account/login/completed",
+          params: { loginId: "login-home", success: true, error: null },
+        },
+      });
+    });
+
+    expect(refreshAccountInfo).toHaveBeenCalledWith("ws-home");
+    expect(refreshAccountRateLimits).toHaveBeenCalledWith("ws-home");
+    expect(alertError).not.toHaveBeenCalled();
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
   it("cancels and ignores a failed completion event", async () => {
     vi.mocked(runCodexLogin).mockResolvedValue({
       loginId: "login-2",

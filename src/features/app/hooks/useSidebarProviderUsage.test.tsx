@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { renderHook, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, renderHook, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppSettings } from "@/types";
 import { useSidebarProviderUsage } from "./useSidebarProviderUsage";
 
@@ -50,6 +50,10 @@ describe("useSidebarProviderUsage", () => {
       isPartial: false,
       source: "sub2",
     });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("uses the home account workspace when no project is active", async () => {
@@ -156,5 +160,58 @@ describe("useSidebarProviderUsage", () => {
       expect(getWorkspaceThirdPartyKeyUsageMock).toHaveBeenCalledTimes(2);
     });
     expect(getProviderStatusMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not refresh usage when unrelated display settings change", async () => {
+    const { rerender } = renderHook(
+      ({ settings }) =>
+        useSidebarProviderUsage({
+          appSettings: settings,
+          activeWorkspaceId: "active-workspace",
+          homeAccountWorkspaceId: "home-workspace",
+        }),
+      { initialProps: { settings: appSettings } },
+    );
+
+    await waitFor(() => {
+      expect(getWorkspaceThirdPartyKeyUsageMock).toHaveBeenCalledTimes(1);
+    });
+
+    rerender({
+      settings: {
+        ...appSettings,
+        messageReadingStyle: "cli",
+        messageToolGroupsCollapsedByDefault: true,
+      } as AppSettings,
+    });
+
+    await Promise.resolve();
+
+    expect(getProviderStatusMock).toHaveBeenCalledTimes(1);
+    expect(getWorkspaceThirdPartyKeyUsageMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("can defer the initial provider status request for a non-critical startup surface", async () => {
+    vi.useFakeTimers();
+
+    renderHook(() =>
+      useSidebarProviderUsage({
+        appSettings,
+        activeWorkspaceId: null,
+        homeAccountWorkspaceId: "home-workspace",
+        statusDelayMs: 800,
+      }),
+    );
+
+    expect(getProviderStatusMock).not.toHaveBeenCalled();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(799);
+    });
+    expect(getProviderStatusMock).not.toHaveBeenCalled();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+
+    expect(getProviderStatusMock).toHaveBeenCalledWith("home-workspace");
   });
 });

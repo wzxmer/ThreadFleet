@@ -21,6 +21,7 @@ import { useSettingsServerSection } from "./useSettingsServerSection";
 import type { GroupedWorkspaces } from "./settingsSectionTypes";
 import type { SettingsWorkflowSectionProps } from "@settings/components/sections/SettingsWorkflowSection";
 import type { ProviderSessionDiagnostics } from "@settings/utils/providerSessionDiagnostics";
+import type { SettingsUpdaterControls } from "@settings/components/SettingsView";
 import {
   COMPOSER_PRESET_CONFIGS,
   COMPOSER_PRESET_LABELS,
@@ -37,6 +38,7 @@ type UseSettingsViewOrchestrationArgs = {
   openAppIconById: Record<string, string>;
   onUpdateAppSettings: (next: AppSettings) => Promise<void>;
   onToggleAutomaticAppUpdateChecks?: () => void;
+  updater?: SettingsUpdaterControls;
   onRunDoctor: (
     codexBin: string | null,
     codexArgs: string | null,
@@ -85,6 +87,7 @@ export function useSettingsViewOrchestration({
   openAppIconById,
   onUpdateAppSettings,
   onToggleAutomaticAppUpdateChecks,
+  updater,
   onRunDoctor,
   onRunCodexUpdate,
   onUpdateWorkspaceSettings,
@@ -226,7 +229,9 @@ export function useSettingsViewOrchestration({
   return {
     aboutSectionProps: {
       appSettings,
+      onUpdateAppSettings,
       onToggleAutomaticAppUpdateChecks,
+      updater,
     },
     projectsSectionProps,
     environmentsSectionProps,

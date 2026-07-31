@@ -3,21 +3,263 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 describe("sidebar interaction styles", () => {
-  it("distributes header icon buttons across the available sidebar width", () => {
+  it("uses a compact object-title header with grouped actions", () => {
     const sidebarCss = readFileSync(new URL("./sidebar.css", import.meta.url), "utf8");
     const headerRule = sidebarCss.match(/\.sidebar-header\s*\{([\s\S]*?)\n\}/);
     const titleRule = sidebarCss.match(/\.sidebar-header-title\s*\{([\s\S]*?)\n\}/);
     const titleGroupRule = sidebarCss.match(/\.sidebar-title-group\s*\{([\s\S]*?)\n\}/);
     const actionsRule = sidebarCss.match(/\.sidebar-header-actions\s*\{([\s\S]*?)\n\}/);
 
-    expect(headerRule?.[1]).toContain("justify-content: space-between");
-    expect(headerRule?.[1]).toContain("gap: 0");
+    expect(headerRule?.[1]).toContain("display: flex");
+    expect(headerRule?.[1]).toContain("justify-content: flex-start");
+    expect(headerRule?.[1]).toContain("gap: clamp(4px, calc((100% - 292px) / 4), 14px)");
     expect(headerRule?.[1]).toContain("width: 100%");
     expect(titleRule?.[1]).toContain("display: contents");
     expect(titleGroupRule?.[1]).toContain("display: contents");
     expect(actionsRule?.[1]).toContain("display: contents");
-    expect(actionsRule?.[1]).not.toContain("margin-left: auto");
+    expect(sidebarCss).toContain(".sidebar-object-title");
+    expect(sidebarCss).toMatch(
+      /\.sidebar-header-actions \.sidebar-search\s*\{[^}]*flex:\s*1 1 152px;[^}]*min-width:\s*118px;/s,
+    );
+    expect(sidebarCss).toMatch(
+      /\.sidebar-header-actions \.sidebar-search-input\s*\{[^}]*height:\s*28px;[^}]*color:\s*var\(--sidebar-object-text\);[^}]*caret-color:\s*var\(--sidebar-object-text\);/s,
+    );
+    expect(sidebarCss).toMatch(
+      /:root:not\(\[data-theme\]\) \.sidebar-header-actions \.sidebar-search-input,\s*:root\[data-theme="light"\] \.sidebar-header-actions \.sidebar-search-input\s*\{[^}]*background:\s*color-mix\(in srgb, var\(--sidebar-object-bg-strong\) 92%, var\(--sidebar-object-bg\) 8%\);[^}]*color:\s*var\(--sidebar-object-text\);/s,
+    );
   });
+
+  it("keeps object-sidebar top actions and tablet rail icons visible on dark chrome", () => {
+    const sidebarCss = readFileSync(new URL("./sidebar.css", import.meta.url), "utf8");
+    const tabletCss = readFileSync(new URL("./compact-tablet.css", import.meta.url), "utf8");
+
+    expect(sidebarCss).toMatch(
+      /\.sidebar-title-add\s*\{[^}]*color:\s*var\(--sidebar-object-muted\);/s,
+    );
+    expect(sidebarCss).toMatch(
+      /\.sidebar-home-toggle\s*\{[^}]*color:\s*var\(--sidebar-object-muted\);/s,
+    );
+    expect(sidebarCss).toMatch(
+      /\.sidebar-sort-toggle\s*\{[^}]*color:\s*var\(--sidebar-object-muted\);/s,
+    );
+    expect(sidebarCss).toMatch(
+      /\.sidebar-refresh-toggle\s*\{[^}]*color:\s*var\(--sidebar-object-muted\);/s,
+    );
+    expect(sidebarCss).toMatch(
+      /\.sidebar-search-toggle\s*\{[^}]*color:\s*var\(--sidebar-object-muted\);/s,
+    );
+    expect(tabletCss).toMatch(
+      /\.tablet-nav-item\s*\{[^}]*color:\s*#7d8992;/s,
+    );
+    expect(tabletCss).toMatch(
+      /\.tablet-nav-item:hover:not\(:disabled\),\s*\.tablet-nav-item:focus-visible\s*\{[^}]*color:\s*#dfe5ea;[^}]*background:\s*rgba\(255, 255, 255, 0\.055\);/s,
+    );
+    expect(tabletCss).toMatch(
+      /:root:not\(\[data-theme\]\) \.tablet-nav-account-popover,\s*:root\[data-theme="light"\] \.tablet-nav-account-popover\s*\{[^}]*--ds-popover-bg:\s*var\(--cm-light-panel-bg\);/s,
+    );
+    expect(tabletCss).toMatch(
+      /\.app\.layout-tablet\s*\{[^}]*grid-template-columns:\s*var\(--tablet-nav-width,\s*52px\) var\(--tablet-sidebar-effective-width,\s*0px\) minmax\(0,\s*1fr\);/s,
+    );
+    expect(tabletCss).toMatch(
+      /\.app\.layout-tablet\.settings-surface-open\s*\{[^}]*grid-template-columns:\s*var\(--tablet-nav-width,\s*52px\) minmax\(0,\s*1fr\);/s,
+    );
+    expect(tabletCss).toMatch(
+      /@media \(max-width: 900px\)[\s\S]*?\.app\.layout-tablet\.tablet-projects-open \.tablet-projects\s*\{[^}]*position:\s*absolute;[^}]*width:\s*min\(360px,\s*calc\(100vw - var\(--tablet-nav-width,\s*52px\) - 24px\)\);/s,
+    );
+    expect(sidebarCss).toMatch(
+      /\.app\.layout-desktop\.sidebar-overlay-open \.sidebar\s*\{[^}]*position:\s*absolute;[^}]*left:\s*var\(--app-rail-width,\s*52px\);[^}]*width:\s*min\(/s,
+    );
+    expect(sidebarCss).toMatch(
+      /\.app\.layout-desktop\.sidebar-overlay-open \.sidebar\s*\{[^}]*opacity:\s*1;[^}]*transform:\s*none;[^}]*pointer-events:\s*auto;/s,
+    );
+  });
+
+  it("renders workspace sessions as a compact project tree without elevated row shadows", () => {
+    const sidebarCss = readFileSync(new URL("./sidebar.css", import.meta.url), "utf8");
+    const sidebarRule = sidebarCss.match(/\.sidebar\s*\{([\s\S]*?)\n\}/);
+    const workspaceContentRule = sidebarCss.match(
+      /\.workspace-card-content-inner\s*\{([\s\S]*?)\n\}/,
+    );
+    const workspaceTitleRule = sidebarCss.match(
+      /\.workspace-title\s*\{([\s\S]*?)\n\}/,
+    );
+    const workspaceRowRule = sidebarCss.match(
+      /\.workspace-row\s*\{([\s\S]*?)\n\}/,
+    );
+    const workspaceCountRule = sidebarCss.match(
+      /\.workspace-thread-count\s*\{([\s\S]*?)\n\}/,
+    );
+    const threadListRule = sidebarCss.match(
+      /\.thread-list\s*\{([\s\S]*?)\n\}/,
+    );
+    const workspaceHoverRule = sidebarCss.match(
+      /\.workspace-row:hover::before\s*\{([\s\S]*?)\n\}/,
+    );
+    const threadHoverRule = sidebarCss.match(
+      /(?:^|\n)\.thread-row:hover\s*\{([\s\S]*?)\n\}/,
+    );
+    const threadRowRule = sidebarCss.match(/(?:^|\n)\.thread-row\s*\{([\s\S]*?)\n\}/);
+
+    expect(sidebarRule?.[1]).toContain("--sidebar-object-bg: #171b20");
+    expect(sidebarRule?.[1]).toContain("--sidebar-object-active: #22282e");
+    expect(workspaceContentRule?.[1]).toContain("margin-left: 0");
+    expect(workspaceContentRule?.[1]).toContain("padding: 3px 8px");
+    expect(workspaceContentRule?.[1]).toContain("border-left: 0");
+    expect(sidebarCss).not.toContain(".app:not(.layout-phone) .sidebar .workspace-card-content-inner");
+    expect(threadRowRule?.[1]).toContain("gap: 8px");
+    expect(threadRowRule?.[1]).toContain(
+      "padding: 7px 10px 7px calc(10px + var(--thread-indent, 0px))",
+    );
+    expect(threadRowRule?.[1]).toContain("min-height: 44px");
+    expect(threadRowRule?.[1]).toContain("border-radius: 10px");
+    expect(workspaceTitleRule?.[1]).toContain(
+      "grid-template-columns: 18px 16px minmax(0, 1fr) auto",
+    );
+    expect(workspaceTitleRule?.[1]).toContain("gap: 4px");
+    expect(workspaceRowRule?.[1]).toContain("align-items: center");
+    expect(workspaceRowRule?.[1]).toContain("min-height: 38px");
+    expect(workspaceRowRule?.[1]).toContain("padding: 4px 6px");
+    expect(workspaceCountRule?.[1]).toContain("align-items: center");
+    expect(workspaceCountRule?.[1]).toContain("justify-content: center");
+    expect(workspaceCountRule?.[1]).toContain("height: 18px");
+    expect(threadListRule?.[1]).toContain("gap: 2px");
+    expect(sidebarCss).toMatch(
+      /\.app:not\(\.layout-phone\) \.sidebar \.thread-row\s*\{[^}]*min-height:\s*34px;[^}]*padding-top:\s*3px;[^}]*padding-bottom:\s*3px;/s,
+    );
+    expect(workspaceHoverRule?.[1]).toContain("box-shadow: none");
+    expect(threadHoverRule?.[1]).toContain("box-shadow: none");
+    expect(sidebarCss).toContain(".workspace-thread-count");
+  });
+
+  it("keeps desktop/tablet project rows on themeable object-sidebar tokens", () => {
+    const sidebarCss = readFileSync(new URL("./sidebar.css", import.meta.url), "utf8");
+
+    expect(sidebarCss).toMatch(
+      /:root:not\(\[data-theme\]\) \.sidebar,\s*:root\[data-theme="light"\] \.sidebar\s*\{[^}]*--sidebar-object-bg:\s*var\(--cm-light-chrome-bg\);[^}]*--sidebar-object-text:\s*var\(--cm-light-text-strong\);/s,
+    );
+    expect(sidebarCss).toMatch(
+      /:root:not\(\[data-theme\]\) \.app:not\(\.layout-phone\) \.sidebar \.workspace-name,\s*:root\[data-theme="light"\] \.app:not\(\.layout-phone\) \.sidebar \.workspace-name\s*\{[^}]*color:\s*var\(--sidebar-object-text\);/s,
+    );
+    expect(sidebarCss).toMatch(
+      /\.app:not\(\.layout-phone\) \.sidebar \.workspace-row\.active::before\s*\{[^}]*background:\s*var\(--sidebar-object-active\);[^}]*border-color:\s*var\(--sidebar-object-active-border\);/s,
+    );
+    expect(sidebarCss).toMatch(
+      /\.app:not\(\.layout-phone\) \.sidebar \.workspace-row:not\(\.active\)::before\s*\{[^}]*background:\s*var\(--sidebar-object-hover\);[^}]*border-color:\s*var\(--sidebar-object-border\);[^}]*box-shadow:\s*none;/s,
+    );
+    expect(sidebarCss).toMatch(
+      /\.app:not\(\.layout-phone\) \.sidebar \.workspace-thread-count\s*\{[^}]*background:\s*var\(--sidebar-object-control\);[^}]*color:\s*var\(--sidebar-object-muted\);/s,
+    );
+    expect(sidebarCss).toMatch(
+      /\.app:not\(\.layout-phone\) \.sidebar \.workspace-row\.active \.workspace-thread-count\s*\{[^}]*background:\s*rgba\(255, 255, 255, 0\.055\);[^}]*color:\s*var\(--sidebar-object-text\);/s,
+    );
+  });
+
+  it("uses a white light-theme conversation list without changing the tablet rail", () => {
+    const sidebarCss = readFileSync(new URL("./sidebar.css", import.meta.url), "utf8");
+
+    expect(sidebarCss).toMatch(
+      /:root:not\(\[data-theme\]\) \.sidebar-body,\s*:root\[data-theme="light"\] \.sidebar-body\s*\{[^}]*background:\s*var\(--cm-light-panel-bg\);/s,
+    );
+    expect(sidebarCss).not.toMatch(
+      /:root(?:[^{}]|\{[^}]*\})*\.tablet-nav[^{}]*\{[^}]*background:\s*var\(--cm-light-panel-bg\)/s,
+    );
+  });
+
+  it("keeps desktop/tablet command-deck thread rows readable on the dark object sidebar", () => {
+    const sidebarCss = readFileSync(new URL("./sidebar.css", import.meta.url), "utf8");
+
+    expect(sidebarCss).toMatch(
+      /\.app:not\(\.layout-phone\) \.sidebar \.thread-row\s*\{[^}]*min-height:\s*34px;[^}]*padding-top:\s*3px;[^}]*padding-bottom:\s*3px;[^}]*color:\s*var\(--sidebar-object-muted\);/s,
+    );
+    expect(sidebarCss).toMatch(
+      /\.app:not\(\.layout-phone\) \.sidebar \.thread-row\.active\s*\{[^}]*background:\s*var\(--sidebar-object-active\);[^}]*color:\s*var\(--sidebar-object-text\);/s,
+    );
+    expect(sidebarCss).toMatch(
+      /\.app:not\(\.layout-phone\) \.sidebar \.thread-row\.active\s*\{[^}]*box-shadow:\s*inset 3px 0 0 var\(--border-accent\);/s,
+    );
+    expect(sidebarCss).toMatch(
+      /\.app:not\(\.layout-phone\) \.sidebar \.thread-row:hover \.thread-name,\s*\.app:not\(\.layout-phone\) \.sidebar \.thread-row\.active \.thread-name\s*\{[^}]*color:\s*var\(--sidebar-object-text\);/s,
+    );
+    expect(sidebarCss).toMatch(
+      /\.thread-more\s*\{[^}]*color:\s*var\(--sidebar-object-muted\);/s,
+    );
+    expect(sidebarCss).toMatch(
+      /\.thread-more:hover\s*\{[^}]*color:\s*var\(--sidebar-object-text\);/s,
+    );
+  });
+
+  it("keeps desktop/tablet command-deck sidebar bottom controls dark and compact", () => {
+    const sidebarCss = readFileSync(new URL("./sidebar.css", import.meta.url), "utf8");
+
+    expect(sidebarCss).toMatch(
+      /\.sidebar-usage-panel\s*\{[^}]*border:\s*1px solid var\(--sidebar-object-border\);[^}]*background:\s*var\(--sidebar-object-bg-strong\);/s,
+    );
+    expect(sidebarCss).not.toContain(".sidebar-theme-toggle");
+    expect(sidebarCss).not.toContain(".sidebar-bottom-actions");
+    expect(sidebarCss).not.toContain(".sidebar-account-menu");
+    expect(sidebarCss).not.toContain(".sidebar-labeled-button");
+    expect(sidebarCss).not.toContain(".sidebar-utility-actions");
+    expect(sidebarCss).not.toContain(".sidebar-utility-button");
+  });
+
+  it("keeps workspace creation menus on the object-sidebar dark surface", () => {
+    const sidebarCss = readFileSync(new URL("./sidebar.css", import.meta.url), "utf8");
+
+    expect(sidebarCss).toMatch(
+      /\.workspace-add-menu\s*\{[^}]*--ds-popover-bg:\s*var\(--sidebar-object-bg-strong,\s*#151a1f\);[^}]*background:\s*var\(--sidebar-object-bg-strong,\s*#151a1f\);/s,
+    );
+    expect(sidebarCss).toMatch(
+      /\.workspace-add-menu \.ds-popover-item\s*\{[^}]*color:\s*var\(--sidebar-object-muted,\s*#a5b0b7\);/s,
+    );
+    expect(sidebarCss).toMatch(
+      /\.workspace-add-option\s*\{[^}]*color:\s*var\(--sidebar-object-muted,\s*#a5b0b7\);[^}]*padding:\s*8px 9px;/s,
+    );
+    expect(sidebarCss).toMatch(
+      /\.workspace-add-menu \.ds-popover-item:hover:not\(:disabled\),\s*\.workspace-add-menu \.ds-popover-item:focus-visible,\s*\.workspace-add-menu \.ds-popover-item\.is-active\s*\{[^}]*background:\s*var\(--sidebar-object-hover,\s*rgba\(255, 255, 255, 0\.045\)\);/s,
+    );
+  });
+
+  it("keeps pinned and active thread times visible in the sidebar meta lane", () => {
+    const sidebarCss = readFileSync(new URL("./sidebar.css", import.meta.url), "utf8");
+    const metaRule = sidebarCss.match(/\.thread-meta\s*\{([\s\S]*?)\n\}/);
+
+    expect(metaRule?.[1]).toContain("grid-template-columns: 22px 40px");
+    expect(metaRule?.[1]).toContain("width: 66px");
+    expect(sidebarCss).toMatch(
+      /\.thread-meta\.has-subagent-toggle\s*\{[^}]*grid-template-columns:\s*22px 56px;[^}]*width:\s*82px;/s,
+    );
+    expect(sidebarCss).toMatch(
+      /\.thread-pin-button\s*\{[^}]*grid-column:\s*1;/s,
+    );
+    expect(sidebarCss).toMatch(
+      /\.thread-time,\s*\.thread-subagent-time-toggle\s*\{[^}]*grid-column:\s*2;[^}]*justify-self:\s*end;/s,
+    );
+    expect(sidebarCss).toMatch(
+      /\.app:not\(\.layout-phone\) \.sidebar \.thread-time,\s*\.app:not\(\.layout-phone\) \.sidebar \.thread-subagent-time-label\s*\{[^}]*color:\s*var\(--sidebar-object-muted\);[^}]*opacity:\s*1;/s,
+    );
+    expect(sidebarCss).toMatch(
+      /\.app:not\(\.layout-phone\) \.sidebar \.thread-row\.active \.thread-time/s,
+    );
+    expect(sidebarCss).toMatch(
+      /\.app:not\(\.layout-phone\) \.sidebar \.thread-pin-button\.is-pinned\s*\{[^}]*color:\s*var\(--sidebar-object-muted\);/s,
+    );
+    expect(sidebarCss).toMatch(
+      /\.workspace-actions\s*\{[^}]*opacity:\s*0\.7;[^}]*pointer-events:\s*auto;/s,
+    );
+    expect(sidebarCss).toMatch(
+      /\.workspace-add\s*\{[^}]*color:\s*var\(--sidebar-object-muted\);[^}]*opacity:\s*0\.82;/s,
+    );
+    expect(sidebarCss).toMatch(
+      /\.workspace-add-direct,\s*\.workspace-more\s*\{[^}]*color:\s*var\(--sidebar-object-muted\);[^}]*opacity:\s*0\.86;/s,
+    );
+    expect(sidebarCss).toMatch(
+      /\.thread-pin-button\s*\{[^}]*color:\s*var\(--sidebar-object-muted\);[^}]*opacity:\s*0\.76;/s,
+    );
+    expect(sidebarCss).toMatch(
+      /\.thread-row:hover \.thread-pin-button,\s*\.thread-row\.active \.thread-pin-button,\s*\.thread-pin-button:focus-visible,\s*\.thread-pin-button\.is-pinned\s*\{[^}]*opacity:\s*1;/s,
+    );
+  });
+
 
   it("keeps the local Codex history pill from inheriting global button elevation", () => {
     const sidebarCss = readFileSync(new URL("./sidebar.css", import.meta.url), "utf8");

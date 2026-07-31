@@ -1,19 +1,5 @@
 .git-init-modal .ds-modal-card {
   width: min(520px, calc(100vw - 48px));
-  border-radius: 16px;
-  padding: 18px 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  /* Make this modal fully opaque (no glass/transparency). */
-  background: var(--surface-sidebar-opaque);
-}
-
-.git-init-modal .ds-modal-backdrop {
-  /* Fully opaque backdrop; no blur/transparency so nothing bleeds through. */
-  background: color-mix(in srgb, var(--surface-sidebar-opaque) 18%, black);
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
 }
 
 .git-init-modal-checkbox-row {
@@ -44,8 +30,8 @@
   gap: 10px;
   padding: 12px 12px;
   border-radius: 14px;
-  border: 1px solid var(--ds-border-subtle);
-  background: var(--surface-sidebar-opaque);
+  border: 1px solid var(--cm-panel-border);
+  background: color-mix(in srgb, var(--cm-main-bg) 78%, var(--cm-panel-bg) 22%);
 }
 
 .git-init-modal-actions {

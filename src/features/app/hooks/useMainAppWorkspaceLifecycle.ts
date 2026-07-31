@@ -23,6 +23,7 @@ type UseMainAppWorkspaceLifecycleArgs = {
   activeWorkspace: WorkspaceInfo | null;
   activeThreadId: string | null;
   threadStatusById: Record<string, { isProcessing: boolean }>;
+  activeThreadNeedsBackgroundRefresh: boolean;
   remoteThreadConnectionState: "live" | "polling" | "disconnected";
   refreshThread: (workspaceId: string, threadId: string) => Promise<unknown>;
 };
@@ -40,6 +41,7 @@ export function useMainAppWorkspaceLifecycle({
   activeWorkspace,
   activeThreadId,
   threadStatusById,
+  activeThreadNeedsBackgroundRefresh,
   remoteThreadConnectionState,
   refreshThread,
 }: UseMainAppWorkspaceLifecycleArgs) {
@@ -73,6 +75,7 @@ export function useMainAppWorkspaceLifecycle({
     activeThreadIsProcessing: Boolean(
       activeThreadId && threadStatusById[activeThreadId]?.isProcessing,
     ),
+    activeThreadNeedsBackgroundRefresh,
     suspendPolling:
       backendMode === "remote" && remoteThreadConnectionState === "live",
     reconnectWorkspace: connectWorkspace,

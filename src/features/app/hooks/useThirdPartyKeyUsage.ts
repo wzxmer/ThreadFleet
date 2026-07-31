@@ -8,7 +8,7 @@ type UseThirdPartyKeyUsageArgs = {
   enabled: boolean;
   workspaceId: string | null | undefined;
   profileId?: string | null;
-  profileRevision?: number;
+  profileRevision?: number | string;
 };
 
 type UsageState = {

@@ -1,7 +1,4 @@
 import type { AppSettings, ThemePreference } from "@/types";
-import { CONVERSATION_STYLE_PRESETS } from "@/features/messages/utils/conversationStylePresets";
-
-type ResolvedTheme = Exclude<ThemePreference, "system">;
 
 export type ConversationAppearance = Pick<
   AppSettings,
@@ -15,60 +12,32 @@ export type ConversationAppearance = Pick<
   composerInputBackgroundColor?: string;
 };
 
-const WHITE_COMPOSER_CANVAS_COLORS = new Set(
-  CONVERSATION_STYLE_PRESETS.filter(
-    (preset) => preset.id === "native-white" || preset.id === "native-light",
-  ).map((preset) => preset.settings.messageCanvasColor.toLowerCase()),
-);
+const NATIVE_DARK_APPEARANCE: ConversationAppearance = {
+  messageCanvasColor: "#101419",
+  messageUserBubbleColor: "#20262c",
+  messageUserTextColor: "#dfe5ea",
+  messageAssistantBubbleColor: "#151a1f",
+  messageAssistantAccentColor: "#68d0ad",
+  messageAssistantTextColor: "#dfe5ea",
+};
 
-function resolveComposerInputBackgroundColor(messageCanvasColor: string): string | undefined {
-  return WHITE_COMPOSER_CANVAS_COLORS.has(messageCanvasColor.toLowerCase())
-    ? "#ffffff"
-    : undefined;
-}
-
-const blackOrangePreset = CONVERSATION_STYLE_PRESETS.find(
-  (preset) => preset.id === "cli-ember",
-)?.settings;
+const NATIVE_LIGHT_APPEARANCE: ConversationAppearance = {
+  messageCanvasColor: "var(--cm-light-main-bg)",
+  messageUserBubbleColor: "var(--cm-light-control-bg)",
+  messageUserTextColor: "#000",
+  messageAssistantBubbleColor: "var(--cm-light-panel-bg)",
+  messageAssistantAccentColor: "var(--cm-light-accent)",
+  messageAssistantTextColor: "#000",
+  composerInputBackgroundColor: "var(--cm-light-panel-bg)",
+};
 
 export function resolveRuntimeThemeAppearance(
-  settings: AppSettings,
-  resolvedTheme: ResolvedTheme,
+  resolvedTheme: ThemePreference,
 ): {
-  themeAccent: AppSettings["themeAccent"];
   conversationAppearance: ConversationAppearance;
 } {
-  const conversationAppearance: ConversationAppearance = {
-    messageCanvasColor: settings.messageCanvasColor,
-    messageUserBubbleColor: settings.messageUserBubbleColor,
-    messageUserTextColor: settings.messageUserTextColor,
-    messageAssistantBubbleColor: settings.messageAssistantBubbleColor,
-    messageAssistantAccentColor: settings.messageAssistantAccentColor,
-    messageAssistantTextColor: settings.messageAssistantTextColor,
-    composerInputBackgroundColor: resolveComposerInputBackgroundColor(
-      settings.messageCanvasColor,
-    ),
-  };
-
-  if (settings.theme !== "system" || resolvedTheme !== "dark" || !blackOrangePreset) {
-    return {
-      themeAccent: settings.themeAccent,
-      conversationAppearance,
-    };
-  }
-
   return {
-    themeAccent: "orange",
-    conversationAppearance: {
-      messageCanvasColor: blackOrangePreset.messageCanvasColor,
-      messageUserBubbleColor: blackOrangePreset.messageUserBubbleColor,
-      messageUserTextColor: blackOrangePreset.messageUserTextColor,
-      messageAssistantBubbleColor: blackOrangePreset.messageAssistantBubbleColor,
-      messageAssistantAccentColor: blackOrangePreset.messageAssistantAccentColor,
-      messageAssistantTextColor: blackOrangePreset.messageAssistantTextColor,
-      composerInputBackgroundColor: resolveComposerInputBackgroundColor(
-        blackOrangePreset.messageCanvasColor,
-      ),
-    },
+    conversationAppearance:
+      resolvedTheme === "dark" ? NATIVE_DARK_APPEARANCE : NATIVE_LIGHT_APPEARANCE,
   };
 }

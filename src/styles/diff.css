@@ -7,12 +7,12 @@
 }
 
 .git-panel-header {
-  gap: 12px;
+  gap: 8px;
 }
 
 .git-panel-header .panel-tabs {
-  background: var(--cm-surface-panel);
-  border-color: var(--cm-border-default);
+  background: var(--right-panel-control-bg, var(--cm-surface-panel));
+  border-color: var(--right-panel-control-border, var(--cm-border-default));
 }
 
 .git-panel-header .panel-tab {
@@ -20,7 +20,7 @@
 }
 
 .git-panel-header .panel-tab.is-active {
-  background: var(--cm-surface-panel-hover);
+  background: var(--right-panel-control-bg-active, var(--cm-surface-panel-hover));
   color: var(--text-strong);
 }
 
@@ -37,15 +37,15 @@
 }
 
 .git-panel-select-input {
-  border: 1px solid var(--cm-border-default);
-  background: var(--cm-surface-panel);
+  border: 1px solid var(--right-panel-control-border, var(--cm-border-default));
+  background: var(--right-panel-control-bg, var(--cm-surface-panel));
   color: var(--text-emphasis);
   font-size: 12px;
   font-weight: 600;
-  padding: 9px 34px 9px 34px;
-  border-radius: 999px;
+  padding: 6px 30px 6px 30px;
+  border-radius: 7px;
   cursor: pointer;
-  min-height: 34px;
+  min-height: 30px;
   appearance: none;
   background-image: linear-gradient(45deg, transparent 50%, var(--text-dim) 50%),
     linear-gradient(135deg, var(--text-dim) 50%, transparent 50%);
@@ -62,8 +62,8 @@
 
 .git-panel-select-input:hover,
 .git-panel-select-input:focus-visible {
-  background-color: var(--cm-surface-panel-hover);
-  border-color: var(--cm-border-hover);
+  background-color: var(--right-panel-control-bg-hover, var(--cm-surface-panel-hover));
+  border-color: var(--right-panel-control-border-hover, var(--cm-border-hover));
   outline: none;
 }
 
@@ -73,7 +73,7 @@
   justify-content: center;
   color: var(--text-faint);
   position: absolute;
-  left: 12px;
+  left: 10px;
   pointer-events: none;
 }
 
@@ -137,9 +137,9 @@
   justify-content: center;
   width: 28px;
   height: 28px;
-  border-radius: 999px;
-  border: 1px solid var(--cm-border-default);
-  background: var(--cm-surface-panel);
+  border-radius: 6px;
+  border: 1px solid var(--right-panel-control-border, var(--cm-border-default));
+  background: var(--right-panel-control-bg, var(--cm-surface-panel));
   color: var(--text-muted);
   cursor: pointer;
   padding: 0;
@@ -150,8 +150,8 @@
 }
 
 .diff-branch-refresh:hover:not(:disabled) {
-  background: var(--cm-surface-panel-hover);
-  border-color: var(--cm-border-hover);
+  background: var(--right-panel-control-bg-hover, var(--cm-surface-panel-hover));
+  border-color: var(--right-panel-control-border-hover, var(--cm-border-hover));
   color: var(--text-strong);
   box-shadow: none;
   transform: none;
@@ -194,7 +194,7 @@
   flex-direction: column;
   gap: 12px;
   padding: 14px;
-  border-radius: 18px;
+  border-radius: 7px;
   border: 1px solid var(--cm-border-default);
   background: var(--cm-surface-panel-soft);
 }
@@ -219,7 +219,7 @@
 .git-root-button {
   padding: 7px 11px;
   font-size: 12px;
-  border-radius: 999px;
+  border-radius: 7px;
   border: 1px solid var(--cm-border-default);
   background: var(--cm-surface-panel);
   color: var(--text-emphasis);
@@ -271,7 +271,7 @@
 
 .git-root-select {
   padding: 6px 24px 6px 10px;
-  border-radius: 999px;
+  border-radius: 7px;
   border: 1px solid var(--cm-border-default);
   background: var(--cm-surface-panel);
   color: var(--text-strong);
@@ -294,7 +294,7 @@
   background: transparent;
   color: var(--text-emphasis);
   padding: 9px 10px;
-  border-radius: 12px;
+  border-radius: 7px;
   font-size: 12px;
   box-shadow: none;
   transform: none;
@@ -396,8 +396,8 @@
   height: 24px;
   padding: 0 8px;
   border-radius: 999px;
-  border: 1px solid var(--cm-border-soft);
-  background: var(--cm-surface-panel);
+  border: 1px solid var(--right-panel-control-border, var(--cm-border-soft));
+  background: var(--right-panel-control-bg, var(--cm-surface-panel));
   font-family: var(--code-font-family);
   font-size: var(--code-font-size, 11px);
   font-variant-numeric: tabular-nums;
@@ -451,7 +451,7 @@
   background: transparent;
   color: var(--text-emphasis);
   padding: 9px 10px;
-  border-radius: 12px;
+  border-radius: 7px;
   cursor: pointer;
   text-align: left;
   box-shadow: none;
@@ -499,7 +499,7 @@
 .per-file-edit-row {
   width: 100%;
   border: 0;
-  border-radius: 12px;
+  border-radius: 7px;
   background: transparent;
   color: var(--text-emphasis);
   display: grid;
@@ -642,7 +642,7 @@
   column-gap: 8px;
   align-items: center;
   padding: 8px 10px;
-  border-radius: 12px;
+  border-radius: 7px;
   cursor: pointer;
   border: 0;
   background: transparent;
@@ -863,16 +863,16 @@
   gap: 3px;
   padding: 2px 7px;
   border-radius: 999px;
-  border: 1px solid var(--cm-border-soft);
-  background: var(--cm-surface-panel);
+  border: 1px solid var(--right-panel-control-border, var(--cm-border-soft));
+  background: var(--right-panel-control-bg, var(--cm-surface-panel));
   font-family: var(--code-font-family);
   font-variant-numeric: tabular-nums;
   color: var(--text-muted);
 }
 
 .diff-row:hover .diff-counts-inline {
-  border-color: var(--cm-border-hover);
-  background: var(--cm-surface-panel-hover);
+  border-color: var(--right-panel-control-border-hover, var(--cm-border-hover));
+  background: var(--right-panel-control-bg-hover, var(--cm-surface-panel-hover));
 }
 
 .diff-dir {
@@ -1148,6 +1148,16 @@
   background: var(--cm-surface-panel-soft);
 }
 
+.app.layout-desktop .right-panel .commit-message-section {
+  border-color: rgba(255, 255, 255, 0.075);
+  background: #151a1f;
+}
+
+:root[data-theme="light"] .app.layout-desktop .right-panel .commit-message-section {
+  border-color: var(--cm-light-panel-border);
+  background: var(--cm-light-panel-bg);
+}
+
 .commit-message-input-wrapper {
   position: relative;
 }
@@ -1168,8 +1178,28 @@
   transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
 }
 
+.app.layout-desktop .right-panel .commit-message-input {
+  color: #dfe5ea;
+  background: #20262c;
+  border-color: rgba(255, 255, 255, 0.085);
+}
+
+:root[data-theme="light"] .app.layout-desktop .right-panel .commit-message-input {
+  color: var(--cm-light-text-primary);
+  background: var(--cm-light-control-bg);
+  border-color: var(--cm-light-control-border);
+}
+
 .commit-message-input::placeholder {
   color: var(--text-faint);
+}
+
+.app.layout-desktop .right-panel .commit-message-input::placeholder {
+  color: #71808a;
+}
+
+:root[data-theme="light"] .app.layout-desktop .right-panel .commit-message-input::placeholder {
+  color: color-mix(in srgb, var(--cm-light-text-primary) 52%, transparent);
 }
 
 .commit-message-input:focus {
@@ -1177,6 +1207,25 @@
   background: var(--cm-surface-panel-hover);
   border-color: var(--cm-border-accent-strong);
   color: var(--text-emphasis);
+}
+
+.app.layout-desktop .right-panel .commit-message-input:focus {
+  background: #242b31;
+  border-color: rgba(104, 208, 173, 0.42);
+  color: #dfe5ea;
+}
+
+:root[data-theme="light"] .app.layout-desktop .right-panel .commit-message-input:focus {
+  background: var(--cm-light-control-bg-hover);
+  border-color: color-mix(in srgb, var(--border-accent) 64%, var(--cm-light-control-border));
+  color: var(--cm-light-text-primary);
+}
+
+.app.layout-desktop .right-panel .commit-message-input:disabled {
+  opacity: 1;
+  color: #65717a;
+  background: var(--right-panel-control-bg);
+  border-color: var(--right-panel-control-border);
 }
 
 .commit-message-input:disabled {
@@ -1201,10 +1250,27 @@
   transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
 }
 
+.app.layout-desktop .right-panel .commit-message-generate-button {
+  border-color: var(--right-panel-control-border);
+  background: var(--right-panel-control-bg-active);
+  color: #a5b0b7;
+}
+
+:root[data-theme="light"] .app.layout-desktop .right-panel .commit-message-generate-button {
+  color: var(--cm-light-text-primary);
+}
+
 .commit-message-generate-button:hover:not(:disabled) {
-  background: var(--cm-surface-panel-hover);
-  border-color: var(--cm-border-hover);
+  background: var(--right-panel-control-bg-hover, var(--cm-surface-panel-hover));
+  border-color: var(--right-panel-control-border-hover, var(--cm-border-hover));
   color: var(--text-emphasis);
+}
+
+.app.layout-desktop .right-panel .commit-message-generate-button:disabled {
+  opacity: 1;
+  color: #65717a;
+  background: var(--right-panel-control-bg);
+  border-color: var(--right-panel-control-border);
 }
 
 .commit-message-generate-button:disabled {
@@ -1252,6 +1318,25 @@
   box-shadow: none;
   transform: none;
   transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+.app.layout-desktop .right-panel .commit-button {
+  color: #dfe5ea;
+  background: #20262c;
+  border-color: rgba(255, 255, 255, 0.085);
+}
+
+:root[data-theme="light"] .app.layout-desktop .right-panel .commit-button {
+  color: var(--cm-light-text-primary);
+  background: var(--cm-light-control-bg);
+  border-color: var(--cm-light-control-border);
+}
+
+.app.layout-desktop .right-panel .commit-button:disabled {
+  color: #8f9aa3;
+  background: var(--right-panel-control-bg);
+  border-color: var(--right-panel-control-border);
+  opacity: 1;
 }
 
 .commit-button:hover:not(:disabled) {
@@ -1311,8 +1396,8 @@
   font-size: 12px;
   font-weight: 600;
   color: var(--text-emphasis);
-  background: var(--cm-surface-row);
-  border: 1px solid var(--cm-border-default);
+  background: var(--right-panel-control-bg, var(--cm-surface-row));
+  border: 1px solid var(--right-panel-control-border, var(--cm-border-default));
   border-radius: 14px;
   cursor: pointer;
   box-shadow: none;
@@ -1321,8 +1406,8 @@
 }
 
 .push-button:hover:not(:disabled) {
-  background: var(--cm-surface-panel-hover);
-  border-color: var(--cm-border-accent-strong);
+  background: var(--right-panel-control-bg-hover, var(--cm-surface-panel-hover));
+  border-color: var(--right-panel-control-border-hover, var(--cm-border-accent-strong));
   color: var(--text-strong);
   box-shadow: none;
   transform: none;
@@ -1342,8 +1427,8 @@
   font-size: 12px;
   font-weight: 600;
   color: var(--text-emphasis);
-  background: var(--cm-surface-row);
-  border: 1px solid var(--cm-border-default);
+  background: var(--right-panel-control-bg, var(--cm-surface-row));
+  border: 1px solid var(--right-panel-control-border, var(--cm-border-default));
   border-radius: 14px;
   cursor: pointer;
   box-shadow: none;
@@ -1352,8 +1437,8 @@
 }
 
 .push-button-secondary:hover:not(:disabled) {
-  background: var(--cm-surface-panel-hover);
-  border-color: var(--cm-border-accent-strong);
+  background: var(--right-panel-control-bg-hover, var(--cm-surface-panel-hover));
+  border-color: var(--right-panel-control-border-hover, var(--cm-border-accent-strong));
   box-shadow: none;
   transform: none;
 }
@@ -1361,6 +1446,14 @@
 .push-button-secondary:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.app.layout-desktop .right-panel .push-button:disabled,
+.app.layout-desktop .right-panel .push-button-secondary:disabled {
+  opacity: 1;
+  color: #65717a;
+  background: var(--right-panel-control-bg);
+  border-color: var(--right-panel-control-border);
 }
 
 .push-count {
@@ -1373,6 +1466,6 @@
   font-size: 10px;
   font-weight: 600;
   color: var(--text-emphasis);
-  background: var(--cm-surface-panel-hover);
+  background: var(--right-panel-control-bg-active, var(--cm-surface-panel-hover));
   border-radius: 9px;
 }

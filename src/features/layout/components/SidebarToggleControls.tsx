@@ -1,41 +1,19 @@
-import PanelLeftClose from "lucide-react/dist/esm/icons/panel-left-close";
 import PanelLeftOpen from "lucide-react/dist/esm/icons/panel-left-open";
 import PanelRightClose from "lucide-react/dist/esm/icons/panel-right-close";
 import PanelRightOpen from "lucide-react/dist/esm/icons/panel-right-open";
+import { useI18n } from "@/features/i18n/I18nProvider";
 
 export type SidebarToggleProps = {
   isCompact: boolean;
   sidebarCollapsed: boolean;
   rightPanelCollapsed: boolean;
+  autoSidebarCollapsed?: boolean;
+  autoRightPanelCollapsed?: boolean;
   onCollapseSidebar: () => void;
   onExpandSidebar: () => void;
   onCollapseRightPanel: () => void;
   onExpandRightPanel: () => void;
 };
-
-export function SidebarCollapseButton({
-  isCompact,
-  sidebarCollapsed,
-  onCollapseSidebar,
-}: SidebarToggleProps) {
-  if (isCompact || sidebarCollapsed) {
-    return null;
-  }
-  return (
-    <button
-      type="button"
-      className="ghost main-header-action ds-tooltip-trigger"
-      onClick={onCollapseSidebar}
-      data-tauri-drag-region="false"
-      aria-label="Hide threads sidebar"
-      title="Hide threads sidebar"
-      data-tooltip="Hide threads sidebar"
-      data-tooltip-placement="bottom"
-    >
-      <PanelLeftClose size={14} aria-hidden />
-    </button>
-  );
-}
 
 export function RightPanelCollapseButton({
   isCompact,
@@ -88,9 +66,11 @@ export function RightPanelExpandButton({
 export function TitlebarExpandControls({
   isCompact,
   sidebarCollapsed,
+  autoSidebarCollapsed = false,
   onExpandSidebar,
 }: SidebarToggleProps) {
-  if (isCompact || !sidebarCollapsed) {
+  const { t } = useI18n();
+  if (isCompact || !sidebarCollapsed || autoSidebarCollapsed) {
     return null;
   }
   return (
@@ -102,9 +82,9 @@ export function TitlebarExpandControls({
             className="ghost main-header-action ds-tooltip-trigger"
             onClick={onExpandSidebar}
             data-tauri-drag-region="false"
-            aria-label="Show threads sidebar"
-            title="Show threads sidebar"
-            data-tooltip="Show threads sidebar"
+            aria-label={t("sidebar.showThreadsSidebar")}
+            title={t("sidebar.showThreadsSidebar")}
+            data-tooltip={t("sidebar.showThreadsSidebar")}
             data-tooltip-placement="bottom"
           >
             <PanelLeftOpen size={14} aria-hidden />

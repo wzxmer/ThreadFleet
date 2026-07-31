@@ -7,11 +7,19 @@
   background: var(--ds-toast-bg);
   border: 1px solid var(--ds-toast-border);
   box-shadow: var(--ds-toast-shadow);
-  border-radius: 12px;
-  padding: 12px;
+  border-radius: 18px;
+  padding: 16px;
   pointer-events: auto;
   max-width: 100%;
+  color: var(--ds-toast-body);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
   animation: ds-toast-in var(--ds-toast-enter-duration, 0.2s) ease-out;
+}
+
+.app.reduced-transparency .ds-toast-card {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .ds-toast-title {
@@ -41,13 +49,14 @@
 .ds-toast-error {
   font-family: var(--code-font-family);
   font-size: 11px;
-  color: var(--text-muted);
+  color: var(--cm-text-primary);
   white-space: pre-wrap;
   max-height: 120px;
   overflow: auto;
-  border-radius: 8px;
-  background: var(--surface-card-muted);
-  padding: 8px;
+  border: 1px solid var(--cm-panel-border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--cm-main-bg) 86%, var(--cm-panel-bg) 14%);
+  padding: 9px 10px;
   margin: 0;
   overflow-wrap: anywhere;
   word-break: break-word;

@@ -1,5 +1,6 @@
 import { useMemo, type RefObject } from "react";
 import type {
+  AccountSnapshot,
   AppSettings,
   CodexProviderStatus,
   ComposerEditorSettings,
@@ -32,6 +33,7 @@ import {
 } from "@/features/messages/utils/subagentResults";
 import { useI18n } from "@/features/i18n/I18nProvider";
 import { isContextCompactionInProgress } from "@/features/threads/utils/contextUsage";
+import { resolveNextThemePreference } from "@app/utils/themePreference";
 
 type SidebarProps = LayoutNodesOptions["primary"]["sidebarProps"];
 type ComposerProps = NonNullable<LayoutNodesOptions["primary"]["composerProps"]>;
@@ -76,27 +78,26 @@ type UseMainAppLayoutSurfacesArgs = {
   threadListCursorByWorkspace: SidebarProps["threadListCursorByWorkspace"];
   pinnedThreadsVersion: number;
   threadListSortKey: SidebarProps["threadListSortKey"];
-  onSetThreadListSortKey: SidebarProps["onSetThreadListSortKey"];
   threadListOrganizeMode: SidebarProps["threadListOrganizeMode"];
-  onSetThreadListOrganizeMode: SidebarProps["onSetThreadListOrganizeMode"];
   onRefreshAllThreads: SidebarProps["onRefreshAllThreads"];
+  onCollapseSidebar: SidebarProps["onCollapseSidebar"];
   activeWorkspace: WorkspaceInfo | null;
   activeWorkspaceId: string | null;
   activeThreadId: string | null;
   activeItems: LayoutNodesOptions["primary"]["messagesProps"]["items"];
+  agentMdContent: string;
   threadHistoryPageByThread: Record<string, ThreadHistoryPageState>;
   onLoadOlderThreadHistory: (workspaceId: string, threadId: string) => Promise<boolean>;
   itemsByThread: Record<string, ConversationItem[]>;
   userInputRequests: SidebarProps["userInputRequests"];
   approvals: LayoutNodesOptions["primary"]["approvalToastsProps"]["approvals"];
   activeRateLimits: SidebarProps["accountRateLimits"];
-  activeAccount: SidebarProps["accountInfo"];
+  activeAccount: AccountSnapshot | null;
   homeRateLimits: LayoutNodesOptions["primary"]["homeProps"]["accountRateLimits"];
   homeAccount: LayoutNodesOptions["primary"]["homeProps"]["accountInfo"];
   homeAccountWorkspaceId: string | null;
-  accountSwitching: SidebarProps["accountSwitching"];
-  onSwitchAccount: SidebarProps["onSwitchAccount"];
-  onCancelSwitchAccount: SidebarProps["onCancelSwitchAccount"];
+  accountSwitching: boolean;
+  onSwitchAccount: (workspaceIdOverride?: string | null) => void;
   onDecision: LayoutNodesOptions["primary"]["approvalToastsProps"]["onDecision"];
   onRemember: LayoutNodesOptions["primary"]["approvalToastsProps"]["onRemember"];
   onUserInputSubmit: LayoutNodesOptions["primary"]["messagesProps"]["onUserInputSubmit"];
@@ -169,8 +170,9 @@ type UseMainAppLayoutSurfacesArgs = {
   handleSelectLocalCodexThread: SidebarProps["onSelectLocalCodexThread"];
   handleOpenThreadLink: LayoutNodesOptions["primary"]["messagesProps"]["onOpenThreadLink"];
   handleSelectOpenAppId: MainHeaderProps["onSelectOpenAppId"];
-  handleCopyThread: MainHeaderProps["onCopyThread"];
-  handleToggleTerminalWithFocus: MainHeaderProps["onToggleTerminal"];
+  handleToggleTerminalWithFocus: () => void;
+  handleOpenTerminalWithFocus: () => void;
+  onCloseTerminalPanel: () => void;
   launchScriptState: {
     launchScript: string | null;
     editorOpen: boolean;
@@ -263,10 +265,19 @@ type UseMainAppLayoutSurfacesArgs = {
   onResizeTerminal: LayoutNodesOptions["secondary"]["terminalDockProps"]["onResizeStart"];
   isCompact: boolean;
   isPhone: boolean;
+  rightPanelCollapsed: boolean;
+  onCollapseRightPanel: () => void;
+  onExpandRightPanel: () => void;
   activeTab: LayoutNodesOptions["primary"]["tabBarProps"]["activeTab"];
   setActiveTab: (tab: "home" | "projects" | "codex" | "git" | "log") => void;
   tabletTab: LayoutNodesOptions["primary"]["tabletNavProps"]["activeTab"];
+  sessionManagerOpen: boolean;
+  onToggleSessionManager: () => void;
+  onRevealSidebar: () => void;
+  onHideSidebar: () => void;
   showMobilePollingFetchStatus: boolean;
+  appModalsSettingsOpen: boolean;
+  onCloseSettings: () => void;
   appModalsAboutOpen: boolean;
   updaterState: LayoutNodesOptions["primary"]["updateToastProps"]["state"];
   startUpdate: LayoutNodesOptions["primary"]["updateToastProps"]["onUpdate"];
@@ -275,13 +286,12 @@ type UseMainAppLayoutSurfacesArgs = {
   dismissPostUpdateNotice: LayoutNodesOptions["primary"]["updateToastProps"]["onDismissPostUpdateNotice"];
   errorToasts: LayoutNodesOptions["primary"]["errorToastsProps"]["toasts"];
   dismissErrorToast: LayoutNodesOptions["primary"]["errorToastsProps"]["onDismiss"];
-  showDebugButton: boolean;
   handleDebugClick: () => void;
+  onCloseActivity: () => void;
 };
 
 type MainAppLayoutSurfacesContext = UseMainAppLayoutSurfacesArgs & {
   sidebarRateLimits: SidebarProps["accountRateLimits"];
-  sidebarAccount: SidebarProps["accountInfo"];
   codexProviderStatus: CodexProviderStatus | null;
   thirdPartyProviderUsage: SidebarProps["thirdPartyProviderUsage"];
   subagentResults: SubagentResultSummary[];
@@ -314,28 +324,28 @@ function buildPrimarySurface({
   threadListCursorByWorkspace,
   pinnedThreadsVersion,
   threadListSortKey,
-  onSetThreadListSortKey,
   threadListOrganizeMode,
-  onSetThreadListOrganizeMode,
   onRefreshAllThreads,
+  onCollapseSidebar,
   activeWorkspace,
   activeWorkspaceId,
   activeThreadId,
   activeItems,
+  agentMdContent,
   threadHistoryPageByThread,
   onLoadOlderThreadHistory,
   subagentResults,
   userInputRequests,
   approvals,
   sidebarRateLimits,
-  sidebarAccount,
   codexProviderStatus,
   thirdPartyProviderUsage,
+  activeAccount,
   homeRateLimits,
   homeAccount,
+  homeAccountWorkspaceId,
   accountSwitching,
   onSwitchAccount,
-  onCancelSwitchAccount,
   onDecision,
   onRemember,
   onUserInputSubmit,
@@ -376,8 +386,8 @@ function buildPrimarySurface({
   handleSelectLocalCodexThread,
   handleOpenThreadLink,
   handleSelectOpenAppId,
-  handleCopyThread,
-  handleToggleTerminalWithFocus,
+  handleOpenTerminalWithFocus,
+  onCloseTerminalPanel,
   launchScriptState,
   launchScriptsState,
   models,
@@ -440,11 +450,20 @@ function buildPrimarySurface({
   interruptTurn,
   retryEditedUserMessage,
   terminalOpen,
+  debugOpen,
   isCompact,
+  rightPanelCollapsed,
+  onCollapseRightPanel,
+  onExpandRightPanel,
   activeTab,
   setActiveTab,
-  tabletTab,
+  sessionManagerOpen,
+  onToggleSessionManager,
+  onRevealSidebar,
+  onHideSidebar,
   showMobilePollingFetchStatus,
+  appModalsSettingsOpen,
+  onCloseSettings,
   appModalsAboutOpen,
   updaterState,
   startUpdate,
@@ -453,8 +472,8 @@ function buildPrimarySurface({
   dismissPostUpdateNotice,
   errorToasts,
   dismissErrorToast,
-  showDebugButton,
   handleDebugClick,
+  onCloseActivity,
 }: MainAppLayoutSurfacesContext): LayoutNodesOptions["primary"] {
   const startingDraftMessage =
     !activeThreadId &&
@@ -484,6 +503,27 @@ function buildPrimarySurface({
   const activeThreadTitleWithSource = activeThreadTitle && activeManagedSessionSourceName
     ? `${activeThreadTitle} · ${activeManagedSessionSourceName}`
     : activeThreadTitle;
+  const closeSettingsSurface = () => {
+    if (appModalsSettingsOpen) {
+      onCloseSettings();
+    }
+  };
+  const closeSessionManagerSurface = () => {
+    if (sessionManagerOpen) {
+      onToggleSessionManager();
+    }
+  };
+  const closeTerminalSurface = () => {
+    if (terminalOpen) {
+      onCloseTerminalPanel();
+    }
+  };
+  const closeActivitySurface = () => {
+    if (debugOpen) {
+      onCloseActivity();
+    }
+  };
+
   return {
     sidebarProps: {
       workspaces: workspaces.filter((workspace) => workspace.id !== LOCAL_CODEX_WORKSPACE_ID),
@@ -500,10 +540,10 @@ function buildPrimarySurface({
       threadListCursorByWorkspace,
       pinnedThreadsVersion,
       threadListSortKey,
-      onSetThreadListSortKey,
       threadListOrganizeMode,
-      onSetThreadListOrganizeMode,
       onRefreshAllThreads,
+      canCollapseSidebar: !isCompact,
+      onCollapseSidebar,
       activeWorkspaceId,
       activeThreadId,
       userInputRequests,
@@ -528,13 +568,6 @@ function buildPrimarySurface({
         (!codexProviderStatus || !codexProviderStatus.isConfigured)
           ? (codexProviderStatus?.error ?? "Codex provider status is not ready")
           : null,
-      accountInfo: sidebarAccount,
-      onSwitchAccount,
-      onCancelSwitchAccount,
-      accountSwitching,
-      onOpenSettings: sidebarHandlers.onOpenSettings,
-      onOpenDebug: handleDebugClick,
-      showDebugButton,
       onAddWorkspace: handleAddWorkspace,
       onSelectHome: sidebarHandlers.onSelectHome,
       onSelectWorkspace: sidebarHandlers.onSelectWorkspace,
@@ -585,6 +618,9 @@ function buildPrimarySurface({
       messageAssistantBubbleColor: conversationAppearance.messageAssistantBubbleColor,
       messageAssistantAccentColor: conversationAppearance.messageAssistantAccentColor,
       messageAssistantTextColor: conversationAppearance.messageAssistantTextColor,
+      assistantInstructionContent: agentMdContent,
+      assistantFallbackModelId: selectedModelId,
+      assistantModelOptions: models,
       chatHistoryScrollbackItems: appSettings.chatHistoryScrollbackItems,
       interruptedStatus: activeThreadId
         ? interruptedThreadById[activeThreadId] ?? null
@@ -860,11 +896,6 @@ function buildPrimarySurface({
           branches: gitState.branches,
           onCheckoutBranch: gitState.handleCheckoutBranch,
           onCreateBranch: gitState.handleCreateBranch,
-          canCopyThread: activeItems.length > 0,
-          onCopyThread: handleCopyThread,
-          onToggleTerminal: handleToggleTerminalWithFocus,
-          isTerminalOpen: terminalOpen,
-          showTerminalButton: !isCompact,
           showWorkspaceTools: !isCompact,
           launchScript: launchScriptState.launchScript,
           launchScriptEditorOpen: launchScriptState.editorOpen,
@@ -888,13 +919,108 @@ function buildPrimarySurface({
       },
     },
     tabletNavProps: {
-      activeTab: tabletTab,
-      onSelect: setActiveTab,
+      activeTab,
+      onToggleGitPanel: !isCompact
+        ? () => {
+            if (rightPanelCollapsed) {
+              onExpandRightPanel();
+            } else {
+              onCollapseRightPanel();
+            }
+          }
+        : undefined,
+      onSelect: (tab) => {
+        closeSettingsSurface();
+        closeSessionManagerSurface();
+        closeTerminalSurface();
+        closeActivitySurface();
+        if (tab === "home") {
+          setActiveTab("home");
+          onHideSidebar();
+          threadNavigation.resetPullRequestSelection();
+          threadNavigation.clearDraftState();
+          threadNavigation.selectHome();
+          return;
+        }
+        if (tab === "codex" || tab === "projects") {
+          onRevealSidebar();
+        } else {
+          onHideSidebar();
+        }
+        setActiveTab(tab);
+      },
+      terminalActive: terminalOpen,
+      terminalDisabled: !activeWorkspace,
+      onToggleTerminal: () => {
+        closeSettingsSurface();
+        closeSessionManagerSurface();
+        closeActivitySurface();
+        onHideSidebar();
+        if (!terminalOpen) {
+          handleOpenTerminalWithFocus();
+        }
+      },
+      libraryActive: sessionManagerOpen,
+      onToggleLibrary: () => {
+        closeSettingsSurface();
+        closeTerminalSurface();
+        closeActivitySurface();
+        onHideSidebar();
+        if (!sessionManagerOpen) {
+          onToggleSessionManager();
+        }
+      },
+      accountActive: accountSwitching,
+      accountDisabled: false,
+      accountInfo: activeWorkspace ? activeAccount : homeAccount,
+      accountWorkspaceName:
+        activeWorkspace?.name ??
+        workspaces.find((workspace) => workspace.id === homeAccountWorkspaceId)?.name ??
+        null,
+      accountActionDisabled:
+        !(activeWorkspaceId ?? homeAccountWorkspaceId) || accountSwitching,
+      onOpenAccount: () => {
+        closeSettingsSurface();
+        closeSessionManagerSurface();
+        closeTerminalSurface();
+        closeActivitySurface();
+        onHideSidebar();
+        onSwitchAccount(activeWorkspaceId ?? homeAccountWorkspaceId);
+      },
+      theme: appSettings.theme,
+      onToggleTheme: () => {
+        void onUpdateAppSettings({
+          ...appSettings,
+          theme: resolveNextThemePreference(appSettings.theme),
+        });
+      },
+      activityActive: debugOpen,
+      onToggleActivity: () => {
+        closeSettingsSurface();
+        closeSessionManagerSurface();
+        closeTerminalSurface();
+        onHideSidebar();
+        setActiveTab("log");
+        if (!debugOpen) {
+          handleDebugClick();
+        }
+      },
+      settingsActive: appModalsSettingsOpen,
+      onOpenSettings: () => {
+        closeSessionManagerSurface();
+        closeTerminalSurface();
+        closeActivitySurface();
+        onHideSidebar();
+        if (!appModalsSettingsOpen) {
+          sidebarHandlers.onOpenSettings();
+        }
+      },
     },
     tabBarProps: {
       activeTab,
       onSelect: (tab) => {
         if (tab === "home") {
+          setActiveTab("home");
           threadNavigation.resetPullRequestSelection();
           threadNavigation.clearDraftState();
           threadNavigation.selectHome();
@@ -1130,6 +1256,7 @@ function buildSecondarySurface({
   activeWorkspace,
   activeWorkspaceId,
   activeThreadId,
+  onRevealSidebar,
 }: MainAppLayoutSurfacesContext): LayoutNodesOptions["secondary"] {
   return {
     planPanelProps: {
@@ -1160,7 +1287,10 @@ function buildSecondarySurface({
       onResizeStart: onResizeDebug,
     },
     compactNavProps: {
-      onGoProjects: () => setActiveTab("projects"),
+      onGoProjects: () => {
+        onRevealSidebar();
+        setActiveTab("projects");
+      },
       centerMode: gitState.centerMode,
       selectedDiffPath: gitState.selectedDiffPath,
       onBackFromDiff: () => {
@@ -1213,14 +1343,14 @@ export function useMainAppLayoutSurfaces({
   threadListCursorByWorkspace,
   pinnedThreadsVersion,
   threadListSortKey,
-  onSetThreadListSortKey,
   threadListOrganizeMode,
-  onSetThreadListOrganizeMode,
   onRefreshAllThreads,
+  onCollapseSidebar,
   activeWorkspace,
   activeWorkspaceId,
   activeThreadId,
   activeItems,
+  agentMdContent,
   threadHistoryPageByThread,
   onLoadOlderThreadHistory,
   itemsByThread,
@@ -1233,7 +1363,6 @@ export function useMainAppLayoutSurfaces({
   homeAccountWorkspaceId,
   accountSwitching,
   onSwitchAccount,
-  onCancelSwitchAccount,
   onDecision,
   onRemember,
   onUserInputSubmit,
@@ -1280,8 +1409,9 @@ export function useMainAppLayoutSurfaces({
   handleSelectLocalCodexThread,
   handleOpenThreadLink,
   handleSelectOpenAppId,
-  handleCopyThread,
   handleToggleTerminalWithFocus,
+  handleOpenTerminalWithFocus,
+  onCloseTerminalPanel,
   launchScriptState,
   launchScriptsState,
   models,
@@ -1359,10 +1489,19 @@ export function useMainAppLayoutSurfaces({
   onResizeTerminal,
   isCompact,
   isPhone,
+  rightPanelCollapsed,
+  onCollapseRightPanel,
+  onExpandRightPanel,
   activeTab,
   setActiveTab,
   tabletTab,
+  sessionManagerOpen,
+  onToggleSessionManager,
+  onRevealSidebar,
+  onHideSidebar,
   showMobilePollingFetchStatus,
+  appModalsSettingsOpen,
+  onCloseSettings,
   appModalsAboutOpen,
   updaterState,
   startUpdate,
@@ -1371,16 +1510,16 @@ export function useMainAppLayoutSurfaces({
   dismissPostUpdateNotice,
   errorToasts,
   dismissErrorToast,
-  showDebugButton,
   handleDebugClick,
+  onCloseActivity,
   onUpdateAppSettings,
 }: UseMainAppLayoutSurfacesArgs): LayoutNodesOptions {
   const { t } = useI18n();
-  const sidebarAccount = activeWorkspace ? activeAccount : homeAccount;
   const { codexProviderStatus, thirdPartyProviderUsage } = useSidebarProviderUsage({
     appSettings,
     activeWorkspaceId,
     homeAccountWorkspaceId,
+    statusDelayMs: activeWorkspaceId ? 0 : 800,
   });
   const sidebarRateLimits = resolveSidebarRateLimits(
     activeRateLimits,
@@ -1437,14 +1576,14 @@ export function useMainAppLayoutSurfaces({
     threadListCursorByWorkspace,
     pinnedThreadsVersion,
     threadListSortKey,
-    onSetThreadListSortKey,
     threadListOrganizeMode,
-    onSetThreadListOrganizeMode,
     onRefreshAllThreads,
+    onCollapseSidebar,
     activeWorkspace,
     activeWorkspaceId,
     activeThreadId,
     activeItems,
+    agentMdContent,
     threadHistoryPageByThread,
     onLoadOlderThreadHistory,
     itemsByThread,
@@ -1457,7 +1596,6 @@ export function useMainAppLayoutSurfaces({
     homeAccountWorkspaceId,
     accountSwitching,
     onSwitchAccount,
-    onCancelSwitchAccount,
     onDecision,
     onRemember,
     onUserInputSubmit,
@@ -1504,8 +1642,9 @@ export function useMainAppLayoutSurfaces({
     handleSelectLocalCodexThread,
     handleOpenThreadLink,
     handleSelectOpenAppId,
-    handleCopyThread,
     handleToggleTerminalWithFocus,
+    handleOpenTerminalWithFocus,
+    onCloseTerminalPanel,
     launchScriptState,
     launchScriptsState,
     models,
@@ -1583,10 +1722,19 @@ export function useMainAppLayoutSurfaces({
     onResizeTerminal,
     isCompact,
     isPhone,
+    rightPanelCollapsed,
+    onCollapseRightPanel,
+    onExpandRightPanel,
     activeTab,
     setActiveTab,
     tabletTab,
+    sessionManagerOpen,
+    onToggleSessionManager,
+    onRevealSidebar,
+    onHideSidebar,
     showMobilePollingFetchStatus,
+    appModalsSettingsOpen,
+    onCloseSettings,
     appModalsAboutOpen,
     updaterState,
     startUpdate,
@@ -1595,10 +1743,9 @@ export function useMainAppLayoutSurfaces({
     dismissPostUpdateNotice,
     errorToasts,
     dismissErrorToast,
-    showDebugButton,
     handleDebugClick,
+    onCloseActivity,
     sidebarRateLimits,
-    sidebarAccount,
     codexProviderStatus,
     thirdPartyProviderUsage,
     subagentResults,

@@ -6,6 +6,8 @@ type PhoneLayoutProps = {
   approvalToastsNode: ReactNode;
   updateToastNode: ReactNode;
   errorToastsNode: ReactNode;
+  settingsOpen: boolean;
+  settingsNode: ReactNode;
   tabBarNode: ReactNode;
   homeNode: ReactNode;
   sidebarNode: ReactNode;
@@ -28,6 +30,8 @@ export function PhoneLayout({
   approvalToastsNode,
   updateToastNode,
   errorToastsNode,
+  settingsOpen,
+  settingsNode,
   tabBarNode,
   homeNode,
   sidebarNode,
@@ -50,6 +54,10 @@ export function PhoneLayout({
       {approvalToastsNode}
       {updateToastNode}
       {errorToastsNode}
+      {settingsOpen ? (
+        <div className="compact-panel">{settingsNode}</div>
+      ) : (
+        <>
       {activeTab === "home" && <div className="compact-panel">{homeNode}</div>}
       {activeTab === "projects" && <div className="compact-panel">{sidebarNode}</div>}
       {activeTab === "codex" && (
@@ -96,6 +104,8 @@ export function PhoneLayout({
         <div className="compact-panel">{debugPanelNode}</div>
       )}
       {tabBarNode}
+        </>
+      )}
     </div>
   );
 }

@@ -18,6 +18,7 @@
   flex-direction: column;
   flex: 1;
   min-height: 0;
+  background: var(--surface-messages);
 }
 
 .app.reduced-transparency .compact-panel {
@@ -37,10 +38,6 @@
   bottom: auto;
   margin-top: 8px;
   align-self: flex-start;
-}
-
-.app.layout-compact .sidebar-account-popover {
-  bottom: calc(100% + 8px);
 }
 
 .compact-topbar {

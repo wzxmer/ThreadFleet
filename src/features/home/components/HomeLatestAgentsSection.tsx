@@ -35,16 +35,18 @@ export function HomeLatestAgentsSection({
                     <span className="home-latest-group">{run.groupName}</span>
                   )}
                 </div>
-                <div className="home-latest-time">
-                  {formatRelativeTime(run.timestamp)}
+                <div className="home-latest-meta">
+                  {run.isProcessing && (
+                    <span className="home-latest-status">{t("home.latest.running")}</span>
+                  )}
+                  <span className="home-latest-time">
+                    {formatRelativeTime(run.timestamp)}
+                  </span>
                 </div>
               </div>
               <div className="home-latest-message">
                 {run.message.trim() || t("home.latest.fallbackMessage")}
               </div>
-              {run.isProcessing && (
-                <div className="home-latest-status">{t("home.latest.running")}</div>
-              )}
             </button>
           ))}
         </div>

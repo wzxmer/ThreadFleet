@@ -34,6 +34,7 @@ export function PopoverMenuItem({
       type="button"
       className={joinClassNames("ds-popover-item", active && "is-active", className)}
       {...props}
+      data-button-elevation="none"
     >
       {icon ? (
         <span className="ds-popover-item-icon" aria-hidden>
@@ -71,6 +72,7 @@ export function MenuTrigger({
       className={joinClassNames(className, isOpen && activeClassName)}
       data-tauri-drag-region={dragRegion ?? "false"}
       {...props}
+      data-button-elevation="none"
     />
   );
 }

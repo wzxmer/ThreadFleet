@@ -2,8 +2,8 @@
   position: fixed;
   top: 50%;
   left: 50%;
-  width: min(460px, calc(100vw - 48px));
-  max-height: min(520px, calc(100vh - 140px));
+  width: min(480px, calc(100vw - 48px));
+  max-height: min(560px, calc(100vh - 120px));
   overflow: auto;
   z-index: 5;
   pointer-events: auto;
@@ -16,7 +16,7 @@
 }
 
 .approval-toast-header {
-  margin-bottom: 6px;
+  margin-bottom: 8px;
 }
 
 .approval-toast-title {
@@ -27,13 +27,20 @@
 
 .approval-toast-workspace {
   font-size: 12px;
-  color: var(--text-faint);
+  color: color-mix(in srgb, var(--cm-text-primary) 62%, transparent);
 }
 
 .approval-toast-method {
+  width: fit-content;
+  max-width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--cm-panel-border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--cm-control-bg) 78%, transparent);
+  color: var(--cm-text-strong);
   font-size: 12px;
   font-weight: 600;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
   overflow-wrap: anywhere;
   word-break: break-word;
 }
@@ -41,17 +48,21 @@
 .approval-toast-details {
   display: grid;
   gap: 8px;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
 }
 
 .approval-toast-detail {
   display: grid;
   gap: 4px;
+  padding: 9px 10px;
+  border: 1px solid var(--cm-panel-border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--cm-main-bg) 82%, var(--cm-panel-bg) 18%);
 }
 
 .approval-toast-detail-label {
   font-size: 11px;
-  color: var(--text-faint);
+  color: color-mix(in srgb, var(--cm-text-primary) 62%, transparent);
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
@@ -68,11 +79,31 @@
 
 .approval-toast-detail-empty {
   font-size: 12px;
-  color: var(--text-muted);
+  color: color-mix(in srgb, var(--cm-text-primary) 72%, transparent);
 }
 
 .approval-toast-remember {
   white-space: nowrap;
+}
+
+.approval-toast-actions button {
+  min-height: 30px;
+  border-radius: 10px;
+  padding: 6px 11px;
+}
+
+.approval-toast-actions .secondary,
+.approval-toast-actions .ghost {
+  border: 1px solid var(--cm-control-border);
+  background: var(--cm-control-bg);
+  color: var(--cm-text-primary);
+}
+
+.approval-toast-actions .secondary:hover:not(:disabled),
+.approval-toast-actions .ghost:hover:not(:disabled) {
+  border-color: var(--cm-control-border-hover);
+  background: var(--cm-control-bg-hover);
+  color: var(--cm-text-strong);
 }
 
 @media (max-width: 960px) {

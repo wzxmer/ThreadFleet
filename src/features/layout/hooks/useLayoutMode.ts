@@ -4,14 +4,13 @@ import { isMobilePlatform } from "../../../utils/platformPaths";
 
 export type LayoutMode = "desktop" | "tablet" | "phone";
 
-const TABLET_MAX_WIDTH = 1100;
-const PHONE_MAX_WIDTH = 520;
+const TABLET_MAX_WIDTH = 720;
 
-function getLayoutMode(width: number, forcePhoneLayout: boolean): LayoutMode {
+export function getLayoutModeForWidth(
+  width: number,
+  forcePhoneLayout: boolean,
+): LayoutMode {
   if (forcePhoneLayout) {
-    return "phone";
-  }
-  if (width <= PHONE_MAX_WIDTH) {
     return "phone";
   }
   if (width <= TABLET_MAX_WIDTH) {
@@ -25,7 +24,7 @@ export function useLayoutMode() {
     isMobilePlatform(),
   );
   const [mode, setMode] = useState<LayoutMode>(() =>
-    getLayoutMode(window.innerWidth, forcePhoneLayout),
+    getLayoutModeForWidth(window.innerWidth, forcePhoneLayout),
   );
 
   useEffect(() => {
@@ -50,9 +49,9 @@ export function useLayoutMode() {
   }, [forcePhoneLayout]);
 
   useEffect(() => {
-    setMode(getLayoutMode(window.innerWidth, forcePhoneLayout));
+    setMode(getLayoutModeForWidth(window.innerWidth, forcePhoneLayout));
     function handleResize() {
-      setMode(getLayoutMode(window.innerWidth, forcePhoneLayout));
+      setMode(getLayoutModeForWidth(window.innerWidth, forcePhoneLayout));
     }
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
