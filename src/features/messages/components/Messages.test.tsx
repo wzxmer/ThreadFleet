@@ -78,7 +78,7 @@ describe("Messages", () => {
     exportMarkdownFileMock.mockReset();
   });
 
-  it("shows the global assistant identity with date time and running state", () => {
+  it("shows the global assistant identity with animated icons and one running state", () => {
     const createdAt = new Date("2026-07-30T14:28:00").getTime();
     const summary: TurnExecutionSummary = {
       schemaVersion: 1,
@@ -122,6 +122,7 @@ describe("Messages", () => {
         threadId="thread-1"
         workspaceId="ws-1"
         isThinking
+        activityState="thinking"
         messageReadingStyle="native"
         assistantInstructionContent="# Identity: BT-7274"
         turnExecutionSummary={summary}
@@ -137,17 +138,25 @@ describe("Messages", () => {
     expect(container.querySelector(".message-agent-time")?.textContent).toBe(
       "2026-07-30 14:28",
     );
-    expect(container.querySelector(".message-agent-avatar svg")).toBeTruthy();
     expect(
-      container.querySelector(".message-agent-running")?.textContent,
-    ).toContain("RUNNING");
+      container
+        .querySelector(".message-agent-avatar .model-activity-core")
+        ?.getAttribute("data-state"),
+    ).toBe("thinking");
+    expect(container.querySelector(".message-agent-running")).toBeNull();
     expect(container.querySelector(".message-user-time")?.textContent).toBe(
       "14:28",
     );
     expect(container.querySelector(".working-agent-name")).toBeNull();
+    expect(
+      container
+        .querySelector(".working-agent-avatar .model-activity-core")
+        ?.getAttribute("data-state"),
+    ).toBe("thinking");
     expect(container.querySelector(".working-status")?.textContent).toBe(
       "RUNNING",
     );
+    expect(container.querySelector(".working-text")).toBeNull();
   });
 
   it("normalizes the turn model to a provider name instead of showing its slug", () => {
@@ -194,7 +203,11 @@ describe("Messages", () => {
     expect(container.querySelector(".message-agent-name")?.textContent).toBe(
       "GPT",
     );
-    expect(container.querySelector(".message-agent-avatar svg")).toBeTruthy();
+    expect(
+      container
+        .querySelector(".message-agent-avatar .model-activity-core")
+        ?.getAttribute("data-state"),
+    ).toBe("completed");
     expect(container.textContent).not.toContain("gpt-5-codex");
   });
 
@@ -2055,9 +2068,7 @@ describe("Messages", () => {
       />,
     );
 
-    const workingText = container.querySelector(".working-text");
-    expect(workingText?.textContent ?? "").toContain("Working");
-    expect(workingText?.textContent ?? "").not.toContain("Old reasoning title");
+    expect(container.querySelector(".working-text")).toBeNull();
   });
 
   it("keeps the latest title-only reasoning label without rendering a reasoning row", () => {

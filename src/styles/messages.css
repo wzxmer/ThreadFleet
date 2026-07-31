@@ -1194,6 +1194,11 @@
   color: var(--text-accent);
 }
 
+.message-agent-avatar .model-activity-core,
+.working-agent-avatar .model-activity-core {
+  display: block;
+}
+
 .message-agent-name {
   max-width: min(220px, 32vw);
   overflow: hidden;
@@ -1282,7 +1287,6 @@
   border-top: 0;
 }
 
-.message-agent-running,
 .message-user-meta {
   display: none;
 }
@@ -1337,26 +1341,6 @@
   height: 26px;
   flex-basis: 26px;
   border-radius: 9px;
-}
-
-.messages-reading-native .message-agent-running {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding-top: 2px;
-  color: var(--text-accent);
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-}
-
-.messages-reading-native .message-agent-running-dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 999px;
-  border: 2px solid color-mix(in srgb, var(--border-accent) 28%, transparent);
-  border-top-color: var(--border-accent);
-  animation: working-spin var(--ds-spinner-dur) linear infinite;
 }
 
 .messages-reading-native .message.assistant .markdown,

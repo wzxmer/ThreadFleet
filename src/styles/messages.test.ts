@@ -170,6 +170,13 @@ describe("message tool group interaction styles", () => {
     expect(messageRowsSource).not.toContain('className="working-agent-name"');
     expect(messageRowsSource).not.toContain('t("messages.agentName")');
     expect(messageRowsSource).toContain('className="message-agent-avatar"');
+    expect(messageRowsSource).toMatch(
+      /<ModelActivityCore\s+state=\{assistantActivityState\}\s+size=\{18\}/s,
+    );
+    expect(messageRowsSource).toContain(
+      '<ModelActivityCore state={activityState} size={22} />',
+    );
+    expect(messageRowsSource).not.toContain('className="message-agent-running"');
     expect(messagesCss).toMatch(
       /\.message-agent-process-toggle\s*\{[^}]*display:\s*inline-flex;[^}]*border:\s*0;[^}]*background:\s*transparent;/s,
     );

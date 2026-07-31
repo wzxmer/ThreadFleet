@@ -11,6 +11,8 @@ import {
 import { RoundedSelect } from "@/features/design-system/components/select/RoundedSelect";
 import { useI18n } from "@/features/i18n/I18nProvider";
 import { formatReasoningEffortLabel } from "@/features/models/utils/reasoningEffortLabels";
+import { ModelActivityCore } from "@/features/models/components/ModelActivityCore";
+import type { ModelActivityState } from "@/features/models/components/ModelActivityCore";
 import type {
   AccessMode,
   ComposerTriggerMode,
@@ -23,6 +25,8 @@ import { WorkflowGateBindingPrompt } from "./WorkflowGateBindingPrompt";
 
 type ComposerMetaBarProps = {
   disabled: boolean;
+  isProcessing?: boolean;
+  modelActivityState?: ModelActivityState;
   collaborationModes: { id: string; label: string }[];
   selectedCollaborationModeId: string | null;
   onSelectCollaborationMode: (id: string | null) => void;
@@ -86,6 +90,8 @@ const getSelectedLabel = <T extends string>(
 
 export function ComposerMetaBar({
   disabled,
+  isProcessing = false,
+  modelActivityState,
   collaborationModes,
   selectedCollaborationModeId,
   onSelectCollaborationMode,
@@ -410,40 +416,15 @@ export function ComposerMetaBar({
           className="composer-select-wrap composer-select-wrap--model"
           style={getControlWidthStyle(
             getSelectedLabel(modelOptions, selectedModelId ?? ""),
-            72,
-            116,
+            78,
+            122,
             260,
           )}
         >
           <span className="composer-icon composer-icon--model" aria-hidden>
-            <svg viewBox="0 0 24 24" fill="none">
-              <path
-                d="M12 4v2"
-                stroke="currentColor"
-                strokeWidth="1.4"
-                strokeLinecap="round"
-              />
-              <path
-                d="M8 7.5h8a2.5 2.5 0 0 1 2.5 2.5v5a2.5 2.5 0 0 1-2.5 2.5H8A2.5 2.5 0 0 1 5.5 15v-5A2.5 2.5 0 0 1 8 7.5Z"
-                stroke="currentColor"
-                strokeWidth="1.4"
-                strokeLinejoin="round"
-              />
-              <circle cx="9.5" cy="12.5" r="1" fill="currentColor" />
-              <circle cx="14.5" cy="12.5" r="1" fill="currentColor" />
-              <path
-                d="M9.5 15.5h5"
-                stroke="currentColor"
-                strokeWidth="1.4"
-                strokeLinecap="round"
-              />
-              <path
-                d="M5.5 11H4M20 11h-1.5"
-                stroke="currentColor"
-                strokeWidth="1.4"
-                strokeLinecap="round"
-              />
-            </svg>
+            <ModelActivityCore
+              state={modelActivityState ?? (isProcessing ? "thinking" : "idle")}
+            />
           </span>
           <RoundedSelect
             className="composer-select composer-select--model"

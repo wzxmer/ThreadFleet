@@ -1642,18 +1642,24 @@
 }
 
 .composer-icon--model {
-  width: 16px;
-  height: 16px;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
 }
 
-.composer-icon--model svg {
-  width: 16px;
-  height: 16px;
+.composer-icon--model .model-activity-core {
+  display: block;
+  width: 22px;
+  height: 22px;
 }
 
 .composer-icon--model,
 .composer-icon--effort {
   transform: translateY(1px);
+}
+
+.composer-select-wrap--model:has(.composer-select-trigger:disabled) .composer-icon--model {
+  opacity: 0.52;
 }
 
 .composer-fast-indicator {

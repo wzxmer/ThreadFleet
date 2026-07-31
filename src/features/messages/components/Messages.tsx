@@ -65,6 +65,7 @@ import { useMessagesViewState } from "./useMessagesViewState";
 import type { SubagentResultSummary as SubagentResultSummaryData } from "../utils/subagentResults";
 import { ConversationExportControls } from "../export/ConversationExportControls";
 import { useConversationExport } from "../export/useConversationExport";
+import type { ModelActivityState } from "@/features/models/components/ModelActivityCore";
 
 function getSearchTargetForEntry(entry: MessageListEntry) {
   if (entry.kind === "processGroup") {
@@ -265,6 +266,7 @@ type MessagesProps = {
   threadId: string | null;
   workspaceId?: string | null;
   isThinking: boolean;
+  activityState?: ModelActivityState;
   isLoadingMessages?: boolean;
   hasOlderHistory?: boolean;
   isLoadingOlderHistory?: boolean;
@@ -371,6 +373,7 @@ export const Messages = memo(function Messages({
   threadId,
   workspaceId = null,
   isThinking,
+  activityState = "idle",
   isLoadingMessages = false,
   hasOlderHistory = false,
   isLoadingOlderHistory = false,
@@ -658,15 +661,26 @@ export const Messages = memo(function Messages({
     searchMatches.length > 0
       ? Math.min(activeSearchIndex, searchMatches.length - 1) + 1
       : 0;
-  const activeAssistantTurnIds = useMemo(
-    () =>
-      new Set(
-        turnExecutionSummary?.status === "active"
-          ? turnExecutionSummary.turnChain
-          : [],
-      ),
-    [turnExecutionSummary],
-  );
+  const assistantActivityStateByTurnId = useMemo(() => {
+    const states = new Map<string, ModelActivityState>();
+    const summaries =
+      turnExecutionSummaries.length > 0
+        ? turnExecutionSummaries
+        : turnExecutionSummary
+          ? [turnExecutionSummary]
+          : [];
+    summaries.forEach((summary) => {
+      const state: ModelActivityState =
+        summary.status === "active"
+          ? activityState
+          : summary.status === "completed"
+            ? "completed"
+            : "failed";
+      summary.turnChain.forEach((turnId) => states.set(turnId, state));
+      states.set(summary.turnId, state);
+    });
+    return states;
+  }, [activityState, turnExecutionSummaries, turnExecutionSummary]);
   const assistantRunningLabel = t("messages.runningStatus");
 
   useEffect(() => {
@@ -1078,9 +1092,10 @@ export const Messages = memo(function Messages({
               ? handleResendUserMessage
               : undefined
           }
-          assistantRunning={
-            item.role === "assistant" &&
-            Boolean(item.turnId && activeAssistantTurnIds.has(item.turnId))
+          assistantActivityState={
+            item.role === "assistant" && item.turnId
+              ? (assistantActivityStateByTurnId.get(item.turnId) ?? "idle")
+              : "idle"
           }
           assistantMeta={
             item.role === "assistant"
@@ -1093,7 +1108,6 @@ export const Messages = memo(function Messages({
           assistantProcessContent={
             item.role === "assistant" ? assistantProcessContent : undefined
           }
-          runningLabel={assistantRunningLabel}
           codeBlockCopyUseModifier={codeBlockCopyUseModifier}
           showMessageFilePath={showMessageFilePath}
           interrupted={
@@ -1583,6 +1597,7 @@ export const Messages = memo(function Messages({
           {userInputNode}
           <WorkingIndicator
             isThinking={isThinking}
+            activityState={activityState}
             processingStartedAt={processingStartedAt}
             lastDurationMs={lastDurationMs}
             hasItems={items.length > 0}
@@ -1593,9 +1608,6 @@ export const Messages = memo(function Messages({
               turnExecutionSummary?.status === "active"
                 ? null
                 : (turnExecutionSummary?.status ?? null)
-            }
-            workingLabel={
-              turnExecutionSummary ? t("messages.working") : undefined
             }
             runningLabel={assistantRunningLabel}
             completedLabel={

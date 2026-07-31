@@ -34,6 +34,7 @@ import {
 import { useI18n } from "@/features/i18n/I18nProvider";
 import { isContextCompactionInProgress } from "@/features/threads/utils/contextUsage";
 import { resolveNextThemePreference } from "@app/utils/themePreference";
+import { resolveModelActivityState } from "@/features/models/utils/modelActivityState";
 
 type SidebarProps = LayoutNodesOptions["primary"]["sidebarProps"];
 type ComposerProps = NonNullable<LayoutNodesOptions["primary"]["composerProps"]>;
@@ -494,6 +495,53 @@ function buildPrimarySurface({
         },
       ]
     : activeItems;
+  const activeTurnExecutionSummary = activeThreadId
+    ? turnExecutionSummaryByThread[activeThreadId] ?? null
+    : null;
+  const isActivityProcessing =
+    composerWorkspaceState.isProcessing ||
+    Boolean(activeThreadId && pendingTurnStartByThread[activeThreadId]);
+  const hasPendingApproval = Boolean(
+    activeThreadId &&
+      activeWorkspaceId &&
+      approvals.some((approval) => {
+        if (approval.workspace_id !== activeWorkspaceId) {
+          return false;
+        }
+        const params = approval.params;
+        const nestedTurn =
+          params.turn && typeof params.turn === "object"
+            ? (params.turn as Record<string, unknown>)
+            : null;
+        const approvalThreadId = String(
+          params.threadId ??
+            params.thread_id ??
+            nestedTurn?.threadId ??
+            nestedTurn?.thread_id ??
+            "",
+        ).trim();
+        return approvalThreadId === activeThreadId;
+      }),
+  );
+  const hasPendingUserInput = Boolean(
+    activeThreadId &&
+      activeWorkspaceId &&
+      (userInputRequests ?? []).some(
+        (request) =>
+          request.workspace_id === activeWorkspaceId &&
+          request.params.thread_id === activeThreadId,
+      ),
+  );
+  const modelActivityState = resolveModelActivityState({
+    items: messagesItems,
+    isProcessing: isActivityProcessing,
+    hasPendingInteraction: hasPendingApproval || hasPendingUserInput,
+    turnStatus: activeTurnExecutionSummary?.status ?? null,
+    activeTurnIds:
+      activeTurnExecutionSummary?.status === "active"
+        ? activeTurnExecutionSummary.turnChain
+        : [],
+  });
   const activeThreadTitle =
     activeWorkspaceId && activeThreadId
       ? (threadsByWorkspace[activeWorkspaceId] ?? []).find(
@@ -655,6 +703,7 @@ function buildPrimarySurface({
         Boolean(
           activeThreadId && pendingTurnStartByThread[activeThreadId],
         ),
+      activityState: modelActivityState,
       isLoadingMessages: activeThreadId
         ? threadResumeLoadingById[activeThreadId] ?? false
         : false,
@@ -725,6 +774,7 @@ function buildPrimarySurface({
             });
           },
           isProcessing: composerWorkspaceState.isProcessing,
+          modelActivityState,
           autoReconnectEnabled: activeThreadId
             ? autoContinueStatusByThread[activeThreadId]?.enabled ?? false
             : false,

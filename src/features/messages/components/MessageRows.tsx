@@ -23,6 +23,8 @@ import X from "lucide-react/dist/esm/icons/x";
 import { exportMarkdownFile } from "@services/tauri";
 import { pushErrorToast } from "@services/toasts";
 import { useI18n } from "@/features/i18n/I18nProvider";
+import { ModelActivityCore } from "@/features/models/components/ModelActivityCore";
+import type { ModelActivityState } from "@/features/models/components/ModelActivityCore";
 import type { ConversationItem, SendMessageResult } from "../../../types";
 import { attachmentDisplayName } from "../../../utils/attachments";
 import type { ParsedFileLocation } from "../../../utils/fileLinks";
@@ -64,6 +66,7 @@ type MarkdownFileLinkProps = {
 
 type WorkingIndicatorProps = {
   isThinking: boolean;
+  activityState?: ModelActivityState;
   processingStartedAt?: number | null;
   lastDurationMs?: number | null;
   hasItems: boolean;
@@ -71,7 +74,6 @@ type WorkingIndicatorProps = {
   showPollingFetchStatus?: boolean;
   pollingIntervalMs?: number;
   completionStatus?: "completed" | "interrupted" | "failed" | null;
-  workingLabel?: string;
   runningLabel?: string;
   completedLabel?: string;
   interruptedLabel?: string;
@@ -87,11 +89,10 @@ type MessageRowProps = MarkdownFileLinkProps & {
     item: Extract<ConversationItem, { kind: "message" }>,
     text: string,
   ) => Promise<SendMessageResult>;
-  assistantRunning?: boolean;
+  assistantActivityState?: ModelActivityState;
   assistantMeta?: AssistantMessageMeta | null;
   assistantProcessDisclosure?: AssistantProcessDisclosure;
   assistantProcessContent?: ReactNode;
-  runningLabel?: string;
   interrupted?: { label: string } | null;
   codeBlockCopyUseModifier?: boolean;
   exportSelectionMode?: boolean;
@@ -439,6 +440,7 @@ function buildPlanExportFileName(itemId: string) {
 
 export const WorkingIndicator = memo(function WorkingIndicator({
   isThinking,
+  activityState = "thinking",
   processingStartedAt = null,
   lastDurationMs = null,
   hasItems,
@@ -446,7 +448,6 @@ export const WorkingIndicator = memo(function WorkingIndicator({
   showPollingFetchStatus = false,
   pollingIntervalMs = 12000,
   completionStatus = null,
-  workingLabel = "Working…",
   runningLabel = "RUNNING",
   completedLabel = "Done in",
   interruptedLabel = "Interrupted in",
@@ -496,7 +497,7 @@ export const WorkingIndicator = memo(function WorkingIndicator({
       {isThinking && (
         <div className="working">
           <span className="working-agent-avatar" aria-hidden>
-            <Bot size={14} />
+            <ModelActivityCore state={activityState} size={22} />
           </span>
           <div className="working-main">
             <div className="working-meta">
@@ -508,9 +509,9 @@ export const WorkingIndicator = memo(function WorkingIndicator({
                 </span>
               </div>
             </div>
-            <span className="working-text">
-              {reasoningLabel || workingLabel}
-            </span>
+            {reasoningLabel ? (
+              <span className="working-text">{reasoningLabel}</span>
+            ) : null}
           </div>
         </div>
       )}
@@ -541,11 +542,10 @@ export const MessageRow = memo(function MessageRow({
   onCopy,
   onReference,
   onResendUserMessage,
-  assistantRunning = false,
+  assistantActivityState = "idle",
   assistantMeta = null,
   assistantProcessDisclosure,
   assistantProcessContent,
-  runningLabel = "RUNNING",
   interrupted,
   codeBlockCopyUseModifier,
   showMessageFilePath,
@@ -748,7 +748,10 @@ export const MessageRow = memo(function MessageRow({
         {item.role === "assistant" ? (
           <div className="message-agent-meta">
             <span className="message-agent-avatar" aria-hidden>
-              <Bot size={14} />
+              <ModelActivityCore
+                state={assistantActivityState}
+                size={18}
+              />
             </span>
             <span className="message-agent-name" title={assistantMeta?.name}>
               {assistantMeta?.name ?? "Assistant"}
@@ -868,12 +871,6 @@ export const MessageRow = memo(function MessageRow({
                 </span>
               );
             })()}
-            {assistantRunning ? (
-              <span className="message-agent-running">
-                <span className="message-agent-running-dot" aria-hidden />
-                <span>{runningLabel}</span>
-              </span>
-            ) : null}
           </div>
         ) : null}
         {assistantProcessContent}

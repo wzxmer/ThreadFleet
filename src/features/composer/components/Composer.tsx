@@ -57,6 +57,7 @@ import { isComposingEvent } from "../../../utils/keys";
 import type { CodexArgsOption } from "../../threads/utils/codexArgsProfiles";
 import type { WorkflowGateAdapterStatus } from "@/types";
 import { getContextUsedPercent } from "@/features/threads/utils/contextUsage";
+import type { ModelActivityState } from "@/features/models/components/ModelActivityCore";
 import {
   analyzeLargePaste,
   createPastedTextAttachment,
@@ -81,6 +82,7 @@ type ComposerProps = {
   disabled?: boolean;
   appsEnabled: boolean;
   isProcessing: boolean;
+  modelActivityState?: ModelActivityState;
   autoReconnectEnabled?: boolean;
   autoReconnectPhase?: "idle" | "waiting" | "sending" | "running";
   autoReconnectAttempt?: number;
@@ -216,6 +218,7 @@ export const Composer = memo(function Composer({
   disabled = false,
   appsEnabled,
   isProcessing,
+  modelActivityState,
   autoReconnectEnabled = false,
   autoReconnectPhase = "idle",
   autoReconnectAttempt = 0,
@@ -957,6 +960,8 @@ export const Composer = memo(function Composer({
       />
       <ComposerMetaBar
         disabled={disabled}
+        isProcessing={isProcessing}
+        modelActivityState={modelActivityState}
         collaborationModes={collaborationModes}
         selectedCollaborationModeId={selectedCollaborationModeId}
         onSelectCollaborationMode={onSelectCollaborationMode}

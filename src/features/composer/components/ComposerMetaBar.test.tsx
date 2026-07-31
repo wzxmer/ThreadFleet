@@ -75,6 +75,33 @@ describe("ComposerMetaBar", () => {
     );
   });
 
+  it("activates the model core while the thread is processing, even when controls are disabled", () => {
+    const view = render(
+      <ComposerMetaBar
+        disabled
+        isProcessing
+        collaborationModes={[]}
+        selectedCollaborationModeId={null}
+        onSelectCollaborationMode={() => {}}
+        models={[{ id: "model-1", displayName: "gpt-5.6-sol", model: "gpt-5.6-sol" }]}
+        selectedModelId="model-1"
+        onSelectModel={() => {}}
+        reasoningOptions={[]}
+        selectedEffort={null}
+        onSelectEffort={() => {}}
+        selectedServiceTier={null}
+        reasoningSupported={false}
+        accessMode="current"
+        onSelectAccessMode={() => {}}
+        composerSendShortcut="enter"
+      />,
+    );
+
+    expect(
+      view.container.querySelector(".model-activity-core")?.getAttribute("data-state"),
+    ).toBe("thinking");
+  });
+
   it("sizes controls from the selected label instead of the longest option", () => {
     const view = render(
       <ComposerMetaBar
@@ -106,7 +133,7 @@ describe("ComposerMetaBar", () => {
     const wrapper = view.container.querySelector<HTMLElement>(
       ".composer-select-wrap--model",
     );
-    expect(wrapper?.style.getPropertyValue("--composer-control-width")).toBe("153px");
+    expect(wrapper?.style.getPropertyValue("--composer-control-width")).toBe("159px");
   });
 
   it("combines input shortcut and trigger mode in one menu", () => {
