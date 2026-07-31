@@ -23,8 +23,8 @@ describe("home layout styles", () => {
     expect(homeCss).toMatch(
       /:root:not\(\[data-theme\]\) \.home,\s*:root\[data-theme="light"\] \.home\s*\{[^}]*--home-command-page-bg:\s*var\(--cm-light-main-bg\);[^}]*--home-command-surface:\s*var\(--cm-light-panel-bg\);[^}]*--home-command-text:\s*var\(--cm-light-text-strong\);/s,
     );
-    expect(homeCss).toContain(
-      ".home .home-usage-card,\n.home .home-usage-chart-card",
+    expect(homeCss).toMatch(
+      /\.home \.home-usage-card,\r?\n\.home \.home-usage-chart-card/,
     );
     expect(homeCss).toMatch(
       /\.home \.home-usage-select-wrap,\s*\.home \.home-usage-toggle,\s*\.home \.home-usage-model-chip\s*\{[^}]*border-color:\s*var\(--home-command-border\);[^}]*background:\s*var\(--home-command-surface-control\);/s,
