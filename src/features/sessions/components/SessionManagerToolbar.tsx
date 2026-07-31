@@ -70,6 +70,20 @@ export function SessionManagerToolbar({ manager }: Props) {
         {manager.query && <button type="button" data-button-elevation="none" onClick={() => manager.setQuery("")} aria-label={t("sidebar.clearSearch")}><X size={13} aria-hidden /></button>}
       </div>
 
+      <div className="session-manager-scope-bar">
+        <div className="session-manager-scope-tabs" role="group" aria-label={t("sessionManager.storageFilter")}>
+          <button type="button" className={manager.storageFilter === "all" ? "is-active" : ""} data-button-elevation="none" aria-pressed={manager.storageFilter === "all"} onClick={() => manager.setStorageFilter("all")}>
+            <span>{t("sessionManager.all")}</span>
+          </button>
+          <button type="button" className={manager.storageFilter === "local" ? "is-active" : ""} data-button-elevation="none" aria-pressed={manager.storageFilter === "local"} onClick={() => manager.setStorageFilter("local")}>
+            <span>{t("sessionManager.localStorage")}</span>
+          </button>
+          <button type="button" className={manager.storageFilter === "archived" ? "is-active" : ""} data-button-elevation="none" aria-pressed={manager.storageFilter === "archived"} onClick={() => manager.setStorageFilter("archived")}>
+            <span>{t("sessionManager.archived")}</span>
+          </button>
+        </div>
+      </div>
+
       <div className="session-manager-quick-filters">
         <select value={manager.datePreset} onChange={(event) => manager.setDatePreset(event.target.value as SessionManagerDatePreset)} aria-label={t("sessionManager.dateFilter")}>
           <option value="all">{t("sessionManager.dateAll")}</option>
@@ -81,11 +95,6 @@ export function SessionManagerToolbar({ manager }: Props) {
           <option value="thisMonth">{t("sessionManager.thisMonth")}</option>
           <option value="custom">{t("sessionManager.customDate")}</option>
           <option value="unknown">{t("sessionManager.unknownTime")}</option>
-        </select>
-        <select value={manager.storageFilter} onChange={(event) => manager.setStorageFilter(event.target.value as typeof manager.storageFilter)} aria-label={t("sessionManager.storageFilter")}>
-          <option value="all">{t("sessionManager.all")}</option>
-          <option value="local">{t("sessionManager.localStorage")}</option>
-          <option value="archived">{t("sessionManager.archived")}</option>
         </select>
         <select value={manager.projectMode} onChange={(event) => { manager.setProjectMode(event.target.value as typeof manager.projectMode); if (event.target.value === "selected") setFiltersOpen(true); }} aria-label={t("sessionManager.projectFilter")}>
           <option value="all">{t("sessionManager.allProjects")}</option>
@@ -102,7 +111,7 @@ export function SessionManagerToolbar({ manager }: Props) {
           <option value="main">{t("sessionManager.mainSession")}</option>
           <option value="subagent">{t("sessionManager.subagent")}</option>
         </select>
-        <div className="session-manager-sort-control">
+        <div className="session-manager-sort-control is-wide">
           <select value={manager.sortField} onChange={(event) => manager.setSortField(event.target.value as typeof manager.sortField)} aria-label={t("sessionManager.sortField")}>
             <option value="updatedAt">{t("sessionManager.sortByLastUsed")}</option>
             <option value="createdAt">{t("sessionManager.sortByCreatedAt")}</option>

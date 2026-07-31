@@ -15,7 +15,7 @@ import { useApps } from "@/features/apps/hooks/useApps";
 import { useCustomPrompts } from "@/features/prompts/hooks/useCustomPrompts";
 import { useBranchSwitcherShortcut } from "@/features/git/hooks/useBranchSwitcherShortcut";
 import { useRenameWorktreePrompt } from "@/features/workspaces/hooks/useRenameWorktreePrompt";
-import { useLayoutController } from "@app/hooks/useLayoutController";
+import { SESSION_MANAGER_MIN_MAIN_CONTENT_WIDTH, useLayoutController } from "@app/hooks/useLayoutController";
 import { useUpdaterController } from "@app/hooks/useUpdaterController";
 import { useResponseRequiredNotificationsController } from "@app/hooks/useResponseRequiredNotificationsController";
 import { useErrorToasts } from "@/features/notifications/hooks/useErrorToasts";
@@ -414,6 +414,7 @@ export default function MainApp() {
     setDebugOpen,
     toggleDebugPanelShortcut: appSettings.toggleDebugPanelShortcut,
     toggleTerminalShortcut: appSettings.toggleTerminalShortcut,
+    minMainContentWidth: sessionManagerOpen ? SESSION_MANAGER_MIN_MAIN_CONTENT_WIDTH : undefined,
   });
   const handleSessionManagerActiveChange = useCallback(
     (active: boolean) => {

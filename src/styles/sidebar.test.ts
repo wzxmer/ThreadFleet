@@ -287,9 +287,20 @@ describe("sidebar interaction styles", () => {
     expect(workspaceRule?.[1]).not.toContain("grid-column: 1 / -1");
     expect(workspaceRule?.[1]).toContain("grid-row: 1 / -1");
     expect(workspaceRule?.[1]).toContain("width: auto");
+    expect(workspaceRule?.[1]).toContain("max-width: 100%");
     expect(workspaceRule?.[1]).toContain("height: 100%");
     expect(sidebarCss).not.toContain("width: min(980px, calc(100% - 48px))");
     expect(containerRule?.[1]).toContain(".session-manager-workspace-header");
+  });
+
+  it("keeps the session workspace summary clear of Windows caption controls", () => {
+    const sidebarCss = readFileSync(new URL("./sidebar.css", import.meta.url), "utf8");
+    const summaryRule = sidebarCss.match(
+      /\.session-manager-workspace-summary\s*\{([\s\S]*?)\n\}/,
+    );
+
+    expect(summaryRule?.[1]).toContain("var(--window-caption-width, 0px)");
+    expect(summaryRule?.[1]).toContain("var(--window-caption-gap, 0px)");
   });
 
   it("uses the reserved right area as a selected-session information inspector", () => {
@@ -319,8 +330,9 @@ describe("sidebar interaction styles", () => {
 
     expect(contentRule?.[1]).toContain("padding: 0");
     expect(contentRule?.[1]).toContain("border-radius: 0");
-    expect(selectedRule?.[1]).toContain("var(--border-accent) 16%");
-    expect(selectedFocusedRule?.[1]).toContain("var(--border-accent) 20%");
+    expect(selectedRule?.[1]).toContain("var(--border-accent) 46%");
+    expect(selectedRule?.[1]).toContain("background: var(--surface-active)");
+    expect(selectedFocusedRule?.[1]).toContain("var(--border-accent) 56%");
   });
 
   it("keeps the session manager scrollbar stable without a compositor mask", () => {

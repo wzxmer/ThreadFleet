@@ -24,6 +24,16 @@ describe("app root resize background", () => {
     expect(baseCss).not.toMatch(/html,\s*body\s*\{[^}]*background:\s*transparent/s);
   });
 
+  it("lets the main surface fill the window while the desktop sidebar overlays it", () => {
+    const overlayRule = baseCss.match(
+      /\.app\.layout-desktop\.sidebar-overlay-open\s*\{([\s\S]*?)\n\}/,
+    );
+
+    expect(overlayRule?.[1]).toContain(
+      "grid-template-columns: var(--app-rail-width, 52px) minmax(0, 1fr)",
+    );
+  });
+
   it("keeps Windows caption controls visible on active chrome", () => {
     const captionRule = baseCss.match(
       /\.window-caption-control\s*\{([\s\S]*?)\n\}/,

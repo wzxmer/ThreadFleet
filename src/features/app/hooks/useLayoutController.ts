@@ -9,6 +9,7 @@ export const APP_RAIL_WIDTH = 52;
 export const DEFAULT_SIDEBAR_WIDTH = 280;
 export const DEFAULT_RIGHT_PANEL_WIDTH = 300;
 export const MIN_MAIN_CONTENT_WIDTH = 860;
+export const SESSION_MANAGER_MIN_MAIN_CONTENT_WIDTH = 620;
 export const AUTO_COLLAPSE_HYSTERESIS = 40;
 export const AUTO_EXPAND_HYSTERESIS = 80;
 
@@ -23,6 +24,7 @@ export function resolveEffectivePanelCollapse({
   previousAutoRightPanelCollapsed = false,
   sidebarRevealRequested = false,
   rightPanelRevealRequested = false,
+  minMainContentWidth = MIN_MAIN_CONTENT_WIDTH,
 }: {
   width: number;
   isCompact: boolean;
@@ -34,6 +36,7 @@ export function resolveEffectivePanelCollapse({
   previousAutoRightPanelCollapsed?: boolean;
   sidebarRevealRequested?: boolean;
   rightPanelRevealRequested?: boolean;
+  minMainContentWidth?: number;
 }) {
   if (isCompact) {
     return {
@@ -51,7 +54,7 @@ export function resolveEffectivePanelCollapse({
     APP_RAIL_WIDTH +
     (sidebarOpenForRightPanel ? sidebarWidth : 0) +
     rightPanelWidth +
-    MIN_MAIN_CONTENT_WIDTH;
+    minMainContentWidth;
   const rightPanelRevealAllowed =
     rightPanelRevealRequested && width >= rightPanelRequirement;
   const autoRightPanelCollapsed = rightPanelCollapsed
@@ -68,7 +71,7 @@ export function resolveEffectivePanelCollapse({
     APP_RAIL_WIDTH +
     (rightPanelOpenForSidebarRequirement ? rightPanelWidth : 0) +
     sidebarWidth +
-    MIN_MAIN_CONTENT_WIDTH;
+    minMainContentWidth;
   const autoSidebarCollapsed = sidebarCollapsed
     ? false
     : previousAutoSidebarCollapsed
@@ -78,7 +81,7 @@ export function resolveEffectivePanelCollapse({
         : width < sidebarRequirement - AUTO_COLLAPSE_HYSTERESIS;
   const sidebarRevealAllowed =
     sidebarRevealRequested &&
-    width >= APP_RAIL_WIDTH + sidebarWidth + MIN_MAIN_CONTENT_WIDTH;
+    width >= APP_RAIL_WIDTH + sidebarWidth + minMainContentWidth;
   const sidebarOverlayOpen = sidebarRevealRequested && !sidebarRevealAllowed;
 
   return {
@@ -124,12 +127,14 @@ export function useLayoutController({
   setDebugOpen,
   toggleDebugPanelShortcut,
   toggleTerminalShortcut,
+  minMainContentWidth = MIN_MAIN_CONTENT_WIDTH,
 }: {
   activeWorkspaceId: string | null;
   setActiveTab: (tab: "home" | "projects" | "codex" | "git" | "log") => void;
   setDebugOpen: (value: boolean | ((prev: boolean) => boolean)) => void;
   toggleDebugPanelShortcut: string | null;
   toggleTerminalShortcut: string | null;
+  minMainContentWidth?: number;
 }) {
   const {
     appRef,
@@ -182,9 +187,11 @@ export function useLayoutController({
         previousAutoRightPanelCollapsed: previousAutoCollapseRef.current.rightPanel,
         sidebarRevealRequested,
         rightPanelRevealRequested,
+        minMainContentWidth,
       }),
     [
       isCompact,
+      minMainContentWidth,
       manualRightPanelCollapsed,
       manualSidebarCollapsed,
       rightPanelWidth,

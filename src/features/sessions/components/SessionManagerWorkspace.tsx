@@ -27,6 +27,10 @@ export function SessionManagerWorkspace() {
           <span className="session-manager-workspace-eyebrow">{t("sessionManager.resultCount")} {manager.filteredSessionCount} / {manager.totalSessionCount}</span>
           <h1>{focusedSession?.title ?? t("sessionManager.overview")}</h1>
         </div>
+        <div className="session-manager-workspace-summary" aria-label={t("sessionManager.title")}>
+          <span>{t("sessionManager.activeGroup")}<strong>{manager.stats.local}</strong></span>
+          <span>{t("sessionManager.archivedGroup")}<strong>{manager.stats.archived}</strong></span>
+        </div>
       </header>
 
       {manager.archiveResult && <SessionArchiveResultSummary result={manager.archiveResult} sources={manager.sources} onDismiss={manager.dismissArchiveResult} />}

@@ -6,6 +6,7 @@ import {
   DEFAULT_RIGHT_PANEL_WIDTH,
   DEFAULT_SIDEBAR_WIDTH,
   MIN_MAIN_CONTENT_WIDTH,
+  SESSION_MANAGER_MIN_MAIN_CONTENT_WIDTH,
   resolveEffectivePanelCollapse,
 } from "./useLayoutController";
 
@@ -265,6 +266,28 @@ describe("resolveEffectivePanelCollapse", () => {
       autoSidebarCollapsed: false,
       autoRightPanelCollapsed: true,
       sidebarOverlayOpen: true,
+    });
+  });
+
+  it("keeps the session manager index docked beside its responsive workspace", () => {
+    const sessionManagerWidth =
+      APP_RAIL_WIDTH + DEFAULT_SIDEBAR_WIDTH + SESSION_MANAGER_MIN_MAIN_CONTENT_WIDTH;
+
+    expect(
+      resolveEffectivePanelCollapse({
+        width: sessionManagerWidth,
+        isCompact: false,
+        sidebarCollapsed: true,
+        rightPanelCollapsed: true,
+        sidebarRevealRequested: true,
+        minMainContentWidth: SESSION_MANAGER_MIN_MAIN_CONTENT_WIDTH,
+      }),
+    ).toEqual({
+      sidebarCollapsed: false,
+      rightPanelCollapsed: true,
+      autoSidebarCollapsed: false,
+      autoRightPanelCollapsed: false,
+      sidebarOverlayOpen: false,
     });
   });
 });

@@ -45,8 +45,8 @@ export function SessionManagerRow({ session, source, depth = 0, selected, resumi
         <input type="checkbox" checked={selected} readOnly tabIndex={-1} />
       </button>
       <button type="button" className="session-manager-row-content" data-button-elevation="none" onClick={selectRow} onDoubleClick={!resuming && onFocus ? onResume : undefined} aria-busy={resuming} aria-pressed={selected}>
-        <span className="session-manager-row-title">{session.title}</span>
-        <span className="session-manager-row-path">{session.cwd ?? t("sessionManager.unknownProject")}</span>
+        <span className="session-manager-row-title" title={session.title}>{session.title}</span>
+        <span className="session-manager-row-path" title={session.cwd ?? undefined}>{session.cwd ?? t("sessionManager.unknownProject")}</span>
         {!compact && session.preview && <span className="session-manager-row-preview">{session.preview}</span>}
         <span className="session-manager-row-tags">
           <span>{source?.name ?? session.sourceId}</span>

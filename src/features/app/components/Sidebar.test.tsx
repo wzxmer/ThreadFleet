@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render as testingRender, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render as testingRender, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRef, useState, type ReactElement } from "react";
 import {
@@ -209,6 +209,19 @@ describe("Sidebar", () => {
 
     expect(input!.value).toBe("");
     expect(document.querySelector(".session-manager-search-field button")).toBeNull();
+  });
+
+  it("switches local session storage from the primary scope control", () => {
+    render(<Sidebar {...baseProps} />, { sessionManagerActive: true });
+
+    const scope = screen.getByRole("group", { name: "按存储位置筛选" });
+    const allButton = within(scope).getByRole("button", { name: "全部" });
+    const archivedButton = within(scope).getByRole("button", { name: "已归档" });
+
+    expect(allButton.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(archivedButton);
+    expect(archivedButton.getAttribute("aria-pressed")).toBe("true");
+    expect(allButton.getAttribute("aria-pressed")).toBe("false");
   });
 
   it("keeps session manager rendering when a thread is already active", () => {

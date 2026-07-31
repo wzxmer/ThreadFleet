@@ -19,10 +19,10 @@ export function SessionManagerOverview({ stats, sources }: Props) {
   return (
     <div className="session-manager-overview">
       <div className="session-manager-overview-stats">
-        <div><CalendarDays size={16} aria-hidden /><span>{t("sessionManager.overviewToday")}</span><strong>{stats.today}</strong></div>
-        <div><HardDrive size={16} aria-hidden /><span>{t("sessionManager.overviewLocal")}</span><strong>{stats.local}</strong></div>
-        <div><Archive size={16} aria-hidden /><span>{t("sessionManager.overviewArchived")}</span><strong>{stats.archived}</strong></div>
-        <div><FolderX size={16} aria-hidden /><span>{t("sessionManager.overviewMissing")}</span><strong>{stats.missingProjects}</strong></div>
+        <div><span className="session-manager-stat-icon"><CalendarDays size={16} aria-hidden /></span><span>{t("sessionManager.overviewToday")}</span><strong>{stats.today}</strong></div>
+        <div><span className="session-manager-stat-icon"><HardDrive size={16} aria-hidden /></span><span>{t("sessionManager.overviewLocal")}</span><strong>{stats.local}</strong></div>
+        <div><span className="session-manager-stat-icon"><Archive size={16} aria-hidden /></span><span>{t("sessionManager.overviewArchived")}</span><strong>{stats.archived}</strong></div>
+        <div><span className="session-manager-stat-icon"><FolderX size={16} aria-hidden /></span><span>{t("sessionManager.overviewMissing")}</span><strong>{stats.missingProjects}</strong></div>
       </div>
       <section className="session-manager-overview-section">
         <h2>{t("sessionManager.recentActivity")}</h2>

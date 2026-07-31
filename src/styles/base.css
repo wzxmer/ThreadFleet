@@ -171,6 +171,10 @@ body {
   grid-template-columns: var(--app-rail-width, 52px) minmax(0, 1fr);
 }
 
+.app.layout-desktop.sidebar-overlay-open {
+  grid-template-columns: var(--app-rail-width, 52px) minmax(0, 1fr);
+}
+
 .app.layout-desktop .main,
 .app.layout-tablet .tablet-main {
   background: var(--cm-main-bg);
