@@ -615,6 +615,7 @@
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
+  background: var(--sidebar-object-bg);
   -webkit-app-region: no-drag;
   margin-right: calc(-1 * var(--sidebar-padding));
   padding-right: calc(var(--sidebar-padding) - 12px);
@@ -622,11 +623,6 @@
   mask-repeat: no-repeat;
   -webkit-mask-size: 100% 100%;
   mask-size: 100% 100%;
-}
-
-:root:not([data-theme]) .sidebar-body,
-:root[data-theme="light"] .sidebar-body {
-  background: var(--cm-light-panel-bg);
 }
 
 .sidebar-body.fade-top.fade-bottom {
@@ -1727,17 +1723,17 @@
 .thread-meta {
   margin-left: auto;
   display: grid;
-  grid-template-columns: 22px 40px;
+  grid-template-columns: 22px 20px;
   align-items: center;
-  gap: 4px;
-  width: 66px;
+  gap: 2px;
+  width: 44px;
   flex-shrink: 0;
   color: var(--sidebar-object-faint);
 }
 
 .thread-meta.has-subagent-toggle {
-  grid-template-columns: 22px 56px;
-  width: 82px;
+  grid-template-columns: 22px 40px;
+  width: 64px;
 }
 
 .thread-workspace-label,

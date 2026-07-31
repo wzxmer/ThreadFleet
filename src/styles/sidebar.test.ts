@@ -154,12 +154,12 @@ describe("sidebar interaction styles", () => {
     );
   });
 
-  it("uses a white light-theme conversation list without changing the tablet rail", () => {
+  it("keeps the conversation list on the sidebar theme surface without changing the tablet rail", () => {
     const sidebarCss = readFileSync(new URL("./sidebar.css", import.meta.url), "utf8");
+    const sidebarBodyRule = sidebarCss.match(/\.sidebar-body\s*\{([\s\S]*?)\n\}/);
 
-    expect(sidebarCss).toMatch(
-      /:root:not\(\[data-theme\]\) \.sidebar-body,\s*:root\[data-theme="light"\] \.sidebar-body\s*\{[^}]*background:\s*var\(--cm-light-panel-bg\);/s,
-    );
+    expect(sidebarBodyRule?.[1]).toContain("background: var(--sidebar-object-bg)");
+    expect(sidebarCss).not.toMatch(/\.sidebar-body\s*\{[^}]*var\(--cm-light-panel-bg\)/s);
     expect(sidebarCss).not.toMatch(
       /:root(?:[^{}]|\{[^}]*\})*\.tablet-nav[^{}]*\{[^}]*background:\s*var\(--cm-light-panel-bg\)/s,
     );
@@ -223,10 +223,11 @@ describe("sidebar interaction styles", () => {
     const sidebarCss = readFileSync(new URL("./sidebar.css", import.meta.url), "utf8");
     const metaRule = sidebarCss.match(/\.thread-meta\s*\{([\s\S]*?)\n\}/);
 
-    expect(metaRule?.[1]).toContain("grid-template-columns: 22px 40px");
-    expect(metaRule?.[1]).toContain("width: 66px");
+    expect(metaRule?.[1]).toContain("grid-template-columns: 22px 20px");
+    expect(metaRule?.[1]).toContain("gap: 2px");
+    expect(metaRule?.[1]).toContain("width: 44px");
     expect(sidebarCss).toMatch(
-      /\.thread-meta\.has-subagent-toggle\s*\{[^}]*grid-template-columns:\s*22px 56px;[^}]*width:\s*82px;/s,
+      /\.thread-meta\.has-subagent-toggle\s*\{[^}]*grid-template-columns:\s*22px 40px;[^}]*width:\s*64px;/s,
     );
     expect(sidebarCss).toMatch(
       /\.thread-pin-button\s*\{[^}]*grid-column:\s*1;/s,
