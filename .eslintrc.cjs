@@ -42,6 +42,16 @@ module.exports = {
     },
     {
       files: [
+        'src/styles/*.test.ts',
+        'src/features/update/utils/windowsInstallerHooks.test.ts',
+        'src/features/update/utils/windowsInstallerTemplate.test.ts',
+      ],
+      rules: {
+        '@typescript-eslint/ban-ts-comment': 'off',
+      },
+    },
+    {
+      files: [
         'src/features/workspaces/components/*Prompt.tsx',
         'src/features/git/components/BranchSwitcherPrompt.tsx',
         'src/features/threads/components/RenameThreadPrompt.tsx',

@@ -24,7 +24,7 @@ ThreadFleet 当前尚未发布安装包；需要体验时请先按下方说明�
 - macOS: `.dmg`
 - Linux: `.AppImage` / `.rpm`
 
-Windows 请继续使用与当前安装相同的格式更新：`.exe` 对应 NSIS，`.msi` 对应 MSI。应用检测到两种格式共存或安装器归属不明时会停止自动更新，并在更新提示或“设置 > 关于”中提供“查看修复”。只有当前 MSI 健康且仅存在一个可验证的旧 NSIS 残留时才允许修复；无法验证旧 `.lnk` 快捷方式等状态会保持只读阻止。修复不会运行旧卸载器，失败时会自动回滚；操作前仍建议备份重要数据。
+Windows 默认继续使用与当前安装相同的格式更新：`.exe` 对应 NSIS，`.msi` 对应 MSI。“设置 > 关于”提供默认关闭的实验性 NSIS→MSI 迁移选项；只有本机安装归属、目标 MSI 和隔离验证门全部通过后才会下载但不直接打开 MSI，并要求用户再次确认。当前发布版的迁移执行门保持关闭，因此启用该选项仍会使用原安装器类型。应用检测到两种格式共存或安装器归属不明时会停止自动更新，并提供“查看修复”。只有当前 MSI 健康且仅存在一个可验证的旧 NSIS 残留时才允许修复；无法验证旧 `.lnk` 快捷方式等状态会保持只读阻止。迁移和修复都不会运行旧卸载器；操作前仍建议备份重要数据。
 
 macOS 版本当前采用完整 ad-hoc 签名，但尚未使用 Apple Developer ID 公证。首次启动若被 Gatekeeper 阻止，请在“应用程序”中右键 ThreadFleet 并选择“打开”，或前往“系统设置 > 隐私与安全性 > 仍要打开”；正常情况下无需执行 `xattr` 命令。
 
@@ -32,7 +32,7 @@ macOS 版本当前采用完整 ad-hoc 签名，但尚未使用 Apple Developer I
 
 - 中文界面：侧边栏、设置、消息、提示、按钮和常用状态文案中文化。
 - 视觉统一：设置页、侧栏、消息区和弹层控件改为更一致的桌面软件风格。
-- 对话主题：原生亮色、纯白、原生暗色、CLI 暗黑等会话风格；跟随系统暗色时自动使用黑橙外观。
+- 对话显示：统一使用原生阅读样式；默认亮色，可切换暗色，暗色模式使用统一原生暗色外观。
 - 字体体验：默认使用 `PingFang SC` / 内置 `Noto Sans SC Variable` / `Microsoft YaHei UI` 字体链，中文显示更圆润饱满；支持 UI、会话、过程状态、代码四类字号独立调整，UI 字号同步覆盖侧栏、设置、工具栏、弹层和输入区。
 - 模型服务商管理：以卡片按钮切换多组配置，展示启用状态与 URL，并支持独立模型、上下文参数和每个模型声明的思考等级（含高以上等级）；默认在切换服务商时保留同一套本机会话，可在“设置 > 模型服务商”独立控制会话保留和 `config.toml` 同步，并通过脱敏诊断确认当前会话来源。
 - 模型无关工作流：ThreadFleet 统一匹配公共 skills、agents、项目规则和知识候选；默认使用不注入模型上下文的影子模式，可在“设置 > 工作流”切换关闭、影子或启用模式，并刷新 Registry、查看脱敏诊断。输入区支持为当前会话显式绑定 Workflow ID，绑定前会验证状态；已结束的工作流或仅支持手动检查的环境不会被标记为已绑定。
@@ -41,6 +41,7 @@ macOS 版本当前采用完整 ad-hoc 签名，但尚未使用 Apple Developer I
 - 用量显示：左下角 Codex 用量可开关，支持已用/剩余额度切换；第三方模型服务商可凭 Base URL 与 API Key 自动读取 Sub2 余额和消费，或读取 New API 令牌额度与消费；New API 可额外配置 Access Token 读取账户余额。日志不足以完整覆盖当天时会明确回退为累计消费；首页按小时、今日、近 7 天和本月汇总本机全部 Codex 会话，包含归档记录，并区分缓存读取和未缓存输入。
 - 本机会话管理：以本机/归档分区展示完整元数据索引和每条会话的本地最后使用时间，可按最后使用、创建或归档日期，以及项目、来源、主会话/子 Agent、文件映射状态组合筛选并排序；未选择会话时显示当前结果的活动、项目和来源概览。进入时不读取正文，明确点击后默认定位到会话结尾，保留全部用户消息并仅展示 AI 最终答复，向上滚动可持续加载更早内容；跨项目可返回原项目或引用上下文到当前项目创建新会话，原项目已不存在时会使用独立且稳定的 `项目不存在-ABC` 临时工作区恢复。永久删除仅对已归档会话开放，并在确认后再次校验来源、归档状态、时间和精确文件映射。
 - 消息体验：编辑失败消息后重发会覆盖原消息，避免重复堆积；“自动重连”默认关闭，手动开启后仅对当前会话有效，在任务非主动中止时持续尝试恢复连接并继续，且不占用 Codex 当前任务的尝试次数；图片粘贴、拖放和预览支持悬浮复制、应用内大图查看，内部生成图片使用紧凑显示名；达到 4,000 字符或 80 行的大量文本粘贴会自动转为可预览、可恢复的 TXT 附件。
+- 会话正文导出：可选择部分或全部用户/AI 消息导出为 A4 纵向 PDF 或单张 PNG；工具调用与过程状态会被过滤，消息图片保留，生成和分块保存进度可见并可取消。
 - 执行结果摘要：任务结束后保留匹配执行的文件新增/删除行数和 Working 用时；切换会话或重启应用后仍可恢复本机已记录摘要，旧会话缺少记录时不会补造统计。
 - Git 工作流：查看改动、Diff、日志、分支、提交、推送/拉取，并支持 GitHub Issues/PR 列表与 PR 上下文提问。
 - 远程后端：支持桌面 daemon、TCP/Tailscale 连接和 iOS 远程模式。
@@ -288,7 +289,7 @@ ThreadFleet does not have published installers yet; build it from source using t
 - macOS: `.dmg`
 - Linux: `.AppImage` / `.rpm`
 
-Keep using the same Windows installer family for updates: `.exe` for NSIS and `.msi` for MSI. Automatic updates stop when both families are registered or installer ownership is unclear, and **View repair** is available from the update notice or Settings > About. Repair is enabled only for one healthy current MSI plus one verified stale NSIS remnant; unverifiable states such as a legacy `.lnk` shortcut remain read-only and blocked. The old uninstaller is never run, failures trigger automatic rollback, and backing up important data first is still recommended.
+Windows updates use the current installer family by default: `.exe` for NSIS and `.msi` for MSI. Settings > About exposes an experimental NSIS-to-MSI option that is off by default. It downloads an MSI without opening it and asks for confirmation only after local ownership, artifact validation, and the isolated-validation runtime gate all pass. That runtime gate remains closed in current releases, so enabling the option still keeps same-family updates. Automatic updates stop when both families are registered or ownership is unclear, with **View repair** available for the narrowly supported stale-NSIS case. Migration and repair never run the old uninstaller; backing up important data first remains recommended.
 
 The macOS build is fully ad-hoc signed but not notarized with Apple Developer ID. If Gatekeeper blocks first launch, right-click ThreadFleet in Applications and select "Open", or go to "System Settings > Privacy & Security > Open Anyway". Running `xattr` is normally unnecessary.
 
@@ -296,7 +297,7 @@ The macOS build is fully ad-hoc signed but not notarized with Apple Developer ID
 
 - **Localized UI**: sidebar, settings, messages, prompts, buttons, and common status text in Chinese.
 - **Visual consistency**: settings, sidebar, message area, and overlay controls share a unified desktop software style.
-- **Chat themes**: native light, pure white, native dark, CLI dark, and more. Follows system dark mode with a black-orange appearance.
+- **Conversation display**: uses one native reading style globally. Light mode is the default, with a manual dark-mode toggle that uses the shared native dark appearance.
 - **Typography**: defaults to `PingFang SC` / bundled `Noto Sans SC Variable` / `Microsoft YaHei UI` font chain for fuller Chinese rendering. Four independent font sizes for UI, chat, process status, and code.
 - **Provider management**: switch between multiple Codex configurations via card buttons with active status and URL display, including per-model reasoning levels such as high and above when the Provider declares them. Provider switches keep the same local session library by default; Settings > Model Providers exposes independent session-preservation and `config.toml` sync controls plus redacted session-source diagnostics. Selecting the default Provider or disabling sync restores the original Provider/model fields while preserving unrelated config edits.
 - **Model-agnostic workflow**: ThreadFleet matches public skills, agents, project rules, and knowledge candidates. Shadow mode (no model context injection) is the default; toggle via Settings > Workflow.
@@ -308,6 +309,7 @@ The macOS build is fully ad-hoc signed but not notarized with Apple Developer ID
 - **Multiple app instances**: launch additional independent ThreadFleet instances instead of redirecting later launches to an existing window.
 - **Subagent result summaries**: parent conversations show compact child-result summaries, while long outputs open in a dedicated detail panel for reading, copying, or opening the child thread without burying the parent conclusion.
 - **Message experience**: references to the current or a new conversation enter the target composer as a draft and require explicit send; long references can be collapsed or previewed, individual references removed, and multiple references reordered; failed message re-send overwrites the original, auto-reconnect per session, large paste auto-converts to a previewable and restorable TXT attachment at 4,000 chars or 80 lines, image paste/drag/drop with hover copy and in-app large view.
+- **Conversation export**: export selected or all user/AI messages as a portrait A4 PDF or one PNG image. Tool calls and process states are filtered out, message images are preserved, and generation plus chunked-save progress is visible and cancellable.
 - **Execution summaries**: completed runs retain their matching added/deleted line counts and Working duration across thread switches and app restarts; older sessions without local summary data are left unchanged.
 - **Git workflow**: view changes, diffs, logs, branches, commit, push/pull, plus GitHub Issues/PR lists and PR context questions.
 - **Remote backend**: desktop daemon, TCP/Tailscale connection, and iOS remote mode.
