@@ -226,11 +226,15 @@ describe("message tool group interaction styles", () => {
       /:root:not\(\[data-theme\]\)\s+\.app:is\(\.layout-desktop, \.layout-compact\):not\(\.layout-phone\)\s+\.messages-view\.messages-reading-native\s+\.message\.assistant\s+\.bubble,\s*:root\[data-theme="light"\]\s+\.app:is\(\.layout-desktop, \.layout-compact\):not\(\.layout-phone\)\s+\.messages-view\.messages-reading-native\s+\.message\.assistant\s+\.bubble\s*\{[^}]*border-color:\s*transparent;[^}]*border-left-color:\s*transparent;[^}]*background:\s*transparent;/s,
     );
     expect(messagesCss).toMatch(
-      /\.messages-reading-native \.message\.assistant \.markdown,\s*\.messages-reading-native \.message\.assistant \.item-text\s*\{[^}]*max-width:\s*78ch;[^}]*margin-left:\s*0;[^}]*margin-top:\s*0;/s,
+      /\.messages-reading-native \.message\.assistant \.markdown,\s*\.messages-reading-native \.message\.assistant \.item-text\s*\{[^}]*max-width:\s*100%;[^}]*margin-left:\s*0;[^}]*margin-top:\s*0;/s,
     );
     expect(messagesCss).toMatch(
-      /\.messages-reading-native \.message\.assistant \.markdown,\s*\.messages-reading-native \.message\.assistant \.item-text\s*\{[^}]*max-width:\s*78ch;[^}]*font-size:\s*var\(--message-font-size, 15px\);[^}]*line-height:\s*1\.74;/s,
+      /\.messages-reading-native \.message\.assistant \.markdown,\s*\.messages-reading-native \.message\.assistant \.item-text\s*\{[^}]*max-width:\s*100%;[^}]*font-size:\s*var\(--message-font-size, 15px\);[^}]*line-height:\s*1\.74;/s,
     );
+    expect(messagesCss).toMatch(
+      /\.message\.assistant \.markdown :where\(p, ul, ol, blockquote\)\s*\{[^}]*max-width:\s*100%;/s,
+    );
+    expect(messagesCss).not.toMatch(/\.message\.assistant[^{}]*\{[^}]*max-width:\s*\d+ch;/s);
     expect(messagesCss).toContain(".message-agent-name");
     expect(messagesCss).toContain(".message-agent-time");
     expect(messagesCss).toContain(".message-agent-stats");

@@ -1361,7 +1361,7 @@
 
 .messages-reading-native .message.assistant .markdown,
 .messages-reading-native .message.assistant .item-text {
-  max-width: 78ch;
+  max-width: 100%;
   margin-left: 0;
   margin-top: 0;
   color: var(--conversation-assistant-text);
@@ -3158,7 +3158,7 @@
 }
 
 .message.assistant .markdown :where(p, ul, ol, blockquote) {
-  max-width: 94ch;
+  max-width: 100%;
 }
 
 .markdown :where(strong) {
