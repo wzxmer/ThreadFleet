@@ -3,8 +3,9 @@ use super::installer_migration_core::{
     MigrationTarget, INSTALLER_MIGRATION_SCHEMA_VERSION, MAX_MIGRATION_LIFETIME_MS,
 };
 #[cfg(target_os = "windows")]
-use super::installer_migration_engine::TargetInstallerSnapshot;
-use super::installer_migration_engine::{MigrationEngineError, MigrationOutcome};
+use super::installer_migration_engine::{
+    MigrationEngineError, MigrationOutcome, TargetInstallerSnapshot,
+};
 #[cfg(target_os = "windows")]
 use super::installer_migration_windows::NsisSourcePreflightSnapshot;
 use serde::{Deserialize, Serialize};
@@ -262,6 +263,7 @@ pub(crate) struct InstallerMigrationExecutionResult {
 }
 
 impl InstallerMigrationExecutionResult {
+    #[cfg(target_os = "windows")]
     fn engine_result(result: Result<MigrationOutcome, MigrationEngineError>) -> Self {
         match result {
             Ok(MigrationOutcome::Completed {
@@ -689,6 +691,7 @@ mod tests {
         }
     }
 
+    #[cfg(target_os = "windows")]
     #[test]
     fn maps_engine_outcomes_without_exposing_backend_capabilities() {
         let completed =
@@ -800,6 +803,7 @@ mod tests {
     #[test]
     fn production_runtime_gate_is_closed_by_default() {
         let capability = installer_migration_capability();
+        assert_eq!(capability.platform_supported, cfg!(target_os = "windows"));
         assert!(!capability.remote_execution_allowed);
         assert!(!capability.runtime_enabled);
         assert!(capability.reason.is_some());

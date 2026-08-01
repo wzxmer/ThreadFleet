@@ -52,6 +52,7 @@ fn resolve_release_architecture(
         Some(false) if matches!(process_architecture, "x86_64" | "amd64" | "x64") => {
             "x86_64".to_string()
         }
+        None if matches!(process_architecture, "x86_64" | "amd64" | "x64") => "x86_64".to_string(),
         _ => "unknown".to_string(),
     }
 }
@@ -647,7 +648,7 @@ mod tests {
         );
         assert_eq!(
             resolve_release_architecture("macos", "x86_64", None),
-            "unknown"
+            "x86_64"
         );
     }
 

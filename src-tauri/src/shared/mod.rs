@@ -15,10 +15,12 @@ pub(crate) mod git_rpc;
 pub(crate) mod git_ui_core;
 #[allow(dead_code)]
 pub(crate) mod installer_migration_core;
+#[cfg(target_os = "windows")]
 #[allow(dead_code)]
 pub(crate) mod installer_migration_engine;
 #[allow(dead_code)]
 pub(crate) mod installer_migration_service;
+#[cfg(target_os = "windows")]
 #[allow(dead_code)]
 pub(crate) mod installer_migration_store;
 #[cfg(target_os = "windows")]
