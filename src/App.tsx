@@ -14,6 +14,7 @@ import "./styles/home.css";
 import "./styles/workspace-home.css";
 import "./styles/main.css";
 import "./styles/messages.css";
+import "./styles/model-activity-core.css";
 import "./styles/conversation-export.css";
 import "./styles/approval-toasts.css";
 import "./styles/error-toasts.css";
