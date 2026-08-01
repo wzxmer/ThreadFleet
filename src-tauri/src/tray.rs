@@ -27,6 +27,10 @@ const TRAY_CHECK_UPDATES_ID: &str = "tray_check_updates";
 const TRAY_AUTOSTART_ID: &str = "tray_autostart";
 #[cfg(desktop)]
 const TRAY_QUIT_ID: &str = "tray_quit";
+#[cfg(all(desktop, target_os = "macos"))]
+const TRAY_ICON_BYTES: &[u8] = include_bytes!("../icons/tray-icon-template.png");
+#[cfg(all(desktop, not(target_os = "macos")))]
+const TRAY_ICON_BYTES: &[u8] = include_bytes!("../icons/tray-icon.png");
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct TrayRecentThreadEntry {
@@ -383,7 +387,7 @@ fn toggle_main_window<R: Runtime>(app: &tauri::AppHandle<R>) {
 
 #[cfg(desktop)]
 fn load_tray_icon() -> tauri::Result<Image<'static>> {
-    Image::from_bytes(include_bytes!("../icons/tray-icon.png")).map(|image| image.to_owned())
+    Image::from_bytes(TRAY_ICON_BYTES).map(|image| image.to_owned())
 }
 
 #[cfg(test)]
