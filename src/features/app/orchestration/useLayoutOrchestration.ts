@@ -1,6 +1,6 @@
 import { useMemo, type CSSProperties } from "react";
 import type { AppSettings } from "@/types";
-import { isWindowsPlatform } from "@utils/platformPaths";
+import { isMacPlatform, isWindowsPlatform } from "@utils/platformPaths";
 import { composeContentFontFamily, composeUiFontFamily } from "@utils/fonts";
 
 type UseAppShellOrchestrationOptions = {
@@ -59,6 +59,7 @@ export function useAppShellOrchestration({
   debugPanelHeight,
   appSettings,
 }: UseAppShellOrchestrationOptions) {
+  const isMac = isMacPlatform();
   const isWindows = isWindowsPlatform();
   const showGitDetail = Boolean(selectedDiffPath) && isPhone && centerMode === "diff";
   const isThreadOpen = Boolean(activeThreadId && showComposer);
@@ -81,7 +82,7 @@ export function useAppShellOrchestration({
     shouldReduceTransparency ? " reduced-transparency" : ""
   }${!isCompact && sidebarCollapsed ? " sidebar-collapsed" : ""}${
     !isCompact && rightPanelCollapsed ? " right-panel-collapsed" : ""
-  }${isWindows ? " is-windows" : ""}`;
+  }${isMac ? " is-macos" : ""}${isWindows ? " is-windows" : ""}`;
 
   const appStyle = useMemo<CSSProperties>(
     () => ({
@@ -112,6 +113,7 @@ export function useAppShellOrchestration({
       "--home-scroll-offset": isWindows ? "var(--main-topbar-height, 44px)" : "0px",
       "--window-caption-width": isWindows ? "138px" : "0px",
       "--window-caption-gap": isWindows ? "10px" : "0px",
+      "--macos-window-controls-safe-top": isMac && !isPhone ? "44px" : "0px",
       ...(isWindows
         ? {
             "--titlebar-height": "8px",
@@ -143,8 +145,10 @@ export function useAppShellOrchestration({
       codeFontFamily,
       chatDiffSplitPositionPercent,
       debugPanelHeight,
+      isMac,
       isWindows,
       isCompact,
+      isPhone,
       isTablet,
       planPanelHeight,
       rightPanelCollapsed,

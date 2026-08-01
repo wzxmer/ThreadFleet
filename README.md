@@ -72,6 +72,7 @@ macOS 版本当前采用完整 ad-hoc 签名，但尚未使用 Apple Developer I
 - 可配置默认跟进行为：排队发送或在运行中 steer。
 - 模型、推理强度、访问模式、协作模式和上下文用量在输入区集中控制。
 - 输入框边框按当前周期 Token 与模型上下文窗口显示真实占用；压缩开始时显示运行状态，完成后更新并保留该会话的累计压缩次数。
+- 重新编辑失败消息时沿用输入框当前发送快捷键规则；编辑面板使用紧凑操作区，不额外显示快捷键提示。
 - `设置 > Codex > 默认参数` 提供质量、均衡、节省三档 Token 效率策略，并可设置单次工具输出写入会话历史的 Token 预算；策略仅影响新会话，输出预算在重连工作区后生效。
 - 支持语音输入和按住说话快捷键。
 
@@ -309,6 +310,7 @@ The macOS build is fully ad-hoc signed but not notarized with Apple Developer ID
 - **Multiple app instances**: launch additional independent ThreadFleet instances instead of redirecting later launches to an existing window.
 - **Subagent result summaries**: parent conversations show compact child-result summaries, while long outputs open in a dedicated detail panel for reading, copying, or opening the child thread without burying the parent conclusion.
 - **Message experience**: references to the current or a new conversation enter the target composer as a draft and require explicit send; long references can be collapsed or previewed, individual references removed, and multiple references reordered; failed message re-send overwrites the original, auto-reconnect per session, large paste auto-converts to a previewable and restorable TXT attachment at 4,000 chars or 80 lines, image paste/drag/drop with hover copy and in-app large view.
+- **Message editing**: re-editing a failed message follows the composer’s current send-shortcut rule and uses a compact action surface without extra shortcut hints.
 - **Conversation export**: export selected or all user/AI messages as a portrait A4 PDF or one PNG image. Tool calls and process states are filtered out, message images are preserved, and generation plus chunked-save progress is visible and cancellable.
 - **Execution summaries**: completed runs retain their matching added/deleted line counts and Working duration across thread switches and app restarts; older sessions without local summary data are left unchanged.
 - **Git workflow**: view changes, diffs, logs, branches, commit, push/pull, plus GitHub Issues/PR lists and PR context questions.

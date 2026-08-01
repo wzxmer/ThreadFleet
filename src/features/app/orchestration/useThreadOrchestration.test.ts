@@ -291,6 +291,36 @@ describe("useThreadCodexSyncOrchestration seed behavior", () => {
     expect(params.patchThreadCodexParams).not.toHaveBeenCalled();
   });
 
+  it("seeds WorkflowGate from the no-thread scope into a new thread", async () => {
+    const params = makeSyncParams();
+    params.getThreadCodexParams.mockImplementation(
+      (_workspaceId: string, threadId: string) => {
+        if (threadId === "__no_thread__") {
+          return {
+            modelId: null,
+            effort: null,
+            accessMode: null,
+            collaborationModeId: null,
+            codexArgsOverride: undefined,
+            workflowGateId: "wf-workspace",
+            updatedAt: 2,
+          };
+        }
+        return null;
+      },
+    );
+
+    renderHook(() => useThreadCodexSyncOrchestration(params));
+
+    await waitFor(() => {
+      expect(params.patchThreadCodexParams).toHaveBeenCalledWith(
+        "ws-1",
+        "thread-2",
+        expect.objectContaining({ workflowGateId: "wf-workspace" }),
+      );
+    });
+  });
+
   it("backfills missing no-thread fast mode from the active thread selection", async () => {
     const params = makeSyncParams({
       selectedServiceTier: "fast",
@@ -323,6 +353,7 @@ describe("useThreadUiOrchestration", () => {
       selectedServiceTier: null,
       selectedCollaborationModeId: null,
       selectedCodexArgsOverride: null,
+      selectedWorkflowGateId: "wf-draft",
       pendingNewThreadSeedRef: {
         current: null,
       } as MutableRefObject<PendingNewThreadSeed | null>,
@@ -358,6 +389,9 @@ describe("useThreadUiOrchestration", () => {
       undefined,
       undefined,
     );
+    expect(params.pendingNewThreadSeedRef.current).toMatchObject({
+      workflowGateId: "wf-draft",
+    });
   });
 
   it("seeds a new thread from its resolved scope instead of the previous thread UI selection", async () => {

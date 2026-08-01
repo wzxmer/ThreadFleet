@@ -42,13 +42,18 @@ export function useThreadAutoContinue({
   sendContinuationRef,
 }: UseThreadAutoContinueOptions) {
   const [statusByThread, setStatusByThread] = useState<Record<string, ThreadAutoContinueStatus>>({});
+  const [statusByWorkspace, setStatusByWorkspace] = useState<
+    Record<string, ThreadAutoContinueStatus>
+  >({});
   const statusRef = useRef(statusByThread);
+  const statusByWorkspaceRef = useRef(statusByWorkspace);
   const timerByThreadRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const expectedAutoStartRef = useRef(new Set<string>());
   const manuallyStoppedTurnRef = useRef(new Set<string>());
   const manualStopFenceByThreadRef = useRef(new Map<string, number>());
 
   statusRef.current = statusByThread;
+  statusByWorkspaceRef.current = statusByWorkspace;
 
   const clearTimer = useCallback((threadId: string) => {
     const timer = timerByThreadRef.current.get(threadId);
@@ -212,6 +217,30 @@ export function useThreadAutoContinue({
     [clearTimer, updateStatus],
   );
 
+  const setWorkspaceEnabled = useCallback((workspaceId: string, enabled: boolean) => {
+    const next = {
+      ...statusByWorkspaceRef.current,
+      [workspaceId]: { ...EMPTY_STATUS, enabled },
+    };
+    statusByWorkspaceRef.current = next;
+    setStatusByWorkspace(next);
+  }, []);
+
+  const promoteWorkspaceToThread = useCallback((workspaceId: string, threadId: string) => {
+    const pending = statusByWorkspaceRef.current[workspaceId];
+    if (!pending) {
+      return;
+    }
+    setStatusByThread((current) => {
+      const next = { ...current, [threadId]: pending };
+      statusRef.current = next;
+      return next;
+    });
+    const { [workspaceId]: _removed, ...rest } = statusByWorkspaceRef.current;
+    statusByWorkspaceRef.current = rest;
+    setStatusByWorkspace(rest);
+  }, []);
+
   const shouldContinueAfterError = useCallback(
     (threadId: string, turnId: string) =>
       (statusRef.current[threadId] ?? EMPTY_STATUS).enabled &&
@@ -256,7 +285,10 @@ export function useThreadAutoContinue({
 
   return {
     statusByThread,
+    statusByWorkspace,
     setEnabled,
+    setWorkspaceEnabled,
+    promoteWorkspaceToThread,
     onTurnStarted,
     onTurnCompleted,
     onTurnError,

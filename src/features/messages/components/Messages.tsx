@@ -19,6 +19,7 @@ import ChevronRight from "lucide-react/dist/esm/icons/chevron-right";
 import Search from "lucide-react/dist/esm/icons/search";
 import X from "lucide-react/dist/esm/icons/x";
 import type {
+  ComposerSendShortcut,
   ConversationItem,
   MessageReadingStyle,
   OpenAppTarget,
@@ -319,6 +320,7 @@ type MessagesProps = {
   subagentResults?: SubagentResultSummaryData[];
   onQuoteMessage?: (text: string) => void;
   onReferenceMessage?: (action: MessageReferenceAction) => void;
+  composerSendShortcut?: ComposerSendShortcut;
   onResendUserMessage?: (
     text: string,
     images?: string[],
@@ -411,6 +413,7 @@ export const Messages = memo(function Messages({
   subagentResults = [],
   onQuoteMessage,
   onReferenceMessage,
+  composerSendShortcut = "enter",
   onResendUserMessage,
 }: MessagesProps) {
   const pendingOlderHistoryRestoreRef = useRef<{
@@ -1092,6 +1095,7 @@ export const Messages = memo(function Messages({
               ? handleResendUserMessage
               : undefined
           }
+          composerSendShortcut={composerSendShortcut}
           assistantActivityState={
             item.role === "assistant" && item.turnId
               ? (assistantActivityStateByTurnId.get(item.turnId) ?? "idle")
@@ -1619,6 +1623,7 @@ export const Messages = memo(function Messages({
             failedLabel={
               turnExecutionSummary ? t("messages.failedIn") : undefined
             }
+            pollingFetchLabel={t("messages.pollingFetchCountdown")}
           />
           {!items.length &&
             !userInputNode &&

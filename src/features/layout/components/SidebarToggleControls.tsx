@@ -66,11 +66,10 @@ export function RightPanelExpandButton({
 export function TitlebarExpandControls({
   isCompact,
   sidebarCollapsed,
-  autoSidebarCollapsed = false,
   onExpandSidebar,
 }: SidebarToggleProps) {
   const { t } = useI18n();
-  if (isCompact || !sidebarCollapsed || autoSidebarCollapsed) {
+  if (isCompact || !sidebarCollapsed) {
     return null;
   }
   return (

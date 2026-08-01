@@ -82,6 +82,15 @@ function sanitizeEntry(value: unknown): ThreadCodexParams | null {
         ? null
         : coerceServiceTier(entry.serviceTier)
     : undefined;
+  const hasWorkflowGateField = Object.prototype.hasOwnProperty.call(
+    entry,
+    "workflowGateId",
+  );
+  const workflowGateId = hasWorkflowGateField
+    ? typeof entry.workflowGateId === "string" && entry.workflowGateId.length <= 160
+      ? entry.workflowGateId.trim() || null
+      : null
+    : undefined;
   return {
     modelId: typeof entry.modelId === "string" ? entry.modelId : null,
     effort: typeof entry.effort === "string" ? entry.effort : null,
@@ -92,10 +101,7 @@ function sanitizeEntry(value: unknown): ThreadCodexParams | null {
         ? entry.collaborationModeId
         : null,
     codexArgsOverride,
-    workflowGateId:
-      typeof entry.workflowGateId === "string" && entry.workflowGateId.length <= 160
-        ? entry.workflowGateId.trim() || null
-        : null,
+    workflowGateId,
     updatedAt: typeof entry.updatedAt === "number" ? entry.updatedAt : 0,
   };
 }

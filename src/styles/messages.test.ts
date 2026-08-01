@@ -56,7 +56,7 @@ describe("message tool group interaction styles", () => {
 
   it("keeps edited-message retry progress aligned without shifting actions", () => {
     expect(messagesCss).toMatch(
-      /\.message-edit-resend-button\s*\{[^}]*display:\s*inline-flex;[^}]*align-items:\s*center;[^}]*justify-content:\s*center;[^}]*min-width:\s*112px;/s,
+      /\.message-edit-resend-button\s*\{[^}]*display:\s*inline-flex;[^}]*align-items:\s*center;[^}]*justify-content:\s*center;[^}]*min-width:\s*92px;/s,
     );
     expect(messagesCss).toMatch(
       /\.message-edit-resend-spinner\s*\{[^}]*width:\s*12px;[^}]*height:\s*12px;[^}]*border-top-color:\s*currentColor;/s,
@@ -171,10 +171,10 @@ describe("message tool group interaction styles", () => {
     expect(messageRowsSource).not.toContain('t("messages.agentName")');
     expect(messageRowsSource).toContain('className="message-agent-avatar"');
     expect(messageRowsSource).toMatch(
-      /<ModelActivityCore\s+state=\{assistantActivityState\}\s+size=\{18\}/s,
+      /<ModelActivityCore\s+state=\{assistantActivityState\}\s+size=\{22\}/s,
     );
     expect(messageRowsSource).toContain(
-      '<ModelActivityCore state={activityState} size={22} />',
+      '<ModelActivityCore state={activityState} size={40} />',
     );
     expect(messageRowsSource).not.toContain('className="message-agent-running"');
     expect(messagesCss).toMatch(
@@ -278,13 +278,22 @@ describe("message tool group interaction styles", () => {
       /className="ghost message-export-button"\s+data-button-elevation="none"/s,
     );
     expect(messagesCss).toMatch(
-      /\.messages-reading-native \.working\s*\{[^}]*display:\s*grid;[^}]*background:\s*transparent;/s,
+      /\.messages-reading-native \.working\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*42px minmax\(0,\s*1fr\);[^}]*gap:\s*7px;[^}]*padding:\s*4px 6px;[^}]*background:\s*transparent;/s,
     );
     expect(messagesCss).toMatch(
-      /\.message-agent-avatar\s*\{[^}]*width:\s*24px;[^}]*height:\s*24px;[^}]*border-radius:\s*8px;/s,
+      /\.messages-reading-native \.working-agent-avatar\s*\{[^}]*width:\s*42px;[^}]*height:\s*42px;[^}]*background:\s*transparent;/s,
     );
     expect(messagesCss).toMatch(
-      /\.message-edit-form\s*\{[^}]*padding:\s*12px;[^}]*border:\s*1px solid\s+color-mix/s,
+      /\.message-agent-avatar\s*\{[^}]*width:\s*26px;[^}]*height:\s*26px;[^}]*border-radius:\s*8px;/s,
+    );
+    expect(messagesCss).toMatch(
+      /\.message-edit-form\s*\{[^}]*gap:\s*4px;[^}]*padding:\s*0;[^}]*border:\s*0;/s,
+    );
+    expect(messagesCss).toMatch(
+      /\.message-editing \.message-actions\s*\{[^}]*display:\s*none;/s,
+    );
+    expect(messagesCss).toMatch(
+      /\.message-edit-textarea\s*\{[^}]*min-height:\s*104px;[^}]*background:\s*transparent;/s,
     );
   });
 

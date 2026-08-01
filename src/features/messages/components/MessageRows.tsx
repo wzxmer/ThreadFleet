@@ -10,11 +10,12 @@ import Copy from "lucide-react/dist/esm/icons/copy";
 import Diff from "lucide-react/dist/esm/icons/diff";
 import FileDiffIcon from "lucide-react/dist/esm/icons/file-diff";
 import FileText from "lucide-react/dist/esm/icons/file-text";
-import FileOutput from "lucide-react/dist/esm/icons/file-output";
+import FileInput from "lucide-react/dist/esm/icons/file-input";
 import Image from "lucide-react/dist/esm/icons/image";
 import Pencil from "lucide-react/dist/esm/icons/pencil";
 import Quote from "lucide-react/dist/esm/icons/quote";
 import Search from "lucide-react/dist/esm/icons/search";
+import SendHorizontal from "lucide-react/dist/esm/icons/send-horizontal";
 import Terminal from "lucide-react/dist/esm/icons/terminal";
 import TriangleAlert from "lucide-react/dist/esm/icons/triangle-alert";
 import Users from "lucide-react/dist/esm/icons/users";
@@ -25,9 +26,14 @@ import { pushErrorToast } from "@services/toasts";
 import { useI18n } from "@/features/i18n/I18nProvider";
 import { ModelActivityCore } from "@/features/models/components/ModelActivityCore";
 import type { ModelActivityState } from "@/features/models/components/ModelActivityCore";
-import type { ConversationItem, SendMessageResult } from "../../../types";
+import type {
+  ComposerSendShortcut,
+  ConversationItem,
+  SendMessageResult,
+} from "../../../types";
 import { attachmentDisplayName } from "../../../utils/attachments";
 import type { ParsedFileLocation } from "../../../utils/fileLinks";
+import { isMacPlatform } from "../../../utils/platformPaths";
 import { PierreDiffBlock } from "../../git/components/PierreDiffBlock";
 import {
   MAX_COMMAND_OUTPUT_LINES,
@@ -78,6 +84,7 @@ type WorkingIndicatorProps = {
   completedLabel?: string;
   interruptedLabel?: string;
   failedLabel?: string;
+  pollingFetchLabel?: string;
 };
 
 type MessageRowProps = MarkdownFileLinkProps & {
@@ -89,6 +96,7 @@ type MessageRowProps = MarkdownFileLinkProps & {
     item: Extract<ConversationItem, { kind: "message" }>,
     text: string,
   ) => Promise<SendMessageResult>;
+  composerSendShortcut?: ComposerSendShortcut;
   assistantActivityState?: ModelActivityState;
   assistantMeta?: AssistantMessageMeta | null;
   assistantProcessDisclosure?: AssistantProcessDisclosure;
@@ -452,6 +460,7 @@ export const WorkingIndicator = memo(function WorkingIndicator({
   completedLabel = "Done in",
   interruptedLabel = "Interrupted in",
   failedLabel = "Failed in",
+  pollingFetchLabel = "New message will be fetched in {seconds} seconds",
 }: WorkingIndicatorProps) {
   const [elapsedMs, setElapsedMs] = useState(0);
   const localStartedAtRef = useRef<number | null>(null);
@@ -497,11 +506,10 @@ export const WorkingIndicator = memo(function WorkingIndicator({
       {isThinking && (
         <div className="working">
           <span className="working-agent-avatar" aria-hidden>
-            <ModelActivityCore state={activityState} size={22} />
+            <ModelActivityCore state={activityState} size={40} />
           </span>
           <div className="working-main">
             <div className="working-meta">
-              <span className="working-spinner" aria-hidden />
               <span className="working-status">{runningLabel}</span>
               <div className="working-timer">
                 <span className="working-timer-clock">
@@ -520,7 +528,7 @@ export const WorkingIndicator = memo(function WorkingIndicator({
           <span className="turn-complete-line" aria-hidden />
           <span className="turn-complete-label">
             {showPollingFetchStatus
-              ? `New message will be fetched in ${pollCountdownSeconds} seconds`
+              ? pollingFetchLabel.replace("{seconds}", String(pollCountdownSeconds))
               : `${
                   completionStatus === "interrupted"
                     ? interruptedLabel
@@ -542,6 +550,7 @@ export const MessageRow = memo(function MessageRow({
   onCopy,
   onReference,
   onResendUserMessage,
+  composerSendShortcut = "enter",
   assistantActivityState = "idle",
   assistantMeta = null,
   assistantProcessDisclosure,
@@ -566,6 +575,7 @@ export const MessageRow = memo(function MessageRow({
   const [referenceMenuOpen, setReferenceMenuOpen] = useState(false);
   const [referenceMode, setReferenceMode] =
     useState<MessageReferenceMode>("full");
+  const isMac = isMacPlatform();
   const bubbleRef = useRef<HTMLDivElement | null>(null);
   const editTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const resendInFlightRef = useRef(false);
@@ -737,7 +747,7 @@ export const MessageRow = memo(function MessageRow({
     <div
       className={`message ${item.role}${isLongUserMessage ? " message-long" : ""}${
         exportSelected ? " is-export-selected" : ""
-      }`}
+      }${isEditing ? " message-editing" : ""}`}
     >
       <div
         ref={bubbleRef}
@@ -750,7 +760,7 @@ export const MessageRow = memo(function MessageRow({
             <span className="message-agent-avatar" aria-hidden>
               <ModelActivityCore
                 state={assistantActivityState}
-                size={18}
+                size={22}
               />
             </span>
             <span className="message-agent-name" title={assistantMeta?.name}>
@@ -911,7 +921,22 @@ export const MessageRow = memo(function MessageRow({
                   cancelEdit();
                   return;
                 }
-                if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                const isPlainEnter =
+                  event.key === "Enter" &&
+                  !event.shiftKey &&
+                  !event.metaKey &&
+                  !event.ctrlKey &&
+                  !event.altKey;
+                const isModifiedEnter =
+                  event.key === "Enter" &&
+                  !event.shiftKey &&
+                  !event.altKey &&
+                  (event.ctrlKey || (isMac && event.metaKey));
+                const sendsOnEnter = composerSendShortcut !== "ctrl-enter";
+                if (
+                  (sendsOnEnter && isPlainEnter) ||
+                  (!sendsOnEnter && isModifiedEnter)
+                ) {
                   event.preventDefault();
                   void submitEdit();
                 }
@@ -921,15 +946,18 @@ export const MessageRow = memo(function MessageRow({
             <div className="message-edit-actions">
               <button
                 type="button"
-                className="ghost"
+                className="ghost message-edit-cancel-button"
+                data-button-elevation="none"
                 onClick={cancelEdit}
                 disabled={isResending}
               >
+                <X size={13} strokeWidth={2} aria-hidden />
                 {t("messages.cancel")}
               </button>
               <button
                 type="button"
                 className="primary message-edit-resend-button"
+                data-button-elevation="none"
                 onClick={() => void submitEdit()}
                 disabled={!editText.trim() || isResending}
                 aria-busy={isResending}
@@ -939,6 +967,9 @@ export const MessageRow = memo(function MessageRow({
                     className="working-spinner message-edit-resend-spinner"
                     aria-hidden
                   />
+                )}
+                {!isResending && (
+                  <SendHorizontal size={13} strokeWidth={2} aria-hidden />
                 )}
                 {t(isResending ? "messages.resending" : "messages.resend")}
               </button>
@@ -979,6 +1010,30 @@ export const MessageRow = memo(function MessageRow({
         ) : null}
         {!exportSelectionMode && (
           <div className="message-actions">
+            {onExportStart ? (
+              <button
+                type="button"
+                className="ghost message-export-button"
+                data-button-elevation="none"
+                onClick={() => onExportStart(item.id)}
+                aria-label={t("messages.export")}
+                title={t("messages.export")}
+              >
+                <FileInput size={14} aria-hidden />
+              </button>
+            ) : null}
+            {canEditUserMessage && hasText && !isEditing && (
+              <button
+                type="button"
+                className="ghost message-edit-button"
+                data-button-elevation="none"
+                onClick={startEdit}
+                aria-label={t("messages.editAndResend")}
+                title={t("messages.editAndResend")}
+              >
+                <Pencil size={14} aria-hidden />
+              </button>
+            )}
             {onReference && hasText && (
               <div className="message-reference-control">
                 <button
@@ -1010,18 +1065,6 @@ export const MessageRow = memo(function MessageRow({
                 )}
               </div>
             )}
-            {canEditUserMessage && hasText && !isEditing && (
-              <button
-                type="button"
-                className="ghost message-edit-button"
-                data-button-elevation="none"
-                onClick={startEdit}
-                aria-label={t("messages.editAndResend")}
-                title={t("messages.editAndResend")}
-              >
-                <Pencil size={14} aria-hidden />
-              </button>
-            )}
             <button
               type="button"
               className={`ghost message-copy-button${isCopied ? " is-copied" : ""}`}
@@ -1035,18 +1078,6 @@ export const MessageRow = memo(function MessageRow({
                 <Check className="message-copy-icon-check" size={14} />
               </span>
             </button>
-            {onExportStart ? (
-              <button
-                type="button"
-                className="ghost message-export-button"
-                data-button-elevation="none"
-                onClick={() => onExportStart(item.id)}
-                aria-label={t("messages.export")}
-                title={t("messages.export")}
-              >
-                <FileOutput size={14} aria-hidden />
-              </button>
-            ) : null}
           </div>
         )}
       </div>

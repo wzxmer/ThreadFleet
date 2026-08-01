@@ -61,11 +61,13 @@ export function useMessagesViewState({
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const autoScrollRef = useRef(true);
+  const previousThreadIdRef = useRef(threadId);
   const resizeScrollFrameRef = useRef<number | null>(null);
   const copyTimeoutRef = useRef<number | null>(null);
   const manuallyToggledExpandedRef = useRef<Set<string>>(new Set());
   const manuallyToggledToolGroupsRef = useRef<Set<string>>(new Set());
   const finalMessageAutoCollapseRef = useRef<string | null>(null);
+  const userDisabledAutoCollapseRef = useRef(false);
   const [isToolGroupsAutoCollapsed, setIsToolGroupsAutoCollapsed] = useState(
     defaultToolGroupsCollapsed,
   );
@@ -143,7 +145,15 @@ export function useMessagesViewState({
   }, [showLatest]);
 
   useLayoutEffect(() => {
+    const didThreadChange = previousThreadIdRef.current !== threadId;
+    previousThreadIdRef.current = threadId;
     autoScrollRef.current = true;
+    if (didThreadChange) {
+      manuallyToggledExpandedRef.current = new Set();
+      userDisabledAutoCollapseRef.current = false;
+      setExpandedItems(new Set());
+      setCollapsedToolGroups(new Set());
+    }
     manuallyToggledToolGroupsRef.current = new Set();
     finalMessageAutoCollapseRef.current = null;
     setIsToolGroupsAutoCollapsed(defaultToolGroupsCollapsed);
@@ -650,6 +660,7 @@ export function useMessagesViewState({
       )
       .map((entry) => entry.group.id);
     setIsToolGroupsAutoCollapsed(true);
+    userDisabledAutoCollapseRef.current = false;
     manuallyToggledToolGroupsRef.current = new Set(groupIds);
     setCollapsedToolGroups(new Set(groupIds));
   }, [groupedItems]);
@@ -661,6 +672,7 @@ export function useMessagesViewState({
       )
       .map((entry) => entry.group.id);
     setIsToolGroupsAutoCollapsed(false);
+    userDisabledAutoCollapseRef.current = true;
     groupIds.forEach((id) => manuallyToggledToolGroupsRef.current.add(id));
     setCollapsedToolGroups((prev) => {
       if (prev.size === 0) {
@@ -715,7 +727,8 @@ export function useMessagesViewState({
     if (
       !finalAssistantId ||
       (groupIds.length === 0 && itemIds.length === 0) ||
-      isThinking
+      isThinking ||
+      userDisabledAutoCollapseRef.current
     ) {
       return;
     }
@@ -770,7 +783,11 @@ export function useMessagesViewState({
       });
       return changed ? next : prev;
     });
-  }, [finalAssistantCollapseTarget, isThinking, threadId]);
+  }, [
+    finalAssistantCollapseTarget,
+    isThinking,
+    threadId,
+  ]);
 
   const planFollowup = useMemo(() => {
     if (!onPlanAccept || !onPlanSubmitChanges) {

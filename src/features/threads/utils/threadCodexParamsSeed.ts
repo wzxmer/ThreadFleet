@@ -14,6 +14,7 @@ export type PendingNewThreadSeed = {
   collaborationModeId: string | null;
   accessMode: AccessMode;
   codexArgsOverride: string | null;
+  workflowGateId?: string | null;
 };
 
 type ResolveThreadCodexStateInput = {
@@ -44,7 +45,23 @@ type ThreadCodexSeedPatch = {
   accessMode: AccessMode;
   collaborationModeId: string | null;
   codexArgsOverride: string | null | undefined;
+  workflowGateId: string | null;
 };
+
+export function resolveWorkspaceWorkflowGateId(options: {
+  workspaceId: string;
+  threadId: string | null;
+  getThreadCodexParams: (workspaceId: string, threadId: string) => ThreadCodexParams | null;
+}): string | null {
+  const { workspaceId, threadId, getThreadCodexParams } = options;
+  const threadScoped = threadId
+    ? getThreadCodexParams(workspaceId, threadId)
+    : null;
+  if (threadScoped?.workflowGateId !== undefined) {
+    return threadScoped.workflowGateId;
+  }
+  return getThreadCodexParams(workspaceId, NO_THREAD_SCOPE_SUFFIX)?.workflowGateId ?? null;
+}
 
 export function resolveWorkspaceRuntimeCodexArgsOverride(options: {
   workspaceId: string;
@@ -90,6 +107,7 @@ export function createPendingThreadSeed(options: {
   selectedCollaborationModeId: string | null;
   accessMode: AccessMode;
   codexArgsOverride?: string | null;
+  workflowGateId?: string | null;
 }): PendingNewThreadSeed | null {
   const {
     activeThreadId,
@@ -98,6 +116,7 @@ export function createPendingThreadSeed(options: {
     selectedCollaborationModeId,
     accessMode,
     codexArgsOverride = null,
+    workflowGateId = null,
   } = options;
   if (activeThreadId || !activeWorkspaceId) {
     return null;
@@ -108,6 +127,7 @@ export function createPendingThreadSeed(options: {
     collaborationModeId: selectedCollaborationModeId,
     accessMode,
     codexArgsOverride,
+    workflowGateId,
   };
 }
 
@@ -172,6 +192,7 @@ export function buildThreadCodexSeedPatch(options: {
   accessMode: AccessMode;
   selectedCollaborationModeId: string | null;
   codexArgsOverride?: string | null | undefined;
+  workflowGateId?: string | null;
   pendingSeed: PendingNewThreadSeed | null;
 }): ThreadCodexSeedPatch {
   const {
@@ -181,6 +202,7 @@ export function buildThreadCodexSeedPatch(options: {
     accessMode,
     selectedCollaborationModeId,
     codexArgsOverride,
+    workflowGateId,
     pendingSeed,
   } = options;
 
@@ -198,5 +220,9 @@ export function buildThreadCodexSeedPatch(options: {
     codexArgsOverride: pendingForWorkspace
       ? pendingForWorkspace.codexArgsOverride
       : codexArgsOverride,
+    workflowGateId:
+      pendingForWorkspace?.workflowGateId !== undefined
+        ? pendingForWorkspace.workflowGateId
+        : workflowGateId ?? null,
   };
 }

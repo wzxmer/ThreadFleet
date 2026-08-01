@@ -148,6 +148,35 @@ describe("useProviderProfileRuntimeSync", () => {
     await waitFor(() => expect(syncWorkspaceRuntime).toHaveBeenCalledTimes(1));
   });
 
+  it("applies provider edits made while processing after processing finishes", async () => {
+    const syncWorkspaceRuntime = vi.fn(async () => undefined);
+    const initialProfile = profile("profile-a");
+    const editedProfile = { ...initialProfile, key: "edited-key-profile-a" };
+    const { rerender } = renderHook(
+      ({ activeProfile, defer }) =>
+        useProviderProfileRuntimeSync({
+          activeProfile,
+          activeWorkspace: workspace,
+          activeThreadId: "thread-1",
+          settingsLoading: false,
+          defer,
+          syncLocalConfig: false,
+          settingsSnapshot: runtimeSettings(activeProfile, false),
+          syncWorkspaceRuntime,
+          rollbackSettings: noopRollbackSettings,
+        }),
+      { initialProps: { activeProfile: initialProfile, defer: false } },
+    );
+
+    await waitFor(() => expect(syncWorkspaceRuntime).toHaveBeenCalledTimes(1));
+    rerender({ activeProfile: editedProfile, defer: true });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(syncWorkspaceRuntime).toHaveBeenCalledTimes(1);
+
+    rerender({ activeProfile: editedProfile, defer: false });
+    await waitFor(() => expect(syncWorkspaceRuntime).toHaveBeenCalledTimes(2));
+  });
+
   it("resyncs when local config synchronization is enabled", async () => {
     const syncWorkspaceRuntime = vi.fn(async () => undefined);
     const activeProfile = profile("profile-a");

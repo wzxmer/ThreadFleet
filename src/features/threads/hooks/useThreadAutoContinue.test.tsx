@@ -35,6 +35,29 @@ describe("useThreadAutoContinue", () => {
     expect(hook.result.current.statusByThread["thread-2"]).toBeUndefined();
   });
 
+  it("promotes a workspace draft setting to its first thread", () => {
+    const { hook } = setup();
+
+    act(() => {
+      hook.result.current.setWorkspaceEnabled("ws-1", true);
+    });
+
+    expect(hook.result.current.statusByWorkspace["ws-1"]).toMatchObject({
+      enabled: true,
+      phase: "idle",
+    });
+
+    act(() => {
+      hook.result.current.promoteWorkspaceToThread("ws-1", "thread-1");
+    });
+
+    expect(hook.result.current.statusByThread["thread-1"]).toMatchObject({
+      enabled: true,
+      phase: "idle",
+    });
+    expect(hook.result.current.statusByWorkspace["ws-1"]).toBeUndefined();
+  });
+
   it("starts a separate continuation after a terminal turn error", async () => {
     const { hook, sendContinuation } = setup();
     act(() => {

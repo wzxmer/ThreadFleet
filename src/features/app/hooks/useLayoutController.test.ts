@@ -121,7 +121,7 @@ describe("resolveEffectivePanelCollapse", () => {
     });
   });
 
-  it("does not let an explicit Git reveal squeeze the main conversation below its minimum", () => {
+  it("opens Git as a docked panel without changing the project sidebar state", () => {
     expect(
       resolveEffectivePanelCollapse({
         width: fullLayoutWidth - AUTO_COLLAPSE_HYSTERESIS - 1,
@@ -132,9 +132,9 @@ describe("resolveEffectivePanelCollapse", () => {
       }),
     ).toEqual({
       sidebarCollapsed: false,
-      rightPanelCollapsed: true,
+      rightPanelCollapsed: false,
       autoSidebarCollapsed: false,
-      autoRightPanelCollapsed: true,
+      autoRightPanelCollapsed: false,
       sidebarOverlayOpen: false,
     });
 
@@ -212,7 +212,7 @@ describe("resolveEffectivePanelCollapse", () => {
     });
   });
 
-  it("temporarily reveals an auto-collapsed sidebar only when the main area stays above its minimum", () => {
+  it("reveals an auto-collapsed sidebar as a docked column without an overlay", () => {
     expect(
       resolveEffectivePanelCollapse({
         width: sidebarOnlyLayoutWidth,
@@ -242,15 +242,15 @@ describe("resolveEffectivePanelCollapse", () => {
         sidebarRevealRequested: true,
       }),
     ).toEqual({
-      sidebarCollapsed: true,
+      sidebarCollapsed: false,
       rightPanelCollapsed: true,
       autoSidebarCollapsed: true,
       autoRightPanelCollapsed: true,
-      sidebarOverlayOpen: true,
+      sidebarOverlayOpen: false,
     });
   });
 
-  it("uses a temporary overlay when the conversation sidebar cannot be docked safely", () => {
+  it("keeps a manually collapsed sidebar independent from Git when both are toggled", () => {
     expect(
       resolveEffectivePanelCollapse({
         width: sidebarOnlyLayoutWidth - 1,
@@ -261,11 +261,11 @@ describe("resolveEffectivePanelCollapse", () => {
         sidebarRevealRequested: true,
       }),
     ).toEqual({
-      sidebarCollapsed: true,
+      sidebarCollapsed: false,
       rightPanelCollapsed: true,
       autoSidebarCollapsed: false,
       autoRightPanelCollapsed: true,
-      sidebarOverlayOpen: true,
+      sidebarOverlayOpen: false,
     });
   });
 

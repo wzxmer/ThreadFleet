@@ -72,7 +72,17 @@ type UseMainAppLayoutSurfacesArgs = {
       nextRetryAt: number | null;
     }
   >;
+  autoContinueStatusByWorkspace: Record<
+    string,
+    {
+      enabled: boolean;
+      phase: "idle" | "waiting" | "sending" | "running";
+      attempt: number;
+      nextRetryAt: number | null;
+    }
+  >;
   setThreadAutoContinueEnabled: (threadId: string, enabled: boolean) => void;
+  setWorkspaceAutoContinueEnabled: (workspaceId: string, enabled: boolean) => void;
   threadResumeLoadingById: Record<string, boolean>;
   threadListLoadingByWorkspace: SidebarProps["threadListLoadingByWorkspace"];
   threadListPagingByWorkspace: SidebarProps["threadListPagingByWorkspace"];
@@ -318,7 +328,9 @@ function buildPrimarySurface({
   turnExecutionSummariesByThread,
   interruptedThreadById,
   autoContinueStatusByThread,
+  autoContinueStatusByWorkspace,
   setThreadAutoContinueEnabled,
+  setWorkspaceAutoContinueEnabled,
   threadResumeLoadingById,
   threadListLoadingByWorkspace,
   threadListPagingByWorkspace,
@@ -542,6 +554,14 @@ function buildPrimarySurface({
         ? activeTurnExecutionSummary.turnChain
         : [],
   });
+  const composerAutoReconnectStatus = activeThreadId
+    ? autoContinueStatusByThread[activeThreadId] ??
+      (activeWorkspaceId
+        ? autoContinueStatusByWorkspace[activeWorkspaceId]
+        : undefined)
+    : activeWorkspaceId
+      ? autoContinueStatusByWorkspace[activeWorkspaceId]
+      : undefined;
   const activeThreadTitle =
     activeWorkspaceId && activeThreadId
       ? (threadsByWorkspace[activeWorkspaceId] ?? []).find(
@@ -695,6 +715,7 @@ function buildPrimarySurface({
         ? composerWorkspaceState.handleInsertComposerText
         : undefined,
       onReferenceMessage,
+      composerSendShortcut: appSettings.composerSendShortcut,
       onResendUserMessage: (text, images, options) => {
         return retryEditedUserMessage(text, images, options);
       },
@@ -775,18 +796,14 @@ function buildPrimarySurface({
           },
           isProcessing: composerWorkspaceState.isProcessing,
           modelActivityState,
-          autoReconnectEnabled: activeThreadId
-            ? autoContinueStatusByThread[activeThreadId]?.enabled ?? false
-            : false,
-          autoReconnectPhase: activeThreadId
-            ? autoContinueStatusByThread[activeThreadId]?.phase ?? "idle"
-            : "idle",
-          autoReconnectAttempt: activeThreadId
-            ? autoContinueStatusByThread[activeThreadId]?.attempt ?? 0
-            : 0,
+          autoReconnectEnabled: composerAutoReconnectStatus?.enabled ?? false,
+          autoReconnectPhase: composerAutoReconnectStatus?.phase ?? "idle",
+          autoReconnectAttempt: composerAutoReconnectStatus?.attempt ?? 0,
           onAutoReconnectChange: activeThreadId
             ? (enabled) => setThreadAutoContinueEnabled(activeThreadId, enabled)
-            : undefined,
+            : activeWorkspaceId
+              ? (enabled) => setWorkspaceAutoContinueEnabled(activeWorkspaceId, enabled)
+              : undefined,
           draftText: composerWorkspaceState.activeDraft,
           onDraftChange: composerWorkspaceState.handleDraftChange,
           pasteUndoKey: composerWorkspaceState.activeImageDraftKey,
@@ -1386,7 +1403,9 @@ export function useMainAppLayoutSurfaces({
   turnExecutionSummariesByThread,
   interruptedThreadById,
   autoContinueStatusByThread,
+  autoContinueStatusByWorkspace,
   setThreadAutoContinueEnabled,
+  setWorkspaceAutoContinueEnabled,
   threadResumeLoadingById,
   threadListLoadingByWorkspace,
   threadListPagingByWorkspace,
@@ -1619,7 +1638,9 @@ export function useMainAppLayoutSurfaces({
     turnExecutionSummariesByThread,
     interruptedThreadById,
     autoContinueStatusByThread,
+    autoContinueStatusByWorkspace,
     setThreadAutoContinueEnabled,
+    setWorkspaceAutoContinueEnabled,
     threadResumeLoadingById,
     threadListLoadingByWorkspace,
     threadListPagingByWorkspace,

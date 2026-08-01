@@ -416,7 +416,8 @@ export function useThreadActions({
         if (thread) {
           const localActiveTurnId =
             activeTurnIdByThreadRef.current[threadId] ?? null;
-          if (readOnly && localActiveTurnId && !getThreadReadAuthority(response)) {
+          const threadReadAuthority = getThreadReadAuthority(response);
+          if (readOnly && localActiveTurnId && !threadReadAuthority) {
             onDebug?.({
               id: `${Date.now()}-client-thread-read-legacy-active-skipped`,
               timestamp: Date.now(),
@@ -521,12 +522,32 @@ export function useThreadActions({
             localActiveTurnId: activeTurnIdByThreadRef.current[threadId] ?? null,
             getCustomName,
           });
+          const canTrustHydratedActiveTurn =
+            !readOnly || threadReadAuthority === "execution";
+          const shouldMarkProcessing =
+            hydrationPlan.shouldMarkProcessing && canTrustHydratedActiveTurn;
+          const resumedActiveTurnId = shouldMarkProcessing
+            ? hydrationPlan.resumedActiveTurnId
+            : null;
           if (!hydrationPlan.shouldHydrate) {
             loadedThreadsRef.current[threadId] = true;
             loadedThreadRuntimeKeyRef.current[threadId] = requestRuntimeKey;
             return threadId;
           }
-          if (hydrationPlan.keepLocalProcessing) {
+          if (hydrationPlan.shouldMarkProcessing && !canTrustHydratedActiveTurn) {
+            onDebug?.({
+              id: `${Date.now()}-client-thread-read-stale-active-ignored`,
+              timestamp: Date.now(),
+              source: "client",
+              label: "thread/read stale active ignored",
+              payload: {
+                workspaceId,
+                threadId,
+                readAuthority: threadReadAuthority,
+              },
+            });
+          }
+          if (hydrationPlan.keepLocalProcessing && shouldMarkProcessing) {
             onDebug?.({
               id: `${Date.now()}-client-thread-resume-keep-processing`,
               timestamp: Date.now(),
@@ -552,13 +573,15 @@ export function useThreadActions({
           dispatch({
             type: "markProcessing",
             threadId,
-            isProcessing: hydrationPlan.shouldMarkProcessing,
-            timestamp: hydrationPlan.processingTimestamp,
+            isProcessing: shouldMarkProcessing,
+            timestamp: shouldMarkProcessing
+              ? hydrationPlan.processingTimestamp
+              : Date.now(),
           });
           dispatch({
             type: "setActiveTurnId",
             threadId,
-            turnId: hydrationPlan.resumedActiveTurnId,
+            turnId: resumedActiveTurnId,
           });
           dispatch({
             type: "markReviewing",

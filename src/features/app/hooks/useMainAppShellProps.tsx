@@ -20,7 +20,12 @@ type UseMainAppShellPropsArgs = {
     desktopTopbarLeftNode: ComponentProps<typeof MainAppShell>["appLayoutProps"]["desktopTopbarLeftNode"];
     hasActiveWorkspace: boolean;
     backendMode: "local" | "remote";
+    showRemoteThreadConnectionIndicator: boolean;
     remoteThreadConnectionState: "live" | "polling" | "disconnected";
+    remoteThreadConnectionCopy: Record<
+      "live" | "polling" | "disconnected",
+      { label: string; title: string }
+    >;
   };
 };
 
@@ -31,7 +36,11 @@ export function useMainAppShellProps({
   topbar,
 }: UseMainAppShellPropsArgs) {
   const showThreadConnectionIndicator =
-    topbar.hasActiveWorkspace && topbar.backendMode === "remote";
+    topbar.hasActiveWorkspace &&
+    topbar.backendMode === "remote" &&
+    topbar.showRemoteThreadConnectionIndicator;
+  const connectionCopy =
+    topbar.remoteThreadConnectionCopy[topbar.remoteThreadConnectionState];
   const topbarActionsNode = showThreadConnectionIndicator ? (
     <span
       className={`compact-workspace-live-indicator ${
@@ -41,19 +50,9 @@ export function useMainAppShellProps({
             ? "is-polling"
             : "is-disconnected"
       }`}
-      title={
-        topbar.remoteThreadConnectionState === "live"
-          ? "Receiving live thread events"
-          : topbar.remoteThreadConnectionState === "polling"
-            ? "Connected, syncing thread state by polling"
-            : "Disconnected from backend"
-      }
+      title={connectionCopy.title}
     >
-      {topbar.remoteThreadConnectionState === "live"
-        ? "Live"
-        : topbar.remoteThreadConnectionState === "polling"
-          ? "Polling"
-          : "Disconnected"}
+      {connectionCopy.label}
     </span>
   ) : null;
 

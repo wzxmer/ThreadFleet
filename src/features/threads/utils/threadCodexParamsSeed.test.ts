@@ -47,6 +47,7 @@ describe("threadCodexParamsSeed", () => {
       collaborationModeId: "plan",
       accessMode: "full-access",
       codexArgsOverride: "--profile dev",
+      workflowGateId: null,
     });
   });
 
@@ -459,6 +460,7 @@ describe("threadCodexParamsSeed", () => {
       accessMode: "full-access",
       collaborationModeId: "plan",
       codexArgsOverride: "--profile pending",
+      workflowGateId: null,
     });
 
     expect(
@@ -484,6 +486,7 @@ describe("threadCodexParamsSeed", () => {
       accessMode: "full-access",
       collaborationModeId: "plan",
       codexArgsOverride: "--profile pending",
+      workflowGateId: null,
     });
 
     expect(
@@ -509,6 +512,7 @@ describe("threadCodexParamsSeed", () => {
       accessMode: "current",
       collaborationModeId: "default",
       codexArgsOverride: "--profile composer",
+      workflowGateId: null,
     });
 
     expect(
@@ -527,6 +531,7 @@ describe("threadCodexParamsSeed", () => {
       accessMode: "current",
       collaborationModeId: "default",
       codexArgsOverride: undefined,
+      workflowGateId: null,
     });
 
     expect(
@@ -552,6 +557,7 @@ describe("threadCodexParamsSeed", () => {
       accessMode: "full-access",
       collaborationModeId: null,
       codexArgsOverride: null,
+      workflowGateId: null,
     });
   });
 });

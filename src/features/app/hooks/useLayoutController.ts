@@ -48,22 +48,21 @@ export function resolveEffectivePanelCollapse({
     };
   }
 
-  const sidebarOpenForRightPanel =
+  const sidebarOpenForAutomaticRightPanel =
     (!sidebarCollapsed && !previousAutoSidebarCollapsed) || sidebarRevealRequested;
-  const rightPanelRequirement =
+  const automaticRightPanelRequirement =
     APP_RAIL_WIDTH +
-    (sidebarOpenForRightPanel ? sidebarWidth : 0) +
+    (sidebarOpenForAutomaticRightPanel ? sidebarWidth : 0) +
     rightPanelWidth +
     minMainContentWidth;
-  const rightPanelRevealAllowed =
-    rightPanelRevealRequested && width >= rightPanelRequirement;
+  const rightPanelRevealAllowed = rightPanelRevealRequested;
   const autoRightPanelCollapsed = rightPanelCollapsed
     ? false
     : rightPanelRevealRequested
       ? !rightPanelRevealAllowed
       : previousAutoRightPanelCollapsed
-        ? width < rightPanelRequirement + AUTO_EXPAND_HYSTERESIS
-        : width < rightPanelRequirement - AUTO_COLLAPSE_HYSTERESIS;
+        ? width < automaticRightPanelRequirement + AUTO_EXPAND_HYSTERESIS
+        : width < automaticRightPanelRequirement - AUTO_COLLAPSE_HYSTERESIS;
 
   const rightPanelOpenForSidebarRequirement =
     !rightPanelCollapsed && !autoRightPanelCollapsed;
@@ -79,10 +78,8 @@ export function resolveEffectivePanelCollapse({
       : rightPanelRevealAllowed
         ? false
         : width < sidebarRequirement - AUTO_COLLAPSE_HYSTERESIS;
-  const sidebarRevealAllowed =
-    sidebarRevealRequested &&
-    width >= APP_RAIL_WIDTH + sidebarWidth + minMainContentWidth;
-  const sidebarOverlayOpen = sidebarRevealRequested && !sidebarRevealAllowed;
+  const sidebarRevealAllowed = sidebarRevealRequested;
+  const sidebarOverlayOpen = false;
 
   return {
     sidebarCollapsed:
@@ -208,7 +205,6 @@ export function useLayoutController({
     autoRightPanelCollapsed,
     sidebarOverlayOpen,
   } = panelCollapse;
-
   useEffect(() => {
     previousAutoCollapseRef.current = {
       sidebar: autoSidebarCollapsed,
@@ -259,7 +255,7 @@ export function useLayoutController({
 
   const expandSidebar = useCallback(() => {
     if (!isCompact) {
-      setSidebarRevealRequested(false);
+      setSidebarRevealRequested(true);
     }
     expandSidebarPreference();
   }, [expandSidebarPreference, isCompact]);

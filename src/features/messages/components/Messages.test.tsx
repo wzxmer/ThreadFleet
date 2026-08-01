@@ -156,6 +156,7 @@ describe("Messages", () => {
     expect(container.querySelector(".working-status")?.textContent).toBe(
       "RUNNING",
     );
+    expect(container.querySelector(".working .working-spinner")).toBeNull();
     expect(container.querySelector(".working-text")).toBeNull();
   });
 
@@ -450,6 +451,59 @@ describe("Messages", () => {
 
     rerender(renderMessages("thread-export-b"));
     expect(screen.queryByRole("toolbar", { name: "导出会话正文" })).toBeNull();
+  });
+
+  it("orders message actions as export, edit, quote, and copy", () => {
+    const onResendUserMessage = vi.fn(async () => ({
+      status: "sent" as const,
+    }));
+    const onQuoteMessage = vi.fn();
+
+    render(
+      <Messages
+        items={[
+          {
+            id: "msg-action-order-user",
+            kind: "message",
+            role: "user",
+            text: "Action order",
+            turnId: "turn-action-order",
+          },
+          {
+            id: "msg-action-order-assistant",
+            kind: "message",
+            role: "assistant",
+            text: "Turn failed: Service unavailable",
+            turnId: "turn-action-order",
+          },
+        ]}
+        threadId="thread-action-order"
+        workspaceId="ws-action-order"
+        isThinking={false}
+        openTargets={[]}
+        selectedOpenAppId=""
+        onQuoteMessage={onQuoteMessage}
+        onResendUserMessage={onResendUserMessage}
+      />,
+    );
+
+    const message = screen.getByText("Action order").closest(".message");
+    expect(message).toBeTruthy();
+    const actions = message?.querySelector(".message-actions");
+    expect(actions).toBeTruthy();
+    expect(
+      Array.from(actions?.children ?? []).map((child) =>
+        child.classList.contains("message-reference-control")
+          ? "quote"
+          : child.classList.contains("message-export-button")
+            ? "export"
+            : child.classList.contains("message-edit-button")
+              ? "edit"
+              : child.classList.contains("message-copy-button")
+                ? "copy"
+                : "unknown",
+      ),
+    ).toEqual(["export", "edit", "quote", "copy"]);
   });
 
   it("summarizes child results and opens long output in a detail drawer", async () => {
@@ -1084,6 +1138,69 @@ describe("Messages", () => {
     await waitFor(() => {
       expect(screen.queryByLabelText("编辑消息")).toBeNull();
     });
+  });
+
+  it("follows the composer send shortcut while editing", async () => {
+    const onResendUserMessage = vi.fn(async () => ({
+      status: "sent" as const,
+    }));
+    const items: ConversationItem[] = [
+      {
+        id: "msg-edit-shortcut-user",
+        kind: "message",
+        role: "user",
+        text: "原始消息",
+        turnId: "turn-edit-shortcut",
+      },
+      {
+        id: "msg-edit-shortcut-assistant",
+        kind: "message",
+        role: "assistant",
+        text: "Turn failed: Service unavailable",
+        turnId: "turn-edit-shortcut",
+      },
+    ];
+
+    const { rerender } = render(
+      <Messages
+        items={items}
+        threadId="thread-edit-shortcut"
+        workspaceId="ws-1"
+        isThinking={false}
+        openTargets={[]}
+        selectedOpenAppId=""
+        composerSendShortcut="ctrl-enter"
+        onResendUserMessage={onResendUserMessage}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "编辑并重新发送" }));
+    const textarea = screen.getByLabelText("编辑消息");
+    fireEvent.change(textarea, { target: { value: "Ctrl+Enter 发送" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(onResendUserMessage).not.toHaveBeenCalled();
+    fireEvent.keyDown(textarea, { key: "Enter", ctrlKey: true });
+    await waitFor(() => expect(onResendUserMessage).toHaveBeenCalledTimes(1));
+
+    rerender(
+      <Messages
+        items={items}
+        threadId="thread-edit-shortcut-enter"
+        workspaceId="ws-1"
+        isThinking={false}
+        openTargets={[]}
+        selectedOpenAppId=""
+        composerSendShortcut="enter"
+        onResendUserMessage={onResendUserMessage}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "编辑并重新发送" }));
+    const enterTextarea = screen.getByLabelText("编辑消息");
+    fireEvent.change(enterTextarea, { target: { value: "Enter 发送" } });
+    fireEvent.keyDown(enterTextarea, { key: "Enter", ctrlKey: true });
+    expect(onResendUserMessage).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(enterTextarea, { key: "Enter" });
+    await waitFor(() => expect(onResendUserMessage).toHaveBeenCalledTimes(2));
   });
 
   it("keeps the edited turn mounted while rollback refresh is pending", async () => {
@@ -2163,15 +2280,11 @@ describe("Messages", () => {
         />,
       );
 
-      expect(
-        screen.getByText("New message will be fetched in 12 seconds"),
-      ).toBeTruthy();
+      expect(screen.getByText("新消息将在 12 秒后同步")).toBeTruthy();
       act(() => {
         vi.advanceTimersByTime(1_000);
       });
-      expect(
-        screen.getByText("New message will be fetched in 11 seconds"),
-      ).toBeTruthy();
+      expect(screen.getByText("新消息将在 11 秒后同步")).toBeTruthy();
     } finally {
       vi.useRealTimers();
     }
@@ -2653,6 +2766,121 @@ describe("Messages", () => {
       expect(screen.queryByText("git diff")).toBeNull();
     });
     expect(screen.getByText("Done with first command.")).toBeTruthy();
+  });
+
+  it("keeps late process rows expanded after auto-collapse is turned off", async () => {
+    const firstItems: ConversationItem[] = [
+      {
+        id: "tool-expand-late-1",
+        kind: "tool",
+        toolType: "commandExecution",
+        title: "Command: git status",
+        detail: "/repo",
+        status: "completed",
+        output: "",
+      },
+      {
+        id: "assistant-expand-late",
+        kind: "message",
+        role: "assistant",
+        text: "Final result is ready.",
+      },
+    ];
+
+    const { rerender } = render(
+      <Messages
+        items={firstItems}
+        threadId="thread-expand-late"
+        workspaceId="ws-1"
+        isThinking={false}
+        openTargets={[]}
+        selectedOpenAppId=""
+        defaultToolGroupsCollapsed
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText("git status")).toBeNull();
+    });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "工具调用自动收起：开" }),
+    );
+    expect(screen.getByText("git status")).toBeTruthy();
+
+    rerender(
+      <Messages
+        items={[
+          firstItems[0],
+          {
+            id: "tool-expand-late-2",
+            kind: "tool",
+            toolType: "commandExecution",
+            title: "Command: git diff",
+            detail: "/repo",
+            status: "completed",
+            output: "",
+          },
+          firstItems[1],
+        ]}
+        threadId="thread-expand-late"
+        workspaceId="ws-1"
+        isThinking={false}
+        openTargets={[]}
+        selectedOpenAppId=""
+        defaultToolGroupsCollapsed
+      />,
+    );
+
+    expect(screen.getByText("git status")).toBeTruthy();
+    expect(screen.getByText("git diff")).toBeTruthy();
+  });
+
+  it("reinitializes automatic tool collapsing when switching threads", async () => {
+    const renderThread = (threadId: string, toolTitle: string, finalText: string) => (
+      <Messages
+        items={[
+          {
+            id: "shared-tool",
+            kind: "tool",
+            toolType: "commandExecution",
+            title: `Command: ${toolTitle}`,
+            detail: "/repo",
+            status: "completed",
+            output: "",
+          },
+          {
+            id: "shared-final",
+            kind: "message",
+            role: "assistant",
+            phase: "final_answer",
+            text: finalText,
+          },
+        ]}
+        threadId={threadId}
+        workspaceId="ws-1"
+        isThinking={false}
+        openTargets={[]}
+        selectedOpenAppId=""
+        defaultToolGroupsCollapsed
+      />
+    );
+
+    const { rerender } = render(
+      renderThread("thread-a", "git status", "Thread A final"),
+    );
+    await waitFor(() => {
+      expect(screen.queryByText("git status")).toBeNull();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "展开过程消息" }));
+    expect(screen.getByText("git status")).toBeTruthy();
+
+    rerender(renderThread("thread-b", "git diff", "Thread B final"));
+
+    await waitFor(() => {
+      expect(screen.queryByText("git diff")).toBeNull();
+    });
+    expect(screen.getByText("Thread B final")).toBeTruthy();
   });
 
   it("collapses tool groups before a final assistant message", async () => {

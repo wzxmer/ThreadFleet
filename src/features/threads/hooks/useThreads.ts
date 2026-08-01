@@ -258,7 +258,10 @@ export function useThreads({
   );
   const {
     statusByThread: autoContinueStatusByThread,
+    statusByWorkspace: autoContinueStatusByWorkspace,
     setEnabled: setThreadAutoContinueEnabled,
+    setWorkspaceEnabled: setWorkspaceAutoContinueEnabled,
+    promoteWorkspaceToThread: promoteWorkspaceAutoContinueToThread,
     onTurnStarted: handleAutoContinueTurnStarted,
     onTurnCompleted: handleAutoContinueTurnCompleted,
     onTurnError: handleAutoContinueTurnError,
@@ -1256,9 +1259,17 @@ export function useThreads({
       if (!runtimeReady) {
         return null;
       }
-      return startThreadForWorkspaceInternal(workspaceId, options);
+      const threadId = await startThreadForWorkspaceInternal(workspaceId, options);
+      if (threadId) {
+        promoteWorkspaceAutoContinueToThread(workspaceId, threadId);
+      }
+      return threadId;
     },
-    [ensureWorkspaceRuntimeCodexArgsBestEffort, startThreadForWorkspaceInternal],
+    [
+      ensureWorkspaceRuntimeCodexArgsBestEffort,
+      promoteWorkspaceAutoContinueToThread,
+      startThreadForWorkspaceInternal,
+    ],
   );
 
   const startThread = useCallback(async () => {
@@ -1547,12 +1558,14 @@ export function useThreads({
     planByThread: state.planByThread,
     interruptedThreadById: state.interruptedThreadById,
     autoContinueStatusByThread,
+    autoContinueStatusByWorkspace,
     lastAgentMessageByThread: state.lastAgentMessageByThread,
     pinnedThreadsVersion,
     refreshAccountRateLimits,
     refreshAccountInfo,
     interruptTurn,
     setThreadAutoContinueEnabled,
+    setWorkspaceAutoContinueEnabled,
     retryEditedUserMessage,
     removeThread,
     pinThread,

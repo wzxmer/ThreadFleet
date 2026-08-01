@@ -410,6 +410,7 @@ fn build_read_thread_metadata_params(thread_id: &str) -> Value {
 
 const MAX_ROLLOUT_TOOL_ARGUMENT_CHARS: usize = 200_000;
 const MAX_ROLLOUT_TOOL_OUTPUT_CHARS: usize = 20_000;
+const MAX_ROLLOUT_MESSAGE_CHARS: usize = 20_000;
 
 #[derive(Default)]
 struct RolloutThreadEnrichment {
@@ -428,6 +429,7 @@ enum RolloutSequenceItem {
         id: Option<String>,
         item_type: &'static str,
     },
+    AgentMessage(Value),
     DynamicTool(Value),
 }
 
@@ -526,6 +528,17 @@ fn rollout_tool_content_items(output: Option<&Value>) -> Vec<Value> {
         .collect()
 }
 
+fn rollout_message_text(payload: &Value) -> String {
+    payload
+        .get("content")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|item| item.get("text").and_then(Value::as_str))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn collect_rollout_enrichment_line(
     line: &str,
     current_turn_id: &mut Option<String>,
@@ -559,19 +572,44 @@ fn collect_rollout_enrichment_line(
                         turn.message_timestamps
                             .push((role.to_string(), timestamp.to_string()));
                     }
-                    let item_type = match payload.get("role").and_then(Value::as_str) {
-                        Some("user") => Some("userMessage"),
-                        Some("assistant") => Some("agentMessage"),
-                        _ => None,
-                    };
-                    if let Some(item_type) = item_type {
-                        turn.sequence.push(RolloutSequenceItem::Anchor {
-                            id: payload
+                    match payload.get("role").and_then(Value::as_str) {
+                        Some("user") => {
+                            turn.sequence.push(RolloutSequenceItem::Anchor {
+                                id: payload
+                                    .get("id")
+                                    .and_then(Value::as_str)
+                                    .map(str::to_string),
+                                item_type: "userMessage",
+                            });
+                        }
+                        Some("assistant") => {
+                            let id = payload
                                 .get("id")
                                 .and_then(Value::as_str)
-                                .map(str::to_string),
-                            item_type,
-                        });
+                                .map(str::to_string);
+                            if payload.get("phase").and_then(Value::as_str) == Some("final_answer")
+                            {
+                                let Some(id) = id else {
+                                    return;
+                                };
+                                turn.sequence.push(RolloutSequenceItem::AgentMessage(json!({
+                                    "type": "agentMessage",
+                                    "id": id,
+                                    "text": truncate_rollout_text(
+                                        &rollout_message_text(payload),
+                                        MAX_ROLLOUT_MESSAGE_CHARS,
+                                    ),
+                                    "phase": "final_answer",
+                                    "createdAt": value.get("timestamp").cloned().unwrap_or(Value::Null),
+                                })));
+                            } else {
+                                turn.sequence.push(RolloutSequenceItem::Anchor {
+                                    id,
+                                    item_type: "agentMessage",
+                                });
+                            }
+                        }
+                        _ => {}
                     }
                 }
                 Some("reasoning") => {
@@ -718,6 +756,27 @@ fn apply_rollout_enrichment(response: &mut Value, enrichment: &RolloutThreadEnri
                     if existing_ids.insert(id.to_string()) {
                         items.insert(cursor.min(items.len()), item.clone());
                         cursor += 1;
+                    }
+                }
+                RolloutSequenceItem::AgentMessage(item) => {
+                    let Some(id) = item.get("id").and_then(Value::as_str) else {
+                        continue;
+                    };
+                    if existing_ids.insert(id.to_string()) {
+                        let is_final_answer =
+                            item.get("phase").and_then(Value::as_str) == Some("final_answer");
+                        let insert_at = if is_final_answer {
+                            items.len()
+                        } else {
+                            cursor.min(items.len())
+                        };
+                        items.insert(insert_at, item.clone());
+                        cursor = insert_at + 1;
+                    } else if let Some(index) = items
+                        .iter()
+                        .position(|existing| existing.get("id").and_then(Value::as_str) == Some(id))
+                    {
+                        cursor = cursor.max(index + 1);
                     }
                 }
             }
@@ -1088,6 +1147,39 @@ fn build_native_thread_history_turns(
     Ok(turns)
 }
 
+fn native_history_page_misses_latest_terminal_agent_message(response: &Value) -> bool {
+    let Some(latest_turn) = response
+        .pointer("/result/thread/turns")
+        .and_then(Value::as_array)
+        .and_then(|turns| turns.last())
+    else {
+        return false;
+    };
+    let Some(status) = latest_turn
+        .get("status")
+        .and_then(Value::as_str)
+        .map(|value| value.to_ascii_lowercase())
+    else {
+        return false;
+    };
+    let is_terminal = matches!(
+        status.as_str(),
+        "completed" | "complete" | "failed" | "error" | "interrupted" | "cancelled"
+    );
+    if !is_terminal {
+        return false;
+    }
+    !latest_turn
+        .get("items")
+        .and_then(Value::as_array)
+        .is_some_and(|items| {
+            items.iter().any(|item| {
+                item.get("type").and_then(Value::as_str) == Some("agentMessage")
+                    && item.get("phase").and_then(Value::as_str) == Some("final_answer")
+            })
+        })
+}
+
 fn paginate_native_thread_history_response(
     mut metadata_response: Value,
     items_response: &Value,
@@ -1406,6 +1498,13 @@ pub(crate) async fn read_thread_page_with_session_core(
         )
         .await?
         {
+            if cursor.is_none()
+                && native_history_page_misses_latest_terminal_agent_message(&response)
+            {
+                let response =
+                    read_thread_with_session_core(session, workspace_id, thread_id).await?;
+                return paginate_thread_history_response(response, None, item_limit, byte_limit);
+            }
             return Ok(response);
         }
     }
@@ -3095,6 +3194,142 @@ base_url = "{base_url}"
         assert_eq!(turns[1]["id"], json!("turn-2"));
         assert_eq!(turns[1]["status"], json!("inProgress"));
         assert_eq!(turns[1]["items"], json!([]));
+    }
+
+    #[test]
+    fn native_history_page_detects_a_terminal_latest_turn_without_an_agent_message() {
+        let page = paginate_native_thread_history_response(
+            json!({ "result": { "thread": { "id": "thread-1" } } }),
+            &json!({ "result": { "data": (0..50).map(|index| json!({
+                "turnId": "turn-1",
+                "item": {
+                    "type": "dynamicToolCall",
+                    "id": format!("tool-{index}"),
+                    "tool": "exec"
+                }
+            })).collect::<Vec<_>>(), "nextCursor": null } }),
+            &json!({ "result": { "data": [{
+                "id": "turn-1", "status": "completed", "items": []
+            }] } }),
+            None,
+            50,
+            THREAD_HISTORY_PAGE_MAX_BYTES,
+        )
+        .expect("native page");
+
+        assert!(native_history_page_misses_latest_terminal_agent_message(
+            &page
+        ));
+    }
+
+    #[test]
+    fn native_history_page_detects_a_terminal_latest_turn_without_a_final_answer() {
+        let page = paginate_native_thread_history_response(
+            json!({ "result": { "thread": { "id": "thread-1" } } }),
+            &json!({ "result": { "data": [{
+                "turnId": "turn-1",
+                "item": {
+                    "type": "agentMessage",
+                    "id": "commentary-1",
+                    "phase": "commentary",
+                    "text": "Still working"
+                }
+            }], "nextCursor": null } }),
+            &json!({ "result": { "data": [{
+                "id": "turn-1", "status": "completed", "items": []
+            }] } }),
+            None,
+            50,
+            THREAD_HISTORY_PAGE_MAX_BYTES,
+        )
+        .expect("native page");
+
+        assert!(native_history_page_misses_latest_terminal_agent_message(
+            &page
+        ));
+    }
+
+    #[test]
+    fn rollout_enrichment_restores_a_missing_final_answer() {
+        let mut current_turn_id = None;
+        let mut enrichment = RolloutThreadEnrichment::default();
+        for line in [
+            r#"{"type":"turn_context","payload":{"turn_id":"turn-1"}}"#,
+            r#"{"timestamp":"2026-08-01T19:43:47.200Z","type":"response_item","payload":{"type":"message","id":"final-1","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"Recovered final answer"}]}}"#,
+        ] {
+            collect_rollout_enrichment_line(line, &mut current_turn_id, &mut enrichment);
+        }
+        let mut response = json!({
+            "result": {
+                "thread": {
+                    "turns": [{
+                        "id": "turn-1",
+                        "items": [{
+                            "type": "dynamicToolCall",
+                            "id": "tool-1",
+                            "tool": "exec"
+                        }]
+                    }]
+                }
+            }
+        });
+
+        apply_rollout_enrichment(&mut response, &enrichment);
+
+        let items = response["result"]["thread"]["turns"][0]["items"]
+            .as_array()
+            .expect("thread items");
+        assert_eq!(
+            items.last().and_then(|item| item.get("id")),
+            Some(&json!("final-1"))
+        );
+        assert_eq!(
+            items.last().and_then(|item| item.get("phase")),
+            Some(&json!("final_answer"))
+        );
+        assert_eq!(
+            items.last().and_then(|item| item.get("text")),
+            Some(&json!("Recovered final answer"))
+        );
+    }
+
+    #[test]
+    fn legacy_history_page_keeps_the_latest_final_answer_after_many_tool_items() {
+        let mut turn_items = (0..50)
+            .map(|index| {
+                json!({
+                    "type": "dynamicToolCall",
+                    "id": format!("tool-{index}"),
+                    "tool": "exec"
+                })
+            })
+            .collect::<Vec<_>>();
+        turn_items.push(json!({
+            "type": "agentMessage",
+            "id": "final-1",
+            "phase": "final_answer",
+            "text": "Done"
+        }));
+        let response = json!({ "result": { "thread": {
+            "id": "thread-1",
+            "turns": [{
+                "id": "turn-1",
+                "status": "completed",
+                "items": turn_items
+            }]
+        } } });
+
+        let page =
+            paginate_thread_history_response(response, None, Some(50), None).expect("latest page");
+        let items = page["result"]["thread"]["turns"][0]["items"]
+            .as_array()
+            .expect("turn items");
+
+        assert_eq!(items.len(), 50);
+        assert_eq!(
+            items.last().and_then(|item| item.get("id")),
+            Some(&json!("final-1"))
+        );
     }
 
     #[test]

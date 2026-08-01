@@ -665,6 +665,16 @@ export function useThreadMessaging({
           Boolean(options?.replaceMessageId),
         );
       }
+      const removeStartOptimisticMessage = () => {
+        if (options?.replaceMessageId) {
+          return;
+        }
+        dispatch({
+          type: "removeItem",
+          threadId,
+          itemId: optimisticMessage.id,
+        });
+      };
       let preparedAttachments: {
         text: string;
         images: string[];
@@ -684,6 +694,7 @@ export function useThreadMessaging({
           );
           safeMessageActivity();
           clearPendingTurnStart(pendingTurnStart);
+          removeStartOptimisticMessage();
           return { status: "blocked" };
         }
       } else {
@@ -712,6 +723,7 @@ export function useThreadMessaging({
           );
           safeMessageActivity();
           clearPendingTurnStart(pendingTurnStart);
+          removeStartOptimisticMessage();
           return { status: "blocked" };
         }
       }
@@ -1097,6 +1109,7 @@ export function useThreadMessaging({
             setActiveTurnId(threadId, null);
             pushThreadErrorMessage(threadId, `Turn failed to start: ${rpcError}`);
             safeMessageActivity();
+            removeStartOptimisticMessage();
             return { status: "blocked" };
           }
           if (isStaleSteerTurnError(rpcError)) {
@@ -1137,6 +1150,7 @@ export function useThreadMessaging({
           setActiveTurnId(threadId, null);
           pushThreadErrorMessage(threadId, "Turn failed to start.");
           safeMessageActivity();
+          removeStartOptimisticMessage();
           return { status: "blocked" };
         }
         dispatch({
@@ -1156,6 +1170,7 @@ export function useThreadMessaging({
         if (requestMode !== "steer") {
           markProcessing(threadId, false);
           setActiveTurnId(threadId, null);
+          removeStartOptimisticMessage();
         } else if (isStaleSteerTurnError(errorMessage)) {
           markProcessing(threadId, false);
           setActiveTurnId(threadId, null);

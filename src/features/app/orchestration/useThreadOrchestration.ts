@@ -96,6 +96,7 @@ type UseThreadUiOrchestrationParams = {
   selectedServiceTier: ServiceTier | null | undefined;
   selectedCollaborationModeId: string | null;
   selectedCodexArgsOverride?: string | null;
+  selectedWorkflowGateId?: string | null;
   pendingNewThreadSeedRef: MutableRefObject<PendingNewThreadSeed | null>;
   runWithDraftStart: (
     runner: () => Promise<void>,
@@ -219,6 +220,7 @@ export function useThreadCodexSyncOrchestration({
 
     seededThreadParamsRef.current.add(key);
     const pendingSeed = pendingNewThreadSeedRef.current;
+    const noThreadStored = getThreadCodexParams(workspaceId, NO_THREAD_SCOPE_SUFFIX);
     const resolved = resolveThreadCodexState({
       workspaceId,
       threadId,
@@ -226,7 +228,7 @@ export function useThreadCodexSyncOrchestration({
       lastComposerModelId: appSettings.lastComposerModelId,
       lastComposerReasoningEffort: appSettings.lastComposerReasoningEffort,
       stored,
-      noThreadStored: getThreadCodexParams(workspaceId, NO_THREAD_SCOPE_SUFFIX),
+      noThreadStored,
       pendingSeed,
     });
     patchThreadCodexParams(
@@ -242,6 +244,7 @@ export function useThreadCodexSyncOrchestration({
           selectedCodexArgsOverride === undefined
             ? undefined
             : selectedCodexArgsOverride,
+        workflowGateId: noThreadStored?.workflowGateId ?? null,
         pendingSeed,
       }),
     );
@@ -408,6 +411,7 @@ export function useThreadUiOrchestration({
   selectedServiceTier,
   selectedCollaborationModeId,
   selectedCodexArgsOverride,
+  selectedWorkflowGateId,
   pendingNewThreadSeedRef,
   runWithDraftStart,
   handleComposerSend,
@@ -430,6 +434,7 @@ export function useThreadUiOrchestration({
       selectedCollaborationModeId,
       accessMode,
       codexArgsOverride: selectedCodexArgsOverride ?? null,
+      workflowGateId: selectedWorkflowGateId ?? null,
     });
   }, [
     accessMode,
@@ -439,6 +444,7 @@ export function useThreadUiOrchestration({
     selectedServiceTier,
     selectedCollaborationModeId,
     selectedCodexArgsOverride,
+    selectedWorkflowGateId,
   ]);
 
   const handleComposerSendWithDraftStart = useCallback(

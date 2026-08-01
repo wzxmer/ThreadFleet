@@ -99,6 +99,10 @@ import {
 import { useAppShellOrchestration } from "@app/orchestration/useLayoutOrchestration";
 import { normalizeCodexArgsInput } from "@/utils/codexArgsInput";
 import {
+  NO_THREAD_SCOPE_SUFFIX,
+  resolveWorkspaceWorkflowGateId,
+} from "@threads/utils/threadCodexParamsSeed";
+import {
   applyRefreshedCodexProviderModels,
   resolveCodexProviderModel,
   resolveCodexProviderBaseUrl,
@@ -370,7 +374,11 @@ export default function MainApp() {
   });
   const getWorkflowGateId = useCallback(
     (workspaceId: string, threadId: string) =>
-      getThreadCodexParams(workspaceId, threadId)?.workflowGateId ?? null,
+      resolveWorkspaceWorkflowGateId({
+        workspaceId,
+        threadId,
+        getThreadCodexParams,
+      }),
     [getThreadCodexParams],
   );
   const {
@@ -765,10 +773,12 @@ export default function MainApp() {
     planByThread,
     interruptedThreadById,
     autoContinueStatusByThread,
+    autoContinueStatusByWorkspace,
     lastAgentMessageByThread,
     pinnedThreadsVersion,
     interruptTurn,
     setThreadAutoContinueEnabled,
+    setWorkspaceAutoContinueEnabled,
     retryEditedUserMessage,
     removeThread,
     pinThread,
@@ -854,17 +864,25 @@ export default function MainApp() {
     threadSortKey: threadListSortKey,
     onThreadCodexMetadataDetected: handleThreadCodexMetadataDetected,
   });
-  const selectedWorkflowGateId = projectActiveWorkspace && activeThreadId
-    ? getWorkflowGateId(projectActiveWorkspace.id, activeThreadId)
+  const selectedWorkflowGateId = projectActiveWorkspace
+    ? resolveWorkspaceWorkflowGateId({
+        workspaceId: projectActiveWorkspace.id,
+        threadId: activeThreadId,
+        getThreadCodexParams,
+      })
     : null;
   const handleSelectWorkflowGateId = useCallback(
     (workflowId: string | null) => {
-      if (!projectActiveWorkspace || !activeThreadId) {
+      if (!projectActiveWorkspace) {
         return;
       }
-      patchThreadCodexParams(projectActiveWorkspace.id, activeThreadId, {
+      patchThreadCodexParams(
+        projectActiveWorkspace.id,
+        activeThreadId ?? NO_THREAD_SCOPE_SUFFIX,
+        {
         workflowGateId: workflowId,
-      });
+        },
+      );
     },
     [activeThreadId, patchThreadCodexParams, projectActiveWorkspace],
   );
@@ -2067,6 +2085,7 @@ export default function MainApp() {
     selectedServiceTier,
     selectedCollaborationModeId,
     selectedCodexArgsOverride,
+    selectedWorkflowGateId,
     pendingNewThreadSeedRef,
     runWithDraftStart,
     handleComposerSend,
@@ -2323,6 +2342,7 @@ export default function MainApp() {
     ((isPhone && activeTab === "codex") || (isTablet && tabletTab === "codex"));
   const showMobilePollingFetchStatus =
     showCompactCodexThreadActions &&
+    activeThreadNeedsBackgroundRefresh &&
     Boolean(activeWorkspace?.connected) &&
     appSettings.backendMode === "remote" &&
     remoteThreadConnectionState === "polling";
@@ -2431,7 +2451,9 @@ export default function MainApp() {
     turnExecutionSummariesByThread,
     interruptedThreadById,
     autoContinueStatusByThread,
+    autoContinueStatusByWorkspace,
     setThreadAutoContinueEnabled,
+    setWorkspaceAutoContinueEnabled,
     threadResumeLoadingById,
     threadListLoadingByWorkspace,
     threadListPagingByWorkspace,
@@ -2567,7 +2589,7 @@ export default function MainApp() {
     onSelectCodexArgsOverride: handleSelectCodexArgsOverride,
     selectedWorkflowGateId,
     onSelectWorkflowGateId: handleSelectWorkflowGateId,
-    onVerifyWorkflowGate: projectActiveWorkspace && activeThreadId
+    onVerifyWorkflowGate: projectActiveWorkspace
       ? handleVerifyWorkflowGate
       : undefined,
     accessMode,
@@ -2707,6 +2729,10 @@ export default function MainApp() {
     !activeWorkspace?.connected
       ? "disconnected"
       : remoteThreadConnectionState;
+  const showRemoteThreadConnectionIndicator =
+    Boolean(activeWorkspace) &&
+    (compactThreadConnectionState === "disconnected" ||
+      activeThreadNeedsBackgroundRefresh);
   const mainAppShellProps = useMainAppShellProps({
     shell: {
       appClassName,
@@ -2775,7 +2801,22 @@ export default function MainApp() {
       desktopTopbarLeftNode,
       hasActiveWorkspace: Boolean(activeWorkspace),
       backendMode: appSettings.backendMode,
+      showRemoteThreadConnectionIndicator,
       remoteThreadConnectionState: compactThreadConnectionState,
+      remoteThreadConnectionCopy: {
+        live: {
+          label: t("threadConnection.liveLabel"),
+          title: t("threadConnection.liveTitle"),
+        },
+        polling: {
+          label: t("threadConnection.pollingLabel"),
+          title: t("threadConnection.pollingTitle"),
+        },
+        disconnected: {
+          label: t("threadConnection.disconnectedLabel"),
+          title: t("threadConnection.disconnectedTitle"),
+        },
+      },
     },
   });
 

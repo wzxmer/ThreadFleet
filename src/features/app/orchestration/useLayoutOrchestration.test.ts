@@ -5,8 +5,10 @@ import type { AppSettings } from "@/types";
 import { useAppShellOrchestration } from "./useLayoutOrchestration";
 
 const isWindowsPlatformMock = vi.hoisted(() => vi.fn());
+const isMacPlatformMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@utils/platformPaths", () => ({
+  isMacPlatform: isMacPlatformMock,
   isWindowsPlatform: isWindowsPlatformMock,
 }));
 
@@ -35,6 +37,7 @@ const appSettings = {
 
 describe("useAppShellOrchestration", () => {
   beforeEach(() => {
+    isMacPlatformMock.mockReturnValue(false);
     isWindowsPlatformMock.mockReturnValue(false);
   });
 
@@ -119,6 +122,39 @@ describe("useAppShellOrchestration", () => {
     expect(appStyle["--window-drag-strip-right"]).toContain(
       "--window-caption-width",
     );
+  });
+
+  it("reserves the macOS traffic-light area above the desktop rail", () => {
+    isMacPlatformMock.mockReturnValue(true);
+    const { result } = renderHook(() =>
+      useAppShellOrchestration({
+        isCompact: false,
+        isPhone: false,
+        isTablet: true,
+        tabletProjectsOpen: false,
+        sidebarOverlayOpen: false,
+        sidebarCollapsed: false,
+        rightPanelCollapsed: false,
+        shouldReduceTransparency: false,
+        isWorkspaceDropActive: false,
+        centerMode: "chat",
+        selectedDiffPath: null,
+        showComposer: true,
+        activeThreadId: "thread-1",
+        sidebarWidth: 320,
+        rightPanelWidth: 360,
+        chatDiffSplitPositionPercent: 50,
+        planPanelHeight: 240,
+        terminalPanelHeight: 240,
+        debugPanelHeight: 240,
+        appSettings,
+      }),
+    );
+
+    const appStyle = result.current.appStyle as Record<string, string>;
+
+    expect(result.current.appClassName).toContain("is-macos");
+    expect(appStyle["--macos-window-controls-safe-top"]).toBe("44px");
   });
 
   it("preserves a usable Windows drag strip in compact windows", () => {
@@ -226,4 +262,5 @@ describe("useAppShellOrchestration", () => {
     expect(appStyle["--sidebar-width"]).toBe("0px");
     expect(appStyle["--sidebar-overlay-width"]).toBe("320px");
   });
+
 });

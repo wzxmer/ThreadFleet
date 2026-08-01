@@ -1050,6 +1050,91 @@ describe("useThreadActions", () => {
     });
   });
 
+  it("does not mark read-only history active from a stale empty latest turn", async () => {
+    vi.mocked(readThreadPage).mockResolvedValue({
+      codexMonitorReadAuthority: "history-no-active-execution",
+      codexMonitorHistoryPage: {
+        snapshotId: "snapshot-1",
+        nextCursor: null,
+        hasMore: false,
+      },
+      result: {
+        thread: {
+          id: "thread-ended",
+          turns: [
+            { id: "turn-complete", status: "completed", items: [{ id: "item-1" }] },
+            { id: "turn-stale", status: "inProgress", items: [] },
+          ],
+        },
+      },
+    });
+    vi.mocked(buildItemsFromThread).mockReturnValue([]);
+    vi.mocked(isReviewingFromThread).mockReturnValue(false);
+
+    const { result, dispatch } = renderActions();
+
+    await act(async () => {
+      await result.current.readThreadForWorkspace("ws-1", "thread-ended", true, false);
+    });
+
+    expect(readThread).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "markProcessing",
+        threadId: "thread-ended",
+        isProcessing: true,
+      }),
+    );
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "markProcessing",
+      threadId: "thread-ended",
+      isProcessing: false,
+      timestamp: expect.any(Number),
+    });
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "setActiveTurnId",
+      threadId: "thread-ended",
+      turnId: null,
+    });
+  });
+
+  it("keeps read-only execution-authority active turns processing", async () => {
+    vi.mocked(readThreadPage).mockResolvedValue({
+      codexMonitorReadAuthority: "execution",
+      codexMonitorHistoryPage: {
+        snapshotId: "snapshot-1",
+        nextCursor: null,
+        hasMore: false,
+      },
+      result: {
+        thread: {
+          id: "thread-live",
+          turns: [{ id: "turn-live", status: "inProgress", items: [] }],
+        },
+      },
+    });
+    vi.mocked(buildItemsFromThread).mockReturnValue([]);
+    vi.mocked(isReviewingFromThread).mockReturnValue(false);
+
+    const { result, dispatch } = renderActions();
+
+    await act(async () => {
+      await result.current.readThreadForWorkspace("ws-1", "thread-live", true, false);
+    });
+
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "markProcessing",
+      threadId: "thread-live",
+      isProcessing: true,
+      timestamp: expect.any(Number),
+    });
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "setActiveTurnId",
+      threadId: "thread-live",
+      turnId: "turn-live",
+    });
+  });
+
   it("does not overwrite live token usage during async restoration", async () => {
     let resolveUsage!: (value: Record<string, unknown> | null) => void;
     vi.mocked(getThreadTokenUsage).mockReturnValue(

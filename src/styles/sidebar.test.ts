@@ -61,6 +61,9 @@ describe("sidebar interaction styles", () => {
       /\.app\.layout-tablet\s*\{[^}]*grid-template-columns:\s*var\(--tablet-nav-width,\s*52px\) var\(--tablet-sidebar-effective-width,\s*0px\) minmax\(0,\s*1fr\);/s,
     );
     expect(tabletCss).toMatch(
+      /\.tablet-nav\s*\{[^}]*padding:\s*calc\(8px \+ var\(--macos-window-controls-safe-top, 0px\)\) 7px 10px;/s,
+    );
+    expect(tabletCss).toMatch(
       /\.app\.layout-tablet\.settings-surface-open\s*\{[^}]*grid-template-columns:\s*var\(--tablet-nav-width,\s*52px\) minmax\(0,\s*1fr\);/s,
     );
     expect(tabletCss).toMatch(

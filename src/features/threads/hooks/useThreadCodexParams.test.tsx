@@ -100,7 +100,7 @@ describe("useThreadCodexParams", () => {
     );
     expect(legacy?.serviceTier).toBeUndefined();
     expect(legacy?.codexArgsOverride).toBeUndefined();
-    expect(legacy?.workflowGateId).toBeNull();
+    expect(legacy?.workflowGateId).toBeUndefined();
   });
 
   it("syncs from storage events", async () => {

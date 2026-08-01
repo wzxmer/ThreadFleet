@@ -814,6 +814,67 @@ describe("useThreadMessaging telemetry", () => {
     });
   });
 
+  it("removes the optimistic specified-thread message when turn/start rejects", async () => {
+    vi.mocked(sendUserMessageService).mockRejectedValueOnce(
+      new Error("transport down"),
+    );
+    const dispatch = vi.fn();
+    const pushThreadErrorMessage = vi.fn();
+    const { result } = renderHook(() =>
+      useThreadMessaging({
+        activeWorkspace: workspace,
+        activeThreadId: "thread-1",
+        accessMode: "current",
+        model: null,
+        effort: null,
+        collaborationMode: null,
+        reviewDeliveryMode: "inline",
+        steerEnabled: false,
+        customPrompts: [],
+        threadStatusById: {},
+        activeTurnIdByThread: {},
+        rateLimitsByWorkspace: {},
+        pendingInterruptsRef: { current: new Set<string>() },
+        dispatch,
+        getCustomName: vi.fn(() => undefined),
+        markProcessing: vi.fn(),
+        markReviewing: vi.fn(),
+        setActiveTurnId: vi.fn(),
+        recordThreadActivity: vi.fn(),
+        safeMessageActivity: vi.fn(),
+        onDebug: vi.fn(),
+        pushThreadErrorMessage,
+        ensureThreadForActiveWorkspace: vi.fn(async () => "thread-1"),
+        ensureThreadForWorkspace: vi.fn(async () => "thread-1"),
+        refreshThread: vi.fn(async () => null),
+        forkThreadForWorkspace: vi.fn(async () => null),
+        updateThreadParent: vi.fn(),
+      }),
+    );
+
+    let sendResult;
+    await act(async () => {
+      sendResult = await result.current.sendUserMessageToThread(
+        workspace,
+        "thread-1",
+        "will fail",
+        [],
+      );
+    });
+
+    const optimisticAction = dispatch.mock.calls
+      .map(([action]) => action)
+      .find((action) => action.type === "upsertItem");
+    expect(sendResult).toEqual({ status: "blocked" });
+    expect(optimisticAction).toBeDefined();
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "removeItem",
+      threadId: "thread-1",
+      itemId: optimisticAction?.item.id,
+    });
+    expect(pushThreadErrorMessage).toHaveBeenCalledWith("thread-1", "transport down");
+  });
+
   it("reuses the computer-control decision id when steering the same active turn", async () => {
     const useMessaging = (active: boolean) =>
       useThreadMessaging({
@@ -2155,6 +2216,7 @@ describe("useThreadMessaging telemetry", () => {
 
   it("blocks unsupported binary attachments instead of dropping them silently", async () => {
     const pushThreadErrorMessage = vi.fn();
+    const dispatch = vi.fn();
     const { result } = renderHook(() =>
       useThreadMessaging({
         activeWorkspace: workspace,
@@ -2170,7 +2232,7 @@ describe("useThreadMessaging telemetry", () => {
         activeTurnIdByThread: {},
         rateLimitsByWorkspace: {},
         pendingInterruptsRef: { current: new Set<string>() },
-        dispatch: vi.fn(),
+        dispatch,
         getCustomName: vi.fn(() => undefined),
         markProcessing: vi.fn(),
         markReviewing: vi.fn(),
@@ -2202,6 +2264,15 @@ describe("useThreadMessaging telemetry", () => {
       "thread-1",
       expect.stringContaining("Unsupported attachment"),
     );
+    const optimisticAction = dispatch.mock.calls
+      .map(([action]) => action)
+      .find((action) => action.type === "upsertItem");
+    expect(optimisticAction).toBeDefined();
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "removeItem",
+      threadId: "thread-1",
+      itemId: optimisticAction?.item.id,
+    });
   });
 
   it("keeps processing state for non-stale turn/steer rpc errors", async () => {
