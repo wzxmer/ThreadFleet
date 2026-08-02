@@ -1149,6 +1149,11 @@ fn merge_profile_codex_args(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| "Provider profiles require a provider base URL".to_string())?;
+    let wire_api = if profile_uses_gateway(profile) {
+        "chat"
+    } else {
+        "responses"
+    };
     for value in [
         format!("model_provider={CODEX_MONITOR_PROVIDER_ID}"),
         format!("model_providers.{CODEX_MONITOR_PROVIDER_ID}.name=ThreadFleet"),
@@ -1156,7 +1161,7 @@ fn merge_profile_codex_args(
         format!(
             "model_providers.{CODEX_MONITOR_PROVIDER_ID}.env_key={CODEX_MONITOR_PROVIDER_KEY_ENV}"
         ),
-        format!("model_providers.{CODEX_MONITOR_PROVIDER_ID}.wire_api=responses"),
+        format!("model_providers.{CODEX_MONITOR_PROVIDER_ID}.wire_api={wire_api}"),
         format!("model_providers.{CODEX_MONITOR_PROVIDER_ID}.requires_openai_auth=false"),
         format!("model_providers.{CODEX_MONITOR_PROVIDER_ID}.supports_websockets=false"),
     ] {
@@ -1182,9 +1187,9 @@ fn merge_profile_codex_args(
 mod tests {
     use super::{
         active_codex_key_runtime, build_new_api_url, build_provider_models_url,
-        build_provider_usage_url, merge_provider_model_payloads, migrate_provider_settings,
-        normalize_new_api_usage_payload, normalize_sub2_usage_payload, profile_for_selection,
-        profile_uses_gateway, summarize_new_api_logs,
+        build_provider_usage_url, merge_profile_codex_args, merge_provider_model_payloads,
+        migrate_provider_settings, normalize_new_api_usage_payload, normalize_sub2_usage_payload,
+        profile_for_selection, profile_uses_gateway, summarize_new_api_logs,
     };
     use crate::codex::args::parse_codex_args;
     use crate::types::{AppSettings, CodexKeyProfile, CredentialSelection};
@@ -1564,6 +1569,9 @@ mod tests {
         assert!(args.windows(2).any(|pair| {
             pair[0] == "-c" && pair[1] == "model_providers.codex_monitor.supports_websockets=false"
         }));
+        assert!(args.windows(2).any(|pair| {
+            pair[0] == "-c" && pair[1] == "model_providers.codex_monitor.wire_api=chat"
+        }));
         assert!(args
             .windows(2)
             .any(|pair| { pair[0] == "-c" && pair[1] == "model=deepseek-chat" }));
@@ -1573,6 +1581,42 @@ mod tests {
                 .map(|(_, value)| value.as_str()),
             Some(value) if value.starts_with("codex-monitor-") && value != "sk-provider"
         ));
+    }
+
+    #[test]
+    fn non_gateway_profiles_keep_responses_wire_api() {
+        let profile = CodexKeyProfile {
+            id: "responses".to_string(),
+            name: "Responses".to_string(),
+            provider_kind: "custom".to_string(),
+            usage_protocol: "auto".to_string(),
+            new_api_access_token: None,
+            key_env_var: "OPENAI_API_KEY".to_string(),
+            key: "secret".to_string(),
+            base_url_env_var: "OPENAI_BASE_URL".to_string(),
+            base_url: Some("https://provider.example/v1".to_string()),
+            model: Some("model".to_string()),
+            context_window: None,
+            max_output_tokens: None,
+            use_gateway: false,
+            transport_mode: "responses".to_string(),
+            supports_thinking: false,
+            supports_reasoning_effort: false,
+            last_model_refresh_at_ms: None,
+            cached_models: Vec::new(),
+            group_name: None,
+        };
+
+        let args = parse_codex_args(
+            merge_profile_codex_args(None, &profile, Some("https://provider.example/v1"))
+                .expect("merged args")
+                .as_deref(),
+        )
+        .expect("parsed args");
+
+        assert!(args.windows(2).any(|pair| {
+            pair[0] == "-c" && pair[1] == "model_providers.codex_monitor.wire_api=responses"
+        }));
     }
 
     #[test]
