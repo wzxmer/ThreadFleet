@@ -641,7 +641,7 @@ export function SettingsAgentsSection({
               )}
               {createReasoningOptions.map((effort) => (
                 <option key={effort} value={effort}>
-                  {formatReasoningEffortLabel(effort, t)}
+                  {formatReasoningEffortLabel(effort)}
                 </option>
               ))}
             </select>

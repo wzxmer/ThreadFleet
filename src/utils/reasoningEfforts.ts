@@ -3,6 +3,7 @@ import type { ReasoningEffortOption } from "@/types";
 const SUPPORTED_EFFORT_KEYS = [
   "supportedReasoningEfforts",
   "supported_reasoning_efforts",
+  "supported_reasoning_levels",
   "reasoningEfforts",
   "reasoning_efforts",
 ] as const;

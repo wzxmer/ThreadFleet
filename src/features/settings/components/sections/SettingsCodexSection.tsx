@@ -1685,7 +1685,7 @@ export function SettingsCodexSection({
           {!reasoningSupported && <option value="">{t("settings.codex.unsupported")}</option>}
           {reasoningOptions.map((effort) => (
             <option key={effort} value={effort}>
-              {formatReasoningEffortLabel(effort, t)}
+              {formatReasoningEffortLabel(effort)}
             </option>
           ))}
         </select>

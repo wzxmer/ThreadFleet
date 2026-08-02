@@ -701,6 +701,8 @@ export type CodexCredential = {
   key: string;
   newApiAccessToken?: string | null;
   keyEnvVar: string;
+  lastModelRefreshAtMs?: number | null;
+  cachedModels?: CodexProviderModel[];
   functionToolCapability?: CodexFunctionToolCapability | null;
 };
 

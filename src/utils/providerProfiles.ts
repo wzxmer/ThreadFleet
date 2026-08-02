@@ -121,11 +121,33 @@ export function applyRefreshedCodexProviderModels(
     let providerChanged = false;
     const codexProviders = settings.codexProviders.map((provider) => {
       if (provider.id !== selection.providerId) return provider;
+      const group = provider.groups.find((candidate) => candidate.id === selection.groupId);
+      const credential = group?.credentials.find(
+        (candidate) => candidate.id === selection.credentialId,
+      );
+      if (!group || !credential) return provider;
       providerChanged = true;
       return {
         ...provider,
-        cachedModels: mergeCodexProviderModels(provider.cachedModels, refreshedModels),
-        lastModelRefreshAtMs: refreshedAtMs,
+        groups: provider.groups.map((candidateGroup) =>
+          candidateGroup.id !== selection.groupId
+            ? candidateGroup
+            : {
+                ...candidateGroup,
+                credentials: candidateGroup.credentials.map((candidate) =>
+                  candidate.id !== selection.credentialId
+                    ? candidate
+                    : {
+                        ...candidate,
+                        cachedModels: mergeCodexProviderModels(
+                          candidate.cachedModels,
+                          refreshedModels,
+                        ),
+                        lastModelRefreshAtMs: refreshedAtMs,
+                      },
+                ),
+              },
+        ),
       };
     });
     if (providerChanged) {

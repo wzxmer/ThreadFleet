@@ -78,4 +78,25 @@ describe("parseModelListResponse", () => {
     ]);
     expect(model.defaultReasoningEffort).toBe("ultra");
   });
+
+  it("maps supported reasoning levels from the Codex model directory", () => {
+    const [model] = parseModelListResponse({
+      result: {
+        data: [{
+          id: "gpt-5.6-luna",
+          supported_reasoning_levels: [
+            { effort: "xhigh" },
+            { effort: "max" },
+          ],
+          default_reasoning_effort: "max",
+        }],
+      },
+    });
+
+    expect(model.supportedReasoningEfforts).toEqual([
+      { reasoningEffort: "xhigh", description: "" },
+      { reasoningEffort: "max", description: "" },
+    ]);
+    expect(model.defaultReasoningEffort).toBe("max");
+  });
 });

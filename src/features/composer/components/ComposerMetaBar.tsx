@@ -156,7 +156,7 @@ export function ComposerMetaBar({
     reasoningOptions.length > 0
       ? reasoningOptions.map((effort) => ({
           value: effort,
-          label: formatReasoningEffortLabel(effort, t),
+          label: formatReasoningEffortLabel(effort),
         }))
       : [{ value: "", label: t("composer.default"), disabled: true }];
   const codexArgsSelectOptions = codexArgsOptions.map((option) => ({

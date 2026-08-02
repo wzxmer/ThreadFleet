@@ -301,7 +301,7 @@ export function WorkspaceHomeRunControls({
             {reasoningOptions.length === 0 && <option value="">{t("common.default")}</option>}
             {reasoningOptions.map((effortOption) => (
               <option key={effortOption} value={effortOption}>
-                {formatReasoningEffortLabel(effortOption, t)}
+                {formatReasoningEffortLabel(effortOption)}
               </option>
             ))}
           </select>

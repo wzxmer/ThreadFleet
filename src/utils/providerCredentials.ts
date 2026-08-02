@@ -178,6 +178,8 @@ function legacyProfileToProvider(profile: CodexKeyProfile): CodexProvider {
             key: profile.key,
             newApiAccessToken: profile.newApiAccessToken ?? null,
             keyEnvVar: profile.keyEnvVar || DEFAULT_KEY_ENV_VAR,
+            lastModelRefreshAtMs: profile.lastModelRefreshAtMs ?? null,
+            cachedModels: profile.cachedModels ?? [],
           },
         ],
       },
@@ -194,32 +196,36 @@ export function providersFromSettings(settings: Pick<AppSettings, "codexProvider
 export function providersToLegacyProfiles(providers: CodexProvider[]): CodexKeyProfile[] {
   return providers.flatMap((provider) =>
     provider.groups.flatMap((group) =>
-      group.credentials.map((credential) => ({
-        id: credentialSelectionId({
-          providerId: provider.id,
-          groupId: group.id,
-          credentialId: credential.id,
-        }),
-        name: credential.name,
-        providerKind: provider.providerKind ?? "custom",
-        usageProtocol: provider.usageProtocol ?? "auto",
-        newApiAccessToken: credential.newApiAccessToken ?? null,
-        keyEnvVar: credential.keyEnvVar || DEFAULT_KEY_ENV_VAR,
-        key: credential.key,
-        baseUrlEnvVar: provider.baseUrlEnvVar || DEFAULT_BASE_URL_ENV_VAR,
-        baseUrl: provider.baseUrl ?? null,
-        model: provider.model ?? null,
-        contextWindow: provider.contextWindow ?? null,
-        maxOutputTokens: provider.maxOutputTokens ?? null,
-        useGateway: providerUsesGateway(provider),
-        transportMode: provider.transportMode ?? "auto",
-        supportsThinking:
-          Boolean(provider.supportsThinking) || Boolean(provider.supportsReasoningEffort),
-        supportsReasoningEffort: Boolean(provider.supportsReasoningEffort),
-        lastModelRefreshAtMs: provider.lastModelRefreshAtMs ?? null,
-        cachedModels: provider.cachedModels ?? [],
-        groupName: group.name,
-      })),
+      group.credentials.map((credential) => {
+        const cachedModels = credential.cachedModels ?? provider.cachedModels ?? [];
+        return {
+          id: credentialSelectionId({
+            providerId: provider.id,
+            groupId: group.id,
+            credentialId: credential.id,
+          }),
+          name: credential.name,
+          providerKind: provider.providerKind ?? "custom",
+          usageProtocol: provider.usageProtocol ?? "auto",
+          newApiAccessToken: credential.newApiAccessToken ?? null,
+          keyEnvVar: credential.keyEnvVar || DEFAULT_KEY_ENV_VAR,
+          key: credential.key,
+          baseUrlEnvVar: provider.baseUrlEnvVar || DEFAULT_BASE_URL_ENV_VAR,
+          baseUrl: provider.baseUrl ?? null,
+          model: provider.model ?? null,
+          contextWindow: provider.contextWindow ?? null,
+          maxOutputTokens: provider.maxOutputTokens ?? null,
+          useGateway: providerUsesGateway(provider),
+          transportMode: provider.transportMode ?? "auto",
+          supportsThinking:
+            Boolean(provider.supportsThinking) || Boolean(provider.supportsReasoningEffort),
+          supportsReasoningEffort: Boolean(provider.supportsReasoningEffort),
+          lastModelRefreshAtMs:
+            credential.lastModelRefreshAtMs ?? provider.lastModelRefreshAtMs ?? null,
+          cachedModels,
+          groupName: group.name,
+        };
+      }),
     ),
   );
 }

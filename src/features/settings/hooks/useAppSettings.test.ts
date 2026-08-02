@@ -152,6 +152,59 @@ describe("useAppSettings", () => {
     expect(result.current.settings.syncProviderProfileToLocalConfig).toBe(true);
   });
 
+  it("keeps legacy provider model fallback separate from key-specific caches", async () => {
+    getAppSettingsMock.mockResolvedValue(
+      ({
+        codexProviders: [
+          {
+            id: "provider-a",
+            name: "Provider A",
+            baseUrlEnvVar: "OPENAI_BASE_URL",
+            baseUrl: "https://provider.example/v1",
+            cachedModels: [
+              { id: "shared-model", name: "Shared", contextWindow: null },
+            ],
+            groups: [
+              {
+                id: "group-a",
+                name: "Key A",
+                credentials: [{
+                  id: "key-a",
+                  name: "Key A",
+                  key: "secret-a",
+                  keyEnvVar: "OPENAI_API_KEY",
+                }],
+              },
+              {
+                id: "group-b",
+                name: "Key B",
+                credentials: [{
+                  id: "key-b",
+                  name: "Key B",
+                  key: "secret-b",
+                  keyEnvVar: "OPENAI_API_KEY",
+                  cachedModels: [
+                    { id: "key-b-model", name: "Key B", contextWindow: null },
+                  ],
+                }],
+              },
+            ],
+          },
+        ],
+      } as unknown) as AppSettings,
+    );
+
+    const { result } = renderHook(() => useAppSettings());
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    const provider = result.current.settings.codexProviders?.[0];
+    expect(provider?.groups[0]?.credentials[0]).not.toHaveProperty("cachedModels");
+    expect(provider?.groups[1]?.credentials[0]?.cachedModels).toEqual([
+      { id: "key-b-model", name: "Key B", contextWindow: null },
+    ]);
+  });
+
   it("migrates the legacy PingFang shorthand to the bundled fallback chain", async () => {
     getAppSettingsMock.mockResolvedValue(
       ({

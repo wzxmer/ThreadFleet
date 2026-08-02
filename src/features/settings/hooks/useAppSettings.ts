@@ -3,6 +3,7 @@ import type {
   AppSettings,
   CodexKeyProfile,
   CodexProvider,
+  CodexProviderModel,
   CredentialSelection,
 } from "@/types";
 import { getAppSettings, runCodexDoctor, updateAppSettings } from "@services/tauri";
@@ -75,6 +76,50 @@ const allowedCodexProviderKinds = new Set([
   "opencode",
   "custom",
 ]);
+
+function normalizePositiveInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? Math.floor(value)
+    : null;
+}
+
+function normalizeRefreshTimestamp(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function normalizeCachedModels(value: unknown): CodexProviderModel[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return null;
+      }
+      const record = entry as Record<string, unknown>;
+      const id = typeof record.id === "string" ? record.id.trim() : "";
+      if (!id) {
+        return null;
+      }
+      const supported = record.supportedReasoningEfforts ?? record.supported_reasoning_levels;
+      const defaultEffort =
+        record.defaultReasoningEffort ?? record.default_reasoning_effort;
+      return {
+        id,
+        name: typeof record.name === "string" ? record.name.trim() || null : null,
+        contextWindow: normalizePositiveInteger(
+          record.contextWindow ?? record.context_window ?? record.max_context_tokens,
+        ),
+        ...(Array.isArray(supported)
+          ? { supportedReasoningEfforts: parseReasoningEffortOptions(supported) }
+          : {}),
+        ...(typeof defaultEffort === "string"
+          ? { defaultReasoningEffort: normalizeReasoningEffortValue(defaultEffort) }
+          : {}),
+      } satisfies CodexProviderModel;
+    })
+    .filter((model): model is CodexProviderModel => model !== null);
+}
 const allowedProviderUsageProtocols = new Set<NonNullable<CodexKeyProfile["usageProtocol"]>>([
   "auto",
   "sub2",
@@ -231,33 +276,7 @@ function normalizeCodexKeyProfiles(
       const usageProtocol = allowedProviderUsageProtocols.has(profile.usageProtocol ?? "auto")
         ? (profile.usageProtocol ?? "auto")
         : "auto";
-      const normalizePositiveInteger = (value: unknown) =>
-        typeof value === "number" && Number.isFinite(value) && value > 0
-          ? Math.floor(value)
-          : null;
-      const cachedModels = Array.isArray(profile.cachedModels)
-        ? profile.cachedModels
-            .map((model) => ({
-              id: model.id?.trim() ?? "",
-              name: model.name?.trim() || null,
-              contextWindow: normalizePositiveInteger(model.contextWindow),
-              ...(Array.isArray(model.supportedReasoningEfforts)
-                ? {
-                    supportedReasoningEfforts: parseReasoningEffortOptions(
-                      model.supportedReasoningEfforts,
-                    ),
-                  }
-                : {}),
-              ...(typeof model.defaultReasoningEffort === "string"
-                ? {
-                    defaultReasoningEffort: normalizeReasoningEffortValue(
-                      model.defaultReasoningEffort,
-                    ),
-                  }
-                : {}),
-            }))
-            .filter((model) => model.id.length > 0)
-        : [];
+      const cachedModels = normalizeCachedModels(profile.cachedModels);
       return {
         id,
         name: profile.name?.trim() || `Key ${index + 1}`,
@@ -275,12 +294,7 @@ function normalizeCodexKeyProfiles(
         supportsThinking:
           Boolean(profile.supportsThinking) || Boolean(profile.supportsReasoningEffort),
         supportsReasoningEffort: Boolean(profile.supportsReasoningEffort),
-        lastModelRefreshAtMs:
-          typeof profile.lastModelRefreshAtMs === "number" &&
-          Number.isFinite(profile.lastModelRefreshAtMs) &&
-          profile.lastModelRefreshAtMs > 0
-            ? profile.lastModelRefreshAtMs
-            : null,
+        lastModelRefreshAtMs: normalizeRefreshTimestamp(profile.lastModelRefreshAtMs),
         cachedModels,
         groupName: profile.groupName?.trim() || profile.name?.trim() || `Key ${index + 1}`,
       };
@@ -299,12 +313,16 @@ function normalizeCodexProviders(
     let suffix = 2;
     while (usedIds.has(id)) id = `${baseId}-${suffix++}`;
     usedIds.add(id);
+    const cachedModels = normalizeCachedModels(provider.cachedModels);
+    const lastModelRefreshAtMs = normalizeRefreshTimestamp(provider.lastModelRefreshAtMs);
     return {
       ...provider,
       id,
       name: provider.name?.trim() || `Provider ${index + 1}`,
       baseUrlEnvVar: provider.baseUrlEnvVar?.trim() || DEFAULT_CODEX_BASE_URL_ENV_VAR,
       baseUrl: provider.baseUrl?.trim() || null,
+      lastModelRefreshAtMs,
+      cachedModels,
       groups: Array.isArray(provider.groups)
         ? provider.groups.map((group, groupIndex) => ({
             ...group,
@@ -320,6 +338,14 @@ function normalizeCodexProviders(
                   key: credential.key?.trim() || "",
                   keyEnvVar: credential.keyEnvVar?.trim() || DEFAULT_CODEX_KEY_ENV_VAR,
                   newApiAccessToken: credential.newApiAccessToken?.trim() || null,
+                  ...(Array.isArray(credential.cachedModels)
+                    ? {
+                        cachedModels: normalizeCachedModels(credential.cachedModels),
+                        lastModelRefreshAtMs: normalizeRefreshTimestamp(
+                          credential.lastModelRefreshAtMs,
+                        ),
+                      }
+                    : {}),
                 }))
               : [],
           }))

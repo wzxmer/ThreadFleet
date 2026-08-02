@@ -53,7 +53,12 @@ function cloneProvider(provider: CodexProvider): CodexProvider {
     cachedModels: [...(provider.cachedModels ?? [])],
     groups: provider.groups.map((group) => ({
       ...group,
-      credentials: group.credentials.map((credential) => ({ ...credential })),
+      credentials: group.credentials.map((credential) => ({
+        ...credential,
+        ...(credential.cachedModels
+          ? { cachedModels: [...credential.cachedModels] }
+          : {}),
+      })),
     })),
   };
 }
@@ -205,6 +210,20 @@ export function SettingsProvidersSection({
   );
   const firstCredential =
     singleCredentialDraft.groups.flatMap((group) => group.credentials)[0] ?? null;
+  const selectedCredential =
+    appSettings.executionCredentialSelection?.providerId === draft.id
+      ? credentialForSelection(
+          [singleCredentialDraft],
+          appSettings.executionCredentialSelection,
+        )?.credential ?? null
+      : null;
+  const modelCredential = selectedCredential ?? firstCredential;
+  const modelCache = mergeCodexProviderModels(
+    modelCredential?.cachedModels ?? draft.cachedModels,
+    draft.model?.trim()
+      ? [{ id: draft.model.trim(), name: null, contextWindow: null }]
+      : [],
+  );
   const resolvedBaseUrl = resolveCodexProviderBaseUrl(draft.providerKind, draft.baseUrl ?? "") ?? "";
   const providerValid =
     draft.name.trim().length > 0 &&
@@ -252,6 +271,8 @@ export function SettingsProvidersSection({
           id: createProviderEntityId("credential"),
           key: "",
           newApiAccessToken: null,
+          cachedModels: [],
+          lastModelRefreshAtMs: null,
         })),
       })),
     };
@@ -464,7 +485,7 @@ export function SettingsProvidersSection({
   };
 
   const fetchModels = async () => {
-    if (!resolvedBaseUrl || !firstCredential?.key.trim()) {
+    if (!resolvedBaseUrl || !modelCredential?.key.trim()) {
       setModelFetchState({
         status: "error",
         error: t("settings.codex.providerModelsNeedUrlAndKey"),
@@ -473,11 +494,25 @@ export function SettingsProvidersSection({
     }
     setModelFetchState({ status: "loading", error: null });
     try {
-      const models = await getProviderModels(resolvedBaseUrl, firstCredential.key.trim());
+      const models = await getProviderModels(resolvedBaseUrl, modelCredential.key.trim());
+      const refreshedAtMs = Date.now();
       setDraft((current) => ({
         ...current,
-        cachedModels: mergeCodexProviderModels(current.cachedModels, models),
-        lastModelRefreshAtMs: Date.now(),
+        groups: current.groups.map((group) => ({
+          ...group,
+          credentials: group.credentials.map((credential) =>
+            credential.id !== modelCredential.id
+              ? credential
+              : {
+                  ...credential,
+                  cachedModels: mergeCodexProviderModels(
+                    credential.cachedModels,
+                    models,
+                  ),
+                  lastModelRefreshAtMs: refreshedAtMs,
+                },
+          ),
+        })),
       }));
       setModelFetchState({
         status: "done",
@@ -895,7 +930,7 @@ export function SettingsProvidersSection({
                 <label className="settings-provider-form-wide settings-provider-model-field">
                   <span>{t("settings.codex.providerModelAria")}</span>
                   <div className="settings-field-row">
-                    {(draft.cachedModels ?? []).length > 0 ? (
+                    {modelCache.length > 0 ? (
                       <select
                         className="settings-select"
                         value={draft.model ?? ""}
@@ -903,7 +938,7 @@ export function SettingsProvidersSection({
                         onChange={(event) => setDraft({ ...draft, model: event.target.value || null })}
                       >
                         <option value="">{t("settings.codex.providerModelPlaceholder")}</option>
-                        {(draft.cachedModels ?? []).map((model) => (
+                        {modelCache.map((model) => (
                           <option key={model.id} value={model.id}>{model.name ?? model.id}</option>
                         ))}
                       </select>
@@ -993,7 +1028,7 @@ export function SettingsProvidersSection({
                     >
                       {PROVIDER_REASONING_EFFORT_VALUES.map((effort) => (
                         <option key={effort} value={effort}>
-                          {t(`settings.codex.reasoningEffort.${effort}`)}
+                          {effort}
                         </option>
                       ))}
                     </select>

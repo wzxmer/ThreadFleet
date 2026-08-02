@@ -101,7 +101,7 @@ describe("resolveCodexProviderBaseUrl", () => {
     });
   });
 
-  it("updates the owning provider model cache for a credential selection", () => {
+  it("isolates refreshed model caches by credential while preserving legacy provider fallback", () => {
     const settings = {
       codexProviders: [
         {
@@ -120,6 +120,12 @@ describe("resolveCodexProviderBaseUrl", () => {
                   key: "secret",
                   keyEnvVar: "OPENAI_API_KEY",
                 },
+                {
+                  id: "key-b",
+                  name: "Key B",
+                  key: "secret-b",
+                  keyEnvVar: "OPENAI_API_KEY",
+                },
               ],
             },
           ],
@@ -131,19 +137,37 @@ describe("resolveCodexProviderBaseUrl", () => {
 
     const next = applyRefreshedCodexProviderModels(
       settings,
-      "provider-a:group-a:key-a",
+      "provider-a:group-a:key-b",
       [{ id: "model-b", name: "Model B", contextWindow: 128000 }],
       456,
     );
 
     expect(next.codexProviders?.[0]).toMatchObject({
+      cachedModels: [{ id: "model-a", name: "Model A", contextWindow: null }],
+    });
+    const credentials = next.codexProviders?.[0]?.groups[0]?.credentials ?? [];
+    expect(credentials[0]?.id).toBe("key-a");
+    expect(credentials[0]).not.toHaveProperty("cachedModels");
+    expect(credentials[0]).not.toHaveProperty("lastModelRefreshAtMs");
+    expect(credentials[1]).toMatchObject({
+      id: "key-b",
       lastModelRefreshAtMs: 456,
       cachedModels: [
-        { id: "model-a", name: "Model A", contextWindow: null },
         { id: "model-b", name: "Model B", contextWindow: 128000 },
       ],
     });
-    expect(next.codexKeyProfiles[0]?.id).toBe("provider-a:group-a:key-a");
+    expect(next.codexKeyProfiles).toEqual([
+      expect.objectContaining({
+        id: "provider-a:group-a:key-a",
+        cachedModels: [{ id: "model-a", name: "Model A", contextWindow: null }],
+      }),
+      expect.objectContaining({
+        id: "provider-a:group-a:key-b",
+        cachedModels: [
+          { id: "model-b", name: "Model B", contextWindow: 128000 },
+        ],
+      }),
+    ]);
   });
 
   it("builds an authoritative model list from the active provider profile", () => {

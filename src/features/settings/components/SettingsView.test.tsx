@@ -2170,6 +2170,82 @@ describe("SettingsView Codex defaults", () => {
     });
   });
 
+  it("fetches provider models with the selected execution credential", async () => {
+    const onUpdateAppSettings = vi.fn().mockResolvedValue(undefined);
+    getProviderModelsMock.mockResolvedValueOnce([
+      { id: "key-b-model", name: "Key B Model", contextWindow: null },
+    ]);
+    renderCodexSection({
+      initialSection: "providers",
+      onUpdateAppSettings,
+      appSettings: {
+        codexProviders: [
+          {
+            id: "provider-a",
+            name: "Provider A",
+            providerKind: "custom",
+            baseUrlEnvVar: "OPENAI_BASE_URL",
+            baseUrl: "https://provider.example/v1",
+            transportMode: "auto",
+            groups: [
+              {
+                id: "group-a",
+                name: "Key A",
+                credentials: [{
+                  id: "key-a",
+                  name: "Key A",
+                  key: "secret-a",
+                  keyEnvVar: "OPENAI_API_KEY",
+                }],
+              },
+              {
+                id: "group-b",
+                name: "Key B",
+                credentials: [{
+                  id: "key-b",
+                  name: "Key B",
+                  key: "secret-b",
+                  keyEnvVar: "OPENAI_API_KEY",
+                }],
+              },
+            ],
+          },
+        ],
+        executionCredentialSelection: {
+          providerId: "provider-a",
+          groupId: "group-b",
+          credentialId: "key-b",
+        },
+      },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "获取模型" }));
+    await waitFor(() => {
+      expect(getProviderModelsMock).toHaveBeenLastCalledWith(
+        "https://provider.example/v1",
+        "secret-b",
+      );
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => {
+      const nextSettings =
+        onUpdateAppSettings.mock.calls[onUpdateAppSettings.mock.calls.length - 1]?.[0] as AppSettings;
+      expect(nextSettings.codexKeyProfiles).toEqual([
+        expect.objectContaining({
+          id: "provider-a:group-a:key-a",
+          cachedModels: [],
+        }),
+        expect.objectContaining({
+          id: "provider-a:group-b:key-b",
+          cachedModels: [
+            { id: "key-b-model", name: "Key B Model", contextWindow: null },
+          ],
+        }),
+      ]);
+    });
+  });
+
   it("saves provider thinking capability flags", async () => {
     const onUpdateAppSettings = vi.fn().mockResolvedValue(undefined);
     renderCodexSection({
