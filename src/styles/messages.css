@@ -1519,15 +1519,9 @@
 
 .messages-reading-native .working-meta {
   display: inline-flex;
-  gap: 7px;
-}
-
-.messages-reading-native .working-status {
-  display: inline;
-  color: var(--text-accent);
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.04em;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
 }
 
 :root:not([data-theme])
@@ -1562,7 +1556,10 @@
 }
 
 .messages-reading-native .working-timer {
-  display: none;
+  display: inline-flex;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--messages-process-text-soft);
 }
 
 .messages-reading-native .working-text {

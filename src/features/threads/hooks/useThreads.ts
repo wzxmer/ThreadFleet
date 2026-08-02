@@ -1449,12 +1449,18 @@ export function useThreads({
       if (!threadId) {
         return false;
       }
-      return (
+      const hasSnapshot =
         loadedThreadsRef.current[threadId] === true ||
-        (itemsByThreadRef.current[threadId]?.length ?? 0) > 0
-      );
+        (itemsByThreadRef.current[threadId]?.length ?? 0) > 0;
+      if (!hasSnapshot) {
+        return false;
+      }
+      const runtimeContext = getThreadListRuntimeContext();
+      const currentRuntimeKey = (runtimeContext.sourceId ?? "") + ":" +
+        runtimeContext.runtimeGeneration;
+      return loadedThreadRuntimeKeyRef.current[threadId] === currentRuntimeKey;
     },
-    [itemsByThreadRef, loadedThreadsRef],
+    [getThreadListRuntimeContext, itemsByThreadRef, loadedThreadRuntimeKeyRef, loadedThreadsRef],
   );
 
   const setActiveThreadId = useCallback(

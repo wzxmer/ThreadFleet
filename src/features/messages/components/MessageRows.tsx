@@ -80,7 +80,6 @@ type WorkingIndicatorProps = {
   showPollingFetchStatus?: boolean;
   pollingIntervalMs?: number;
   completionStatus?: "completed" | "interrupted" | "failed" | null;
-  runningLabel?: string;
   completedLabel?: string;
   interruptedLabel?: string;
   failedLabel?: string;
@@ -456,7 +455,6 @@ export const WorkingIndicator = memo(function WorkingIndicator({
   showPollingFetchStatus = false,
   pollingIntervalMs = 12000,
   completionStatus = null,
-  runningLabel = "RUNNING",
   completedLabel = "Done in",
   interruptedLabel = "Interrupted in",
   failedLabel = "Failed in",
@@ -510,7 +508,6 @@ export const WorkingIndicator = memo(function WorkingIndicator({
           </span>
           <div className="working-main">
             <div className="working-meta">
-              <span className="working-status">{runningLabel}</span>
               <div className="working-timer">
                 <span className="working-timer-clock">
                   {formatDurationMs(elapsedMs)}

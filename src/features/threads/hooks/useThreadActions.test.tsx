@@ -866,10 +866,9 @@ describe("useThreadActions", () => {
       1 * 1024 * 1024,
     );
     expect(dispatch).toHaveBeenCalledWith({
-      type: "setThreadItems",
+      type: "prependThreadItems",
       threadId: "thread-1",
-      items: [...olderItems, ...latestItems],
-      trimItems: false,
+      items: olderItems,
     });
     expect(result.current.threadHistoryPageByThread["thread-1"]).toMatchObject({
       nextCursor: null,

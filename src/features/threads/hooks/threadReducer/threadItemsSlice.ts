@@ -370,6 +370,36 @@ export function reduceThreadItems(state: ThreadState, action: ThreadAction): Thr
               },
       };
     }
+    case "prependThreadItems": {
+      const currentItems = state.itemsByThread[action.threadId] ?? [];
+      const currentIds = new Set(currentItems.map((item) => item.id));
+      const olderItems = action.items.filter((item) => !currentIds.has(item.id));
+      if (olderItems.length === 0) {
+        return state;
+      }
+      const mergedItems = [...olderItems, ...currentItems];
+      const completedContextCompactionIds = mergeCompletedContextCompactionIds(
+        state.completedContextCompactionIdsByThread[action.threadId],
+        mergedItems,
+      );
+      return {
+        ...state,
+        itemsByThread: {
+          ...state.itemsByThread,
+          [action.threadId]: prepareThreadItems(mergedItems, {
+            maxItemsPerThread: null,
+          }),
+        },
+        completedContextCompactionIdsByThread:
+          completedContextCompactionIds ===
+          state.completedContextCompactionIdsByThread[action.threadId]
+            ? state.completedContextCompactionIdsByThread
+            : {
+                ...state.completedContextCompactionIdsByThread,
+                [action.threadId]: completedContextCompactionIds ?? {},
+              },
+      };
+    }
     case "evictThreadItems": {
       const residentThreadIds = action.threadIds.filter(
         (threadId) => threadId in state.itemsByThread,

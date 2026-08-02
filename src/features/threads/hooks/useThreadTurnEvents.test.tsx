@@ -566,7 +566,7 @@ describe("useThreadTurnEvents", () => {
     nowSpy.mockRestore();
   });
 
-  it("records a new status-only lifecycle after the previous turn was finalized", () => {
+  it("ignores a status-only active lifecycle after the previous turn was finalized", () => {
     const { result, dispatch, recordThreadActivity } = makeOptions();
 
     act(() => {
@@ -576,7 +576,7 @@ describe("useThreadTurnEvents", () => {
       result.current.onThreadStatusChanged("ws-1", "thread-1", { type: "idle" });
     });
 
-    expect(recordThreadActivity).toHaveBeenCalledTimes(2);
+    expect(recordThreadActivity).toHaveBeenCalledTimes(1);
     expect(
       dispatch.mock.calls.filter(
         ([action]) =>
@@ -600,6 +600,27 @@ describe("useThreadTurnEvents", () => {
         threadId: "thread-1",
       }),
     );
+  });
+
+  it("does not resurrect processing from a status-only active event after completion", () => {
+    const { result, markProcessing, setActiveTurnId, recordThreadActivity } =
+      makeOptions();
+
+    act(() => {
+      result.current.onTurnStarted("ws-1", "thread-1", "turn-1");
+      result.current.onTurnCompleted("ws-1", "thread-1", "turn-1");
+    });
+    markProcessing.mockClear();
+    setActiveTurnId.mockClear();
+    recordThreadActivity.mockClear();
+
+    act(() => {
+      result.current.onThreadStatusChanged("ws-1", "thread-1", { type: "active" });
+    });
+
+    expect(markProcessing).not.toHaveBeenCalled();
+    expect(setActiveTurnId).not.toHaveBeenCalled();
+    expect(recordThreadActivity).not.toHaveBeenCalled();
   });
 
   it("does not finalize idle status while a retry continuation is pending", () => {

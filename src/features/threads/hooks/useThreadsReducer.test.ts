@@ -1389,6 +1389,46 @@ describe("threadReducer", () => {
     ]);
   });
 
+  it("preserves messages appended while an older history page is loading", () => {
+    const currentItem: ConversationItem = {
+      id: "current-message",
+      kind: "message",
+      role: "assistant",
+      text: "Current message",
+    };
+    const optimisticItem: ConversationItem = {
+      id: "optimistic-user-message",
+      kind: "message",
+      role: "user",
+      text: "New message",
+    };
+    const stateWithNewMessage = {
+      ...initialState,
+      itemsByThread: {
+        "thread-1": [currentItem, optimisticItem],
+      },
+    };
+
+    const next = threadReducer(stateWithNewMessage, {
+      type: "prependThreadItems",
+      threadId: "thread-1",
+      items: [
+        {
+          id: "older-message",
+          kind: "message",
+          role: "user",
+          text: "Older message",
+        },
+      ],
+    });
+
+    expect(next.itemsByThread["thread-1"]?.map((item) => item.id)).toEqual([
+      "older-message",
+      "current-message",
+      "optimistic-user-message",
+    ]);
+  });
+
   it("keeps unlimited live thread history", () => {
     const items: ConversationItem[] = Array.from({ length: 3 }, (_, index) => ({
       id: `msg-${index}`,

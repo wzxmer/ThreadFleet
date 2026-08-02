@@ -141,6 +141,11 @@ export type ThreadAction =
       items: ConversationItem[];
       trimItems?: boolean;
     }
+  | {
+      type: "prependThreadItems";
+      threadId: string;
+      items: ConversationItem[];
+    }
   | { type: "evictThreadItems"; threadIds: string[] }
   | {
       type: "appendReasoningSummary";

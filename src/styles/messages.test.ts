@@ -284,6 +284,9 @@ describe("message tool group interaction styles", () => {
       /\.messages-reading-native \.working-agent-avatar\s*\{[^}]*width:\s*42px;[^}]*height:\s*42px;[^}]*background:\s*transparent;/s,
     );
     expect(messagesCss).toMatch(
+      /\.messages-reading-native \.working-timer\s*\{[^}]*display:\s*inline-flex;[^}]*font-size:\s*11px;[^}]*color:\s*var\(--messages-process-text-soft\);/s,
+    );
+    expect(messagesCss).toMatch(
       /\.message-agent-avatar\s*\{[^}]*width:\s*26px;[^}]*height:\s*26px;[^}]*border-radius:\s*8px;/s,
     );
     expect(messagesCss).toMatch(

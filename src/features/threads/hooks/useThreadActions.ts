@@ -314,9 +314,10 @@ export function useThreadActions({
         return null;
       }
       const requestRuntimeKey = getCurrentThreadRuntimeKey();
+      const previousRuntimeKey = loadedThreadRuntimeKeyRef.current[threadId];
       const loadedInCurrentRuntime =
         loadedThreadsRef.current[threadId] &&
-        loadedThreadRuntimeKeyRef.current[threadId] === requestRuntimeKey;
+        previousRuntimeKey === requestRuntimeKey;
       if (
         !force &&
         loadedInCurrentRuntime &&
@@ -507,8 +508,14 @@ export function useThreadActions({
             childThreadIds.map((childThreadId) => ({ threadId: childThreadId })),
           );
           const localItems = itemsByThread[threadId] ?? [];
+          const shouldReplaceRuntimeSnapshot =
+            readOnly &&
+            localItems.length > 0 &&
+            (!previousRuntimeKey || previousRuntimeKey !== requestRuntimeKey);
           const shouldReplace =
-            replaceLocal || replaceOnResumeRef.current[threadId] === true;
+            replaceLocal ||
+            replaceOnResumeRef.current[threadId] === true ||
+            shouldReplaceRuntimeSnapshot;
           if (shouldReplace) {
             replaceOnResumeRef.current[threadId] = false;
           }
@@ -706,13 +713,11 @@ export function useThreadActions({
         const uniqueOlderItems = olderItems.filter(
           (item) => !currentIds.has(item.id),
         );
-        const mergedItems = [...uniqueOlderItems, ...currentItems];
         if (uniqueOlderItems.length > 0) {
           dispatch({
-            type: "setThreadItems",
+            type: "prependThreadItems",
             threadId,
-            items: mergedItems,
-            trimItems: false,
+            items: uniqueOlderItems,
           });
         }
         setThreadHistoryPageByThread((previous) => ({

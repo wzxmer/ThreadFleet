@@ -2,7 +2,6 @@ import {
   memo,
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -417,11 +416,15 @@ export const Messages = memo(function Messages({
   onResendUserMessage,
 }: MessagesProps) {
   const pendingOlderHistoryRestoreRef = useRef<{
-    previousItemCount: number;
-    previousScrollHeight: number;
+    threadId: string | null;
+    anchorKey: string;
+    anchorTop: number;
     previousScrollTop: number;
   } | null>(null);
   const olderHistoryLoadInFlightRef = useRef(false);
+  const olderHistoryRestoreFrameRef = useRef<number | null>(null);
+  const currentThreadIdRef = useRef(threadId);
+  currentThreadIdRef.current = threadId;
   const { t } = useI18n();
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchThreadId, setSearchThreadId] = useState<string | null>(null);
@@ -546,18 +549,14 @@ export const Messages = memo(function Messages({
     summaries: turnExecutionSummaries,
     threadId,
   });
-  useLayoutEffect(() => {
-    const restore = pendingOlderHistoryRestoreRef.current;
-    const container = containerRef.current;
-    if (!restore || !container || items.length === restore.previousItemCount) {
-      return;
-    }
-    container.scrollTop =
-      container.scrollHeight -
-      restore.previousScrollHeight +
-      restore.previousScrollTop;
-    pendingOlderHistoryRestoreRef.current = null;
-  }, [containerRef, items.length]);
+  useEffect(
+    () => () => {
+      if (olderHistoryRestoreFrameRef.current !== null) {
+        window.cancelAnimationFrame(olderHistoryRestoreFrameRef.current);
+      }
+    },
+    [],
+  );
   const handleLoadOlderHistory = useCallback(async () => {
     if (
       !onLoadOlderHistory ||
@@ -567,23 +566,71 @@ export const Messages = memo(function Messages({
       return;
     }
     const container = containerRef.current;
-    if (container) {
-      pendingOlderHistoryRestoreRef.current = {
-        previousItemCount: items.length,
-        previousScrollHeight: container.scrollHeight,
-        previousScrollTop: container.scrollTop,
-      };
-    }
+    const anchor = container?.querySelector<HTMLElement>("[data-history-anchor]");
+    const restore =
+      container && anchor
+        ? {
+            threadId,
+            anchorKey: anchor.dataset.historyAnchor ?? "",
+            anchorTop: anchor.getBoundingClientRect().top,
+            previousScrollTop: container.scrollTop,
+          }
+        : null;
+    pendingOlderHistoryRestoreRef.current = restore;
     olderHistoryLoadInFlightRef.current = true;
     try {
       const loaded = await onLoadOlderHistory();
       if (!loaded) {
-        pendingOlderHistoryRestoreRef.current = null;
+        if (pendingOlderHistoryRestoreRef.current === restore) {
+          pendingOlderHistoryRestoreRef.current = null;
+        }
+        return;
       }
+      if (
+        !restore ||
+        pendingOlderHistoryRestoreRef.current !== restore ||
+        currentThreadIdRef.current !== restore.threadId
+      ) {
+        if (pendingOlderHistoryRestoreRef.current === restore) {
+          pendingOlderHistoryRestoreRef.current = null;
+        }
+        return;
+      }
+      olderHistoryRestoreFrameRef.current = window.requestAnimationFrame(() => {
+        olderHistoryRestoreFrameRef.current = null;
+        const pendingRestore = pendingOlderHistoryRestoreRef.current;
+        const currentContainer = containerRef.current;
+        if (
+          pendingRestore !== restore ||
+          !currentContainer ||
+          currentThreadIdRef.current !== restore.threadId ||
+          Math.abs(currentContainer.scrollTop - restore.previousScrollTop) > 1
+        ) {
+          if (pendingRestore === restore) {
+            pendingOlderHistoryRestoreRef.current = null;
+          }
+          return;
+        }
+        const currentAnchor = Array.from(
+          currentContainer.querySelectorAll<HTMLElement>(
+            "[data-history-anchor]",
+          ),
+        ).find((node) => node.dataset.historyAnchor === restore.anchorKey);
+        if (!currentAnchor) {
+          pendingOlderHistoryRestoreRef.current = null;
+          return;
+        }
+        const anchorOffset =
+          currentAnchor.getBoundingClientRect().top - restore.anchorTop;
+        if (anchorOffset > 0) {
+          currentContainer.scrollTop = restore.previousScrollTop + anchorOffset;
+        }
+        pendingOlderHistoryRestoreRef.current = null;
+      });
     } finally {
       olderHistoryLoadInFlightRef.current = false;
     }
-  }, [containerRef, isLoadingOlderHistory, items.length, onLoadOlderHistory]);
+  }, [containerRef, isLoadingOlderHistory, onLoadOlderHistory, threadId]);
   const handleMessagesWheel = useCallback(
     (event: ReactWheelEvent<HTMLDivElement>) => {
       if (event.deltaY >= 0) {
@@ -684,8 +731,6 @@ export const Messages = memo(function Messages({
     });
     return states;
   }, [activityState, turnExecutionSummaries, turnExecutionSummary]);
-  const assistantRunningLabel = t("messages.runningStatus");
-
   useEffect(() => {
     setSearchOpen(false);
     setSearchThreadId(null);
@@ -1482,6 +1527,7 @@ export const Messages = memo(function Messages({
                 <div
                   key={`tool-group-${group.id}`}
                   ref={registerSearchTarget(searchTarget)}
+                  data-history-anchor={group.id}
                   className={`tool-group ${searchTargetClassName} ${
                     isCollapsed ? "tool-group-collapsed" : ""
                   }`}
@@ -1579,6 +1625,7 @@ export const Messages = memo(function Messages({
               <div
                 key={`item-search-${entry.item.id}`}
                 ref={registerSearchTarget(searchTarget)}
+                data-history-anchor={entry.item.id}
                 className={searchTargetClassName}
               >
                 {renderItem(entry.item, processDisclosure, processContent)}
@@ -1613,7 +1660,6 @@ export const Messages = memo(function Messages({
                 ? null
                 : (turnExecutionSummary?.status ?? null)
             }
-            runningLabel={assistantRunningLabel}
             completedLabel={
               turnExecutionSummary ? t("messages.completedIn") : undefined
             }

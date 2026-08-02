@@ -595,6 +595,18 @@ export function useThreadTurnEvents({
         return;
       }
       if (statusType === "active") {
+        const activeTurnId = getLatestKnownActiveTurnId(threadId);
+        const lastExecutionTurnId = lastExecutionTurnIdByThreadRef.current[threadId];
+        const lastFinalizedTurnId = lastFinalizedTurnIdByThreadRef.current[threadId];
+        const isStatusOnlyAfterTerminalTurn = Boolean(
+          lastExecutionTurnId &&
+            lastFinalizedTurnId === lastExecutionTurnId &&
+            !activeTurnId &&
+            !continuationPendingByThreadRef.current[threadId],
+        );
+        if (isStatusOnlyAfterTerminalTurn) {
+          return;
+        }
         terminalActivityPendingByThreadRef.current[threadId] = true;
         markProcessing(threadId, true);
         return;

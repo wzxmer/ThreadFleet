@@ -1231,6 +1231,94 @@ describe("useThreads UX integration", () => {
     });
   });
 
+  it("reloads and replaces selected history when the session runtime changes", async () => {
+    let runtimeContext = {
+      sourceId: "source-a",
+      runtimeGeneration: 1,
+    };
+    vi.mocked(readThread)
+      .mockResolvedValueOnce({
+        result: {
+          thread: {
+            id: "thread-shared",
+            turns: [
+              {
+                id: "turn-source-a",
+                items: [
+                  {
+                    type: "agentMessage",
+                    id: "assistant-source-a",
+                    text: "Source A history",
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      })
+      .mockResolvedValueOnce({
+        result: {
+          thread: {
+            id: "thread-shared",
+            turns: [
+              {
+                id: "turn-source-b",
+                items: [
+                  {
+                    type: "agentMessage",
+                    id: "assistant-source-b",
+                    text: "Source B history",
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      });
+
+    const { result } = renderHook(() =>
+      useThreads({
+        activeWorkspace: workspace,
+        onWorkspaceConnected: vi.fn(),
+        getThreadListRuntimeContext: () => runtimeContext,
+      }),
+    );
+
+    act(() => {
+      result.current.setActiveThreadId("thread-shared");
+    });
+    await waitFor(() => {
+      expect(result.current.activeItems).toEqual([
+        expect.objectContaining({
+          id: "assistant-source-a",
+          text: "Source A history",
+        }),
+      ]);
+    });
+
+    vi.mocked(readThread).mockClear();
+    runtimeContext = {
+      sourceId: "source-b",
+      runtimeGeneration: 2,
+    };
+
+    act(() => {
+      result.current.setActiveThreadId("thread-shared");
+    });
+
+    await waitFor(() => {
+      expect(readThread).toHaveBeenCalledWith("ws-1", "thread-shared");
+    });
+    await waitFor(() => {
+      expect(result.current.activeItems).toEqual([
+        expect.objectContaining({
+          id: "assistant-source-b",
+          text: "Source B history",
+        }),
+      ]);
+    });
+  });
+
   it("hydrates every matching terminal execution summary on read", async () => {
     vi.mocked(readThread).mockResolvedValue({
       result: {

@@ -153,8 +153,9 @@ describe("Messages", () => {
         .querySelector(".working-agent-avatar .model-activity-core")
         ?.getAttribute("data-state"),
     ).toBe("thinking");
-    expect(container.querySelector(".working-status")?.textContent).toBe(
-      "RUNNING",
+    expect(container.querySelector(".working-status")).toBeNull();
+    expect(container.querySelector(".working-timer-clock")?.textContent).toMatch(
+      /^\d+:\d{2}$/,
     );
     expect(container.querySelector(".working .working-spinner")).toBeNull();
     expect(container.querySelector(".working-text")).toBeNull();
@@ -359,6 +360,153 @@ describe("Messages", () => {
     fireEvent.wheel(scroller!, { deltaY: -48 });
 
     await waitFor(() => expect(onLoadOlderHistory).toHaveBeenCalledTimes(1));
+  });
+
+  it("does not restore older-history scroll position for an appended message", async () => {
+    let resolveLoad: (loaded: boolean) => void = () => {};
+    const onLoadOlderHistory = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveLoad = resolve;
+        }),
+    );
+    const initialItems: ConversationItem[] = [
+      {
+        id: "existing-message",
+        kind: "message",
+        role: "assistant",
+        text: "Existing message",
+      },
+    ];
+    const renderMessages = (items: ConversationItem[]) => (
+      <Messages
+        items={items}
+        threadId="thread-history-pending-send"
+        workspaceId="ws-history"
+        isThinking={false}
+        hasOlderHistory
+        onLoadOlderHistory={onLoadOlderHistory}
+        openTargets={[]}
+        selectedOpenAppId=""
+      />
+    );
+    const { container, rerender } = render(renderMessages(initialItems));
+    const scroller = container.querySelector<HTMLDivElement>(
+      ".messages.messages-full",
+    );
+    expect(scroller).toBeTruthy();
+
+    let scrollHeight = 1000;
+    Object.defineProperties(scroller!, {
+      scrollTop: { configurable: true, writable: true, value: 0 },
+      scrollHeight: { configurable: true, get: () => scrollHeight },
+      clientHeight: { configurable: true, value: 400 },
+    });
+    fireEvent.scroll(scroller!);
+    fireEvent.wheel(scroller!, { deltaY: -48 });
+    expect(onLoadOlderHistory).toHaveBeenCalledTimes(1);
+
+    scrollHeight = 1100;
+    rerender(
+      renderMessages([
+        ...initialItems,
+        {
+          id: "new-user-message",
+          kind: "message",
+          role: "user",
+          text: "New message",
+        },
+      ]),
+    );
+
+    expect(scroller!.scrollTop).toBe(0);
+    await act(async () => {
+      resolveLoad(false);
+    });
+  });
+
+  it("preserves the visible anchor when older history arrives after a new message", async () => {
+    let resolveLoad: (loaded: boolean) => void = () => {};
+    const onLoadOlderHistory = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveLoad = resolve;
+        }),
+    );
+    const latestItem: ConversationItem = {
+      id: "latest-message",
+      kind: "message",
+      role: "assistant",
+      text: "Latest message",
+    };
+    const renderMessages = (items: ConversationItem[]) => (
+      <Messages
+        items={items}
+        threadId="thread-history-anchor"
+        workspaceId="ws-history"
+        isThinking={false}
+        hasOlderHistory
+        onLoadOlderHistory={onLoadOlderHistory}
+        openTargets={[]}
+        selectedOpenAppId=""
+      />
+    );
+    const { container, rerender } = render(renderMessages([latestItem]));
+    const scroller = container.querySelector<HTMLDivElement>(
+      ".messages.messages-full",
+    );
+    const anchor = container.querySelector<HTMLElement>("[data-history-anchor]");
+    expect(scroller).toBeTruthy();
+    expect(anchor).toBeTruthy();
+
+    let anchorTop = 0;
+    const getBoundingClientRectSpy = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: HTMLElement) {
+        return {
+          top: this.textContent?.includes("Latest message") ? anchorTop : 0,
+        } as DOMRect;
+      });
+    Object.defineProperties(scroller!, {
+      scrollTop: { configurable: true, writable: true, value: 20 },
+      scrollHeight: { configurable: true, value: 1000 },
+      clientHeight: { configurable: true, value: 400 },
+    });
+    fireEvent.scroll(scroller!);
+    fireEvent.wheel(scroller!, { deltaY: -48 });
+    expect(onLoadOlderHistory).toHaveBeenCalledTimes(1);
+
+    anchorTop = 300;
+    const newUserMessage: ConversationItem = {
+      id: "new-user-message",
+      kind: "message",
+      role: "user",
+      text: "New message",
+    };
+    rerender(
+      renderMessages([
+        {
+          id: "older-message",
+          kind: "message",
+          role: "user",
+          text: "Older message",
+        },
+        latestItem,
+        newUserMessage,
+      ]),
+    );
+
+    expect(
+      Array.from(container.querySelectorAll("[data-history-anchor]")).map(
+        (node) => node.getAttribute("data-history-anchor"),
+      ),
+    ).toEqual(["older-message", "latest-message", "new-user-message"]);
+    expect(getBoundingClientRectSpy).toHaveBeenCalled();
+    await act(async () => {
+      resolveLoad(true);
+    });
+    await waitFor(() => expect(scroller!.scrollTop).toBe(320));
+    getBoundingClientRectSpy.mockRestore();
   });
 
   it("reveals local hidden history before requesting an older backend page on upward top scroll", () => {
@@ -2300,7 +2448,7 @@ describe("Messages", () => {
       },
     ];
 
-    render(
+    const { container } = render(
       <Messages
         items={items}
         threadId="thread-1"
@@ -2312,7 +2460,19 @@ describe("Messages", () => {
       />,
     );
 
-    expect(screen.getByText("Done in 0:04")).toBeTruthy();
+    const duration = screen.getByText("Done in 0:04");
+    const finalMessage = screen.getByText("Completed response").closest(".message");
+
+    const completion = container.querySelector(".turn-complete");
+
+    expect(duration).toBeTruthy();
+    expect(finalMessage).not.toBeNull();
+    expect(completion).not.toBeNull();
+    expect(
+      (finalMessage as HTMLElement).compareDocumentPosition(
+        completion as HTMLElement,
+      ) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
   it("renders answered user input items with preview and expandable details", () => {
