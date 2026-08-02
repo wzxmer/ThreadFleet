@@ -113,6 +113,7 @@ function ThirdPartyUsageSummary({
             <RoundedSelect
               className="sidebar-usage-select"
               popoverClassName="sidebar-usage-select-popover"
+              style={{ width: "100%" }}
               value={usageSelection ? selectedProvider?.id ?? "" : "__follow_execution__"}
               ariaLabel={t("sidebar.usageProvider")}
               options={[
@@ -138,6 +139,7 @@ function ThirdPartyUsageSummary({
               <RoundedSelect
                 className="sidebar-usage-select"
                 popoverClassName="sidebar-usage-select-popover"
+                style={{ width: "100%" }}
                 value={selectedGroup?.id ?? ""}
                 ariaLabel={t("sidebar.usageGroup")}
                 options={(selectedProvider.groups ?? []).map((group) => ({

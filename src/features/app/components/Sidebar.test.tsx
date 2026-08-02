@@ -514,6 +514,8 @@ describe("Sidebar", () => {
 
     const providerSelect = screen.getByRole("button", { name: "服务商" });
     expect(providerSelect.dataset.buttonElevation).toBe("none");
+    expect(providerSelect.style.width).toBe("100%");
+    expect(screen.getByRole("button", { name: "分组" }).style.width).toBe("100%");
     expect(document.querySelector(".sidebar-usage-panel select")).toBeNull();
 
     fireEvent.keyDown(providerSelect, { key: "ArrowDown" });

@@ -197,6 +197,12 @@ describe("sidebar interaction styles", () => {
     expect(sidebarCss).toMatch(
       /\.sidebar-usage-panel\s*\{[^}]*border:\s*1px solid var\(--sidebar-object-border\);[^}]*background:\s*var\(--sidebar-object-bg-strong\);/s,
     );
+    expect(sidebarCss).toMatch(
+      /\.sidebar-usage-selection-stack \.ds-rounded-select\s*\{[^}]*display:\s*block;[^}]*width:\s*100%;[^}]*min-width:\s*0;/s,
+    );
+    expect(sidebarCss).toMatch(
+      /\.sidebar-usage-selection-stack \.sidebar-usage-select\s*\{[^}]*display:\s*flex;[^}]*width:\s*100%;[^}]*min-width:\s*0;[^}]*max-width:\s*none;/s,
+    );
     expect(sidebarCss).not.toContain(".sidebar-theme-toggle");
     expect(sidebarCss).not.toContain(".sidebar-bottom-actions");
     expect(sidebarCss).not.toContain(".sidebar-account-menu");

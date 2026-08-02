@@ -2372,9 +2372,16 @@
   cursor: pointer;
 }
 
-.sidebar-usage-selection-stack .ds-rounded-select,
-.sidebar-usage-selection-stack .sidebar-usage-select {
+.sidebar-usage-selection-stack .ds-rounded-select {
+  display: block;
   width: 100%;
+  min-width: 0;
+}
+
+.sidebar-usage-selection-stack .sidebar-usage-select {
+  display: flex;
+  width: 100%;
+  min-width: 0;
   max-width: none;
 }
 
