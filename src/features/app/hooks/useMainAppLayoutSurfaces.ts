@@ -13,7 +13,10 @@ import type {
 import type { ThreadState } from "@/features/threads/hooks/useThreadsReducer";
 import type { ThreadHistoryPageState } from "@/features/threads/hooks/useThreadActions";
 import { useSidebarProviderUsage } from "@app/hooks/useSidebarProviderUsage";
-import { effectiveUsageCredentialSelection } from "@/utils/providerCredentials";
+import {
+  effectiveUsageCredentialSelection,
+  synchronizeUsageProviderSelection,
+} from "@/utils/providerCredentials";
 import type { ConversationAppearance } from "@app/utils/runtimeThemeAppearance";
 import type { WorkspaceLaunchScriptsState } from "@app/hooks/useWorkspaceLaunchScripts";
 import { REMOTE_THREAD_POLL_INTERVAL_MS } from "@app/hooks/useRemoteThreadRefreshOnFocus";
@@ -632,8 +635,7 @@ function buildPrimarySurface({
       effectiveUsageCredentialSelection: effectiveUsageSelection,
       onSelectUsageCredential: (usageSelection) => {
         void onUpdateAppSettings({
-          ...appSettings,
-          usageCredentialSelection: usageSelection,
+          ...synchronizeUsageProviderSelection(appSettings, usageSelection),
         });
       },
       usageConfigurationWarning:

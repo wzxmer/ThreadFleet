@@ -2104,7 +2104,7 @@ describe("SettingsView Codex defaults", () => {
     });
   });
 
-  it("enables the compatibility gateway for opencode", () => {
+  it("selects the compatibility gateway transport for opencode", () => {
     renderCodexSection({ initialSection: "providers" });
 
     fireEvent.change(screen.getByLabelText("服务商类型"), {
@@ -2114,9 +2114,9 @@ describe("SettingsView Codex defaults", () => {
     expect((screen.getByLabelText("服务商 Base URL") as HTMLInputElement).value).toBe(
       "https://opencode.ai/zen/go/v1",
     );
-    const gateway = screen.getByRole("checkbox", { name: "使用本地兼容网关" });
-    expect((gateway as HTMLInputElement).checked).toBe(true);
-    expect((gateway as HTMLInputElement).disabled).toBe(true);
+    const transport = screen.getByRole("combobox", { name: "服务商传输模式" });
+    expect((transport as HTMLSelectElement).value).toBe("chat-completions-gateway");
+    expect((transport as HTMLSelectElement).disabled).toBe(true);
     expect(
       screen.getByText("OpenCode Zen 必须选择明确模型，不能沿用全局 Codex 模型。"),
     ).toBeTruthy();
@@ -2458,6 +2458,64 @@ describe("SettingsView Codex defaults", () => {
       providerId: "provider-a",
       groupId: "group-b",
       credentialId: "key-b",
+    });
+  });
+
+  it("shows only the execution provider as enabled when usage state differs", async () => {
+    renderCodexSection({
+      initialSection: "providers",
+      appSettings: {
+        codexProviders: [
+          {
+            id: "provider-a",
+            name: "Provider A",
+            baseUrlEnvVar: "OPENAI_BASE_URL",
+            baseUrl: "https://a.example.test/v1",
+            groups: [
+              {
+                id: "group-a",
+                name: "Group A",
+                credentials: [
+                  { id: "key-a", name: "Key A", key: "a", keyEnvVar: "OPENAI_API_KEY" },
+                ],
+              },
+            ],
+          },
+          {
+            id: "provider-b",
+            name: "Provider B",
+            baseUrlEnvVar: "OPENAI_BASE_URL",
+            baseUrl: "https://b.example.test/v1",
+            groups: [
+              {
+                id: "group-b",
+                name: "Group B",
+                credentials: [
+                  { id: "key-b", name: "Key B", key: "b", keyEnvVar: "OPENAI_API_KEY" },
+                ],
+              },
+            ],
+          },
+        ],
+        executionCredentialSelection: {
+          providerId: "provider-a",
+          groupId: "group-a",
+          credentialId: "key-a",
+        },
+        usageCredentialSelection: {
+          providerId: "provider-b",
+          groupId: "group-b",
+          credentialId: "key-b",
+        },
+      },
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByText("已启用")).toHaveLength(1);
+      expect(
+        screen.getByRole("button", { name: /Provider A.*https:\/\/a\.example\.test\/v1/ })
+          .textContent,
+      ).toContain("已启用");
     });
   });
 

@@ -12,6 +12,15 @@ const DEFAULT_EFFORT_KEYS = [
   "default_reasoning_effort",
 ] as const;
 
+const MODEL_ID_REASONING_EFFORTS = [
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+  "ultra",
+] as const;
+
 function firstOwnValue(
   record: Record<string, unknown>,
   keys: readonly string[],
@@ -30,6 +39,15 @@ export function normalizeReasoningEffortValue(value: unknown): string | null {
   }
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+export function inferReasoningEffortFromModelId(modelId: string): string | null {
+  const tokens = modelId
+    .trim()
+    .toLocaleLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+  return MODEL_ID_REASONING_EFFORTS.find((effort) => tokens.includes(effort)) ?? null;
 }
 
 export function parseReasoningEffortOptions(value: unknown): ReasoningEffortOption[] {

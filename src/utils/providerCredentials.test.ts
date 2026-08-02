@@ -5,6 +5,7 @@ import {
   credentialSelectionId,
   effectiveUsageCredentialSelection,
   providersToLegacyProfiles,
+  synchronizeUsageProviderSelection,
 } from "./providerCredentials";
 
 const provider: CodexProvider = {
@@ -109,6 +110,74 @@ describe("provider credential projection", () => {
         usageCredentialSelection: usageSelection,
       }),
     ).toEqual(usageSelection);
+  });
+
+  it("synchronizes a usage provider switch with the active execution provider", () => {
+    const providerB: CodexProvider = {
+      ...provider,
+      id: "provider-b",
+      name: "Provider B",
+      groups: [
+        {
+          ...provider.groups[0],
+          id: "group-b",
+          credentials: [{ ...provider.groups[0].credentials[0], id: "key-b" }],
+        },
+      ],
+    };
+    const executionSelection = {
+      providerId: "provider-a",
+      groupId: "group-a",
+      credentialId: "key-a",
+    };
+    const usageSelection = {
+      providerId: "provider-b",
+      groupId: "group-b",
+      credentialId: "key-b",
+    };
+
+    const next = synchronizeUsageProviderSelection(
+      {
+        codexProviders: [provider, providerB],
+        codexKeyProfiles: [],
+        activeCodexKeyProfileId: credentialSelectionId(executionSelection),
+        executionCredentialSelection: executionSelection,
+        usageCredentialSelection: null,
+      },
+      usageSelection,
+    );
+
+    expect(next.usageCredentialSelection).toEqual(usageSelection);
+    expect(next.executionCredentialSelection).toEqual(usageSelection);
+    expect(next.activeCodexKeyProfileId).toBe(credentialSelectionId(usageSelection));
+  });
+
+  it("keeps the execution credential when only the usage group changes", () => {
+    const usageSelection = {
+      providerId: "provider-a",
+      groupId: "group-a",
+      credentialId: "key-b",
+    };
+    const executionSelection = {
+      providerId: "provider-a",
+      groupId: "group-a",
+      credentialId: "key-a",
+    };
+
+    const next = synchronizeUsageProviderSelection(
+      {
+        codexProviders: [provider],
+        codexKeyProfiles: [],
+        activeCodexKeyProfileId: credentialSelectionId(executionSelection),
+        executionCredentialSelection: executionSelection,
+        usageCredentialSelection: null,
+      },
+      usageSelection,
+    );
+
+    expect(next.usageCredentialSelection).toEqual(usageSelection);
+    expect(next.executionCredentialSelection).toEqual(executionSelection);
+    expect(next.activeCodexKeyProfileId).toBe(credentialSelectionId(executionSelection));
   });
 
   it("falls back to the execution credential when the usage override was deleted", () => {

@@ -414,7 +414,8 @@ pub(crate) fn sync_active_provider_profile_to_local_config(
     if !settings.sync_provider_profile_to_local_config && existing_state.is_none() {
         return Ok(ProviderConfigSyncOutcome::Disabled);
     }
-    let has_active_profile = provider_profiles_core::effective_execution_profile(settings).is_some();
+    let has_active_profile =
+        provider_profiles_core::effective_execution_profile(settings).is_some();
 
     let snapshot = config_toml_core::load_global_config_snapshot(codex_home)?;
     let current = ProviderOwnedConfig::capture(&snapshot.document)?;
@@ -477,8 +478,7 @@ mod tests {
     use super::*;
     use crate::shared::config_toml_core;
     use crate::types::{
-        CodexCredential, CodexCredentialGroup, CodexKeyProfile, CodexProvider,
-        CredentialSelection,
+        CodexCredential, CodexCredentialGroup, CodexKeyProfile, CodexProvider, CredentialSelection,
     };
 
     fn temp_dir(prefix: &str) -> PathBuf {

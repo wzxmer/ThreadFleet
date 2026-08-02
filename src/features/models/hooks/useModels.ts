@@ -307,6 +307,26 @@ export function useModels({
       hadProviderModels.current = true;
       setModels(providerModels);
       setConfigModel(preferredModelId);
+      const currentSelection = findModelByIdOrModel(providerModels, selectedModelId);
+      const preferredSelection = findModelByIdOrModel(providerModels, preferredModelId);
+      const nextSelection =
+        (hasUserSelectedModel.current ? currentSelection : null) ??
+        preferredSelection ??
+        providerModels.find((model) => model.isDefault) ??
+        providerModels[0] ??
+        null;
+      if (nextSelection) {
+        if (nextSelection.id !== selectedModelId) {
+          setSelectedModelIdState(nextSelection.id);
+        }
+        const nextEffort = resolveEffort(
+          nextSelection,
+          hasUserSelectedEffort.current,
+        );
+        if (nextEffort !== selectedEffort) {
+          setSelectedEffortState(nextEffort);
+        }
+      }
       return;
     }
     if (!hadProviderModels.current) {
@@ -315,7 +335,7 @@ export function useModels({
     hadProviderModels.current = false;
     lastFetchedWorkspaceId.current = null;
     void refreshModels();
-  }, [preferredModelId, providerModels, refreshModels]);
+  }, [preferredModelId, providerModels, refreshModels, resolveEffort, selectedEffort, selectedModelId]);
 
   useEffect(() => {
     const reconnected = isConnected && !wasConnected.current;

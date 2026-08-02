@@ -254,4 +254,72 @@ describe("resolveCodexProviderBaseUrl", () => {
     ]);
     expect(model.defaultReasoningEffort).toBe("medium");
   });
+
+  it("maps duck model id reasoning variants to compatible effort options", () => {
+    const models = resolveCodexProviderModelOptions({
+      id: "duck",
+      name: "duck",
+      providerKind: "custom",
+      keyEnvVar: "OPENAI_API_KEY",
+      key: "secret",
+      baseUrlEnvVar: "OPENAI_BASE_URL",
+      baseUrl: "https://api.duckcoding.ai",
+      model: "gpt-5.6-luna-max",
+      supportsThinking: true,
+      supportsReasoningEffort: true,
+      cachedModels: [
+        { id: "gpt-5.6-luna", name: null, contextWindow: null },
+        { id: "gpt-5.6-luna-low", name: null, contextWindow: null },
+        { id: "gpt-5.6-luna-max", name: null, contextWindow: null },
+      ],
+    });
+
+    expect(models.find((model) => model.id === "gpt-5.6-luna-max")).toMatchObject({
+      supportedReasoningEfforts: [{ reasoningEffort: "max", description: "" }],
+      defaultReasoningEffort: "max",
+    });
+    expect(models.find((model) => model.id === "gpt-5.6-luna-low")).toMatchObject({
+      supportedReasoningEfforts: [{ reasoningEffort: "low", description: "" }],
+      defaultReasoningEffort: "low",
+    });
+    expect(models.find((model) => model.id === "gpt-5.6-luna")).toMatchObject({
+      supportedReasoningEfforts: [
+        { reasoningEffort: "low", description: "" },
+        { reasoningEffort: "medium", description: "" },
+        { reasoningEffort: "high", description: "" },
+        { reasoningEffort: "xhigh", description: "" },
+        { reasoningEffort: "max", description: "" },
+        { reasoningEffort: "ultra", description: "" },
+      ],
+      defaultReasoningEffort: "medium",
+    });
+  });
+
+  it("keeps max available for the base gpt-5.6-luna model when xhigh is cached", () => {
+    const [model] = resolveCodexProviderModelOptions({
+      id: "luna-provider",
+      name: "Luna Provider",
+      providerKind: "custom",
+      keyEnvVar: "OPENAI_API_KEY",
+      key: "secret",
+      baseUrlEnvVar: "OPENAI_BASE_URL",
+      baseUrl: "https://api.example.com/v1",
+      model: "gpt-5.6-luna",
+      supportsThinking: true,
+      supportsReasoningEffort: true,
+      cachedModels: [{
+        id: "gpt-5.6-luna",
+        name: null,
+        contextWindow: null,
+        supportedReasoningEfforts: [{ reasoningEffort: "xhigh", description: "" }],
+        defaultReasoningEffort: "xhigh",
+      }],
+    });
+
+    expect(model.supportedReasoningEfforts.map((option) => option.reasoningEffort)).toEqual([
+      "xhigh",
+      "max",
+    ]);
+    expect(model.defaultReasoningEffort).toBe("xhigh");
+  });
 });

@@ -9,6 +9,7 @@ import {
   providersToLegacyProfiles,
 } from "@/utils/providerCredentials";
 import {
+  inferReasoningEffortFromModelId,
   normalizeReasoningEffortValue,
   parseReasoningEffortOptions,
 } from "@utils/reasoningEfforts";
@@ -32,6 +33,35 @@ const PROVIDER_REASONING_EFFORTS = [
 ].map(
   (reasoningEffort) => ({ reasoningEffort, description: "" }),
 );
+
+export const PROVIDER_REASONING_EFFORT_VALUES = [
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+  "ultra",
+] as const;
+
+const LUNA_BASE_MODEL_ID = "gpt-5.6-luna";
+
+function isDuckCodingProvider(profile: CodexKeyProfile): boolean {
+  const baseUrl = resolveCodexProviderBaseUrl(profile.providerKind, profile.baseUrl);
+  if (!baseUrl) {
+    return false;
+  }
+  try {
+    const url = new URL(baseUrl.includes("://") ? baseUrl : `https://${baseUrl}`);
+    const hostname = url.hostname.toLocaleLowerCase();
+    return hostname === "api.duckcoding.ai" || hostname.endsWith(".duckcoding.ai");
+  } catch {
+    return false;
+  }
+}
+
+function isBaseGpt56LunaModel(modelId: string): boolean {
+  return modelId.trim().toLocaleLowerCase() === LUNA_BASE_MODEL_ID;
+}
 
 export function resolveCodexProviderBaseUrl(
   providerKind: CodexKeyProfile["providerKind"],
@@ -132,11 +162,30 @@ export function resolveCodexProviderModelOptions(
   if (selectedModel && !cachedModels.some((model) => model.id === selectedModel)) {
     cachedModels.unshift({ id: selectedModel, name: null, contextWindow: null });
   }
+  const inferDuckReasoning = isDuckCodingProvider(profile);
   return cachedModels.map((model) => {
-    const modelDefault = normalizeReasoningEffortValue(model.defaultReasoningEffort);
+    const explicitModelDefault = normalizeReasoningEffortValue(model.defaultReasoningEffort);
+    const canInferReasoning =
+      inferDuckReasoning &&
+      model.supportedReasoningEfforts === undefined &&
+      explicitModelDefault === null;
+    const inferredReasoningEffort = canInferReasoning
+      ? inferReasoningEffortFromModelId(model.id)
+      : null;
+    const modelDefault = explicitModelDefault ?? inferredReasoningEffort;
     const hasModelReasoningMetadata =
-      model.supportedReasoningEfforts !== undefined || modelDefault !== null;
+      model.supportedReasoningEfforts !== undefined ||
+      explicitModelDefault !== null ||
+      inferredReasoningEffort !== null;
     const modelEfforts = parseReasoningEffortOptions(model.supportedReasoningEfforts ?? []);
+    if (
+      inferredReasoningEffort &&
+      !modelEfforts.some(
+        (option) => option.reasoningEffort.toLocaleLowerCase() === inferredReasoningEffort,
+      )
+    ) {
+      modelEfforts.push({ reasoningEffort: inferredReasoningEffort, description: "" });
+    }
     if (
       modelDefault &&
       !modelEfforts.some(
@@ -144,6 +193,16 @@ export function resolveCodexProviderModelOptions(
       )
     ) {
       modelEfforts.push({ reasoningEffort: modelDefault, description: "" });
+    }
+    if (
+      isBaseGpt56LunaModel(model.id) &&
+      !modelEfforts.some((option) => option.reasoningEffort.toLocaleLowerCase() === "max") &&
+      modelEfforts.some((option) => {
+        const effort = option.reasoningEffort.toLocaleLowerCase();
+        return effort === "xhigh" || effort === "ultra";
+      })
+    ) {
+      modelEfforts.push({ reasoningEffort: "max", description: "" });
     }
     const supportedReasoningEfforts = hasModelReasoningMetadata
       ? modelEfforts

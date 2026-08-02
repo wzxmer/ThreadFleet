@@ -1010,6 +1010,23 @@ async fn write_responses_stream_from_chat_stream(
     stream: &mut TcpStream,
     response: reqwest::Response,
 ) -> Result<(), String> {
+    let is_event_stream = response
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .map(str::trim)
+        .is_some_and(|value| value.eq_ignore_ascii_case("text/event-stream"));
+    if !is_event_stream {
+        let response_text = response
+            .text()
+            .await
+            .map_err(|err| format!("Failed to read upstream chat completions response: {err}"))?;
+        let chat_response = serde_json::from_str::<Value>(&response_text)
+            .map_err(|err| format!("Failed to parse upstream chat completions response: {err}"))?;
+        return write_responses_stream_from_chat_response(stream, &chat_response).await;
+    }
+
     write_sse_headers(stream, reqwest::StatusCode::OK).await?;
     let response_id = format!("resp_{}", unique_suffix());
     let model = "gateway";
@@ -1041,40 +1058,27 @@ async fn write_responses_stream_from_chat_stream(
         append_utf8_stream_chunk(&mut pending, &mut pending_utf8, &chunk)?;
         while let Some((raw_event, rest)) = split_next_sse_event(&pending) {
             pending = rest;
-            for data in parse_sse_data_lines(&raw_event) {
-                if data.trim() == "[DONE]" {
-                    continue;
-                }
-                let Ok(value) = serde_json::from_str::<Value>(&data) else {
-                    continue;
-                };
-                if let Some(delta) = chat_stream_delta_text(&value) {
-                    let message_id = ensure_streaming_message(stream, &mut message_id, 0).await?;
-                    accumulated.push_str(&delta);
-                    write_sse_event(
-                        stream,
-                        "response.output_text.delta",
-                        json!({
-                            "type": "response.output_text.delta",
-                            "item_id": message_id,
-                            "output_index": 0,
-                            "content_index": 0,
-                            "delta": delta,
-                        }),
-                    )
-                    .await?;
-                }
-                append_chat_stream_tool_calls(
-                    stream,
-                    &value,
-                    &mut tool_calls,
-                    message_id.is_some(),
-                )
-                .await?;
-            }
+            process_chat_stream_event(
+                stream,
+                &raw_event,
+                &mut accumulated,
+                &mut message_id,
+                &mut tool_calls,
+            )
+            .await?;
         }
     }
     finish_utf8_stream(&pending_utf8)?;
+    if !pending.trim().is_empty() {
+        process_chat_stream_event(
+            stream,
+            &pending,
+            &mut accumulated,
+            &mut message_id,
+            &mut tool_calls,
+        )
+        .await?;
+    }
 
     if let Some(message_id) = message_id.as_deref() {
         write_sse_event(
@@ -1153,6 +1157,213 @@ async fn write_responses_stream_from_chat_stream(
     Ok(())
 }
 
+async fn process_chat_stream_event(
+    stream: &mut TcpStream,
+    raw_event: &str,
+    accumulated: &mut String,
+    message_id: &mut Option<String>,
+    tool_calls: &mut BTreeMap<usize, StreamingToolCall>,
+) -> Result<(), String> {
+    for data in parse_sse_data_lines(raw_event) {
+        if data.trim() == "[DONE]" {
+            continue;
+        }
+        let Ok(value) = serde_json::from_str::<Value>(&data) else {
+            continue;
+        };
+        if let Some(delta) = chat_stream_delta_text(&value) {
+            let message_id = ensure_streaming_message(stream, message_id, 0).await?;
+            accumulated.push_str(&delta);
+            write_sse_event(
+                stream,
+                "response.output_text.delta",
+                json!({
+                    "type": "response.output_text.delta",
+                    "item_id": message_id,
+                    "output_index": 0,
+                    "content_index": 0,
+                    "delta": delta,
+                }),
+            )
+            .await?;
+        }
+        append_chat_stream_tool_calls(stream, &value, tool_calls, message_id.is_some()).await?;
+    }
+    Ok(())
+}
+
+async fn write_responses_stream_from_chat_response(
+    stream: &mut TcpStream,
+    chat_response: &Value,
+) -> Result<(), String> {
+    write_sse_headers(stream, reqwest::StatusCode::OK).await?;
+    let response = chat_completion_to_response(chat_response);
+    let response_id = response
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or("resp_gateway");
+    let model = response
+        .get("model")
+        .cloned()
+        .unwrap_or_else(|| json!("gateway"));
+    let created_at = response
+        .get("created_at")
+        .cloned()
+        .unwrap_or_else(|| json!(now_unix_seconds()));
+    write_sse_event(
+        stream,
+        "response.created",
+        json!({
+            "type": "response.created",
+            "response": {
+                "id": response_id,
+                "object": "response",
+                "created_at": created_at,
+                "status": "in_progress",
+                "model": model,
+                "output": []
+            }
+        }),
+    )
+    .await?;
+
+    for (output_index, item) in response
+        .get("output")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .enumerate()
+    {
+        let item_id = item
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or("item_gateway");
+        let mut in_progress_item = item.clone();
+        if let Some(object) = in_progress_item.as_object_mut() {
+            object.insert("status".to_string(), json!("in_progress"));
+        }
+        write_sse_event(
+            stream,
+            "response.output_item.added",
+            json!({
+                "type": "response.output_item.added",
+                "output_index": output_index,
+                "item": in_progress_item,
+            }),
+        )
+        .await?;
+
+        match item.get("type").and_then(Value::as_str) {
+            Some("message") => {
+                for (content_index, part) in item
+                    .get("content")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .enumerate()
+                {
+                    if part.get("type").and_then(Value::as_str) != Some("output_text") {
+                        continue;
+                    }
+                    let text = part.get("text").and_then(Value::as_str).unwrap_or("");
+                    write_sse_event(
+                        stream,
+                        "response.content_part.added",
+                        json!({
+                            "type": "response.content_part.added",
+                            "item_id": item_id,
+                            "output_index": output_index,
+                            "content_index": content_index,
+                            "part": part,
+                        }),
+                    )
+                    .await?;
+                    if !text.is_empty() {
+                        write_sse_event(
+                            stream,
+                            "response.output_text.delta",
+                            json!({
+                                "type": "response.output_text.delta",
+                                "item_id": item_id,
+                                "output_index": output_index,
+                                "content_index": content_index,
+                                "delta": text,
+                            }),
+                        )
+                        .await?;
+                    }
+                    write_sse_event(
+                        stream,
+                        "response.output_text.done",
+                        json!({
+                            "type": "response.output_text.done",
+                            "item_id": item_id,
+                            "output_index": output_index,
+                            "content_index": content_index,
+                            "text": text,
+                        }),
+                    )
+                    .await?;
+                }
+            }
+            Some("function_call") => {
+                let arguments = item.get("arguments").and_then(Value::as_str).unwrap_or("");
+                if !arguments.is_empty() {
+                    write_sse_event(
+                        stream,
+                        "response.function_call_arguments.delta",
+                        json!({
+                            "type": "response.function_call_arguments.delta",
+                            "item_id": item_id,
+                            "output_index": output_index,
+                            "delta": arguments,
+                        }),
+                    )
+                    .await?;
+                }
+                write_sse_event(
+                    stream,
+                    "response.function_call_arguments.done",
+                    json!({
+                        "type": "response.function_call_arguments.done",
+                        "item_id": item_id,
+                        "output_index": output_index,
+                        "arguments": arguments,
+                    }),
+                )
+                .await?;
+            }
+            _ => {}
+        }
+
+        write_sse_event(
+            stream,
+            "response.output_item.done",
+            json!({
+                "type": "response.output_item.done",
+                "output_index": output_index,
+                "item": item,
+            }),
+        )
+        .await?;
+    }
+
+    write_sse_event(
+        stream,
+        "response.completed",
+        json!({
+            "type": "response.completed",
+            "response": response,
+        }),
+    )
+    .await?;
+    stream
+        .write_all(b"data: [DONE]\n\n")
+        .await
+        .map_err(|err| format!("Failed to finish Responses stream: {err}"))?;
+    Ok(())
+}
+
 async fn ensure_streaming_message<'a>(
     stream: &mut TcpStream,
     message_id: &'a mut Option<String>,
@@ -1203,8 +1414,16 @@ async fn append_chat_stream_tool_calls(
         .get("choices")
         .and_then(Value::as_array)
         .and_then(|choices| choices.first())
-        .and_then(|choice| choice.get("delta"))
-        .and_then(|delta| delta.get("tool_calls"))
+        .and_then(|choice| {
+            choice
+                .get("delta")
+                .and_then(|delta| delta.get("tool_calls"))
+                .or_else(|| {
+                    choice
+                        .get("message")
+                        .and_then(|message| message.get("tool_calls"))
+                })
+        })
         .and_then(Value::as_array);
     let Some(deltas) = deltas else {
         return Ok(());
@@ -1688,6 +1907,44 @@ mod tests {
         reqwest::get(format!("http://{addr}/stream")).await.unwrap()
     }
 
+    async fn unterminated_function_call_event_stream_response() -> reqwest::Response {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0u8; 1024];
+            let _ = stream.read(&mut request).await;
+            let body = "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_tail\",\"type\":\"function\",\"function\":{\"name\":\"shell_command\",\"arguments\":\"{}\"}}]}}]}\n";
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n",
+                body.len(),
+            );
+            stream.write_all(head.as_bytes()).await.unwrap();
+            stream.write_all(body.as_bytes()).await.unwrap();
+        });
+        reqwest::get(format!("http://{addr}/stream")).await.unwrap()
+    }
+
+    async fn non_streaming_function_call_response() -> reqwest::Response {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0u8; 1024];
+            let _ = stream.read(&mut request).await;
+            let body = r#"{"id":"chatcmpl_json","model":"duck-model","choices":[{"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call_json","type":"function","function":{"name":"shell_command","arguments":"{}"}}]}}]}"#;
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+                body.len(),
+            );
+            stream.write_all(head.as_bytes()).await.unwrap();
+            stream.write_all(body.as_bytes()).await.unwrap();
+        });
+        reqwest::get(format!("http://{addr}/response"))
+            .await
+            .unwrap()
+    }
+
     async fn downstream_pair() -> (TcpStream, TcpStream) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -1762,6 +2019,43 @@ mod tests {
             assert!(output.contains("response.output_item.done"));
             assert!(output.contains("\"call_id\":\"call_123\""));
             assert!(output.contains("\"arguments\":\"{\\\"command\\\":\\\"pwd\\\"}\""));
+            assert!(output.contains("response.completed"));
+        });
+    }
+
+    #[test]
+    fn streamed_chat_function_call_keeps_unterminated_final_event() {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let response = unterminated_function_call_event_stream_response().await;
+            let (mut server, mut client) = downstream_pair().await;
+            let writer = tokio::spawn(async move {
+                write_responses_stream_from_chat_stream(&mut server, response).await
+            });
+            let mut output = Vec::new();
+            client.read_to_end(&mut output).await.unwrap();
+            writer.await.unwrap().unwrap();
+
+            let output = String::from_utf8_lossy(&output);
+            assert!(output.contains("call_tail"));
+            assert!(output.contains("response.function_call_arguments.done"));
+        });
+    }
+
+    #[test]
+    fn non_streaming_chat_function_call_is_adapted_to_responses_events() {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let response = non_streaming_function_call_response().await;
+            let (mut server, mut client) = downstream_pair().await;
+            let writer = tokio::spawn(async move {
+                write_responses_stream_from_chat_stream(&mut server, response).await
+            });
+            let mut output = Vec::new();
+            client.read_to_end(&mut output).await.unwrap();
+            writer.await.unwrap().unwrap();
+
+            let output = String::from_utf8_lossy(&output);
+            assert!(output.contains("call_json"));
+            assert!(output.contains("response.output_item.done"));
             assert!(output.contains("response.completed"));
         });
     }

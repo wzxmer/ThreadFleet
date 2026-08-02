@@ -22,7 +22,11 @@ import {
 } from "@/features/design-system/components/settings/SettingsPrimitives";
 import { useI18n } from "@/features/i18n/I18nProvider";
 import { getProviderModels, probeProviderFunctionCalling } from "@/services/tauri";
-import { mergeCodexProviderModels, resolveCodexProviderBaseUrl } from "@/utils/providerProfiles";
+import {
+  mergeCodexProviderModels,
+  PROVIDER_REASONING_EFFORT_VALUES,
+  resolveCodexProviderBaseUrl,
+} from "@/utils/providerProfiles";
 import {
   credentialForSelection,
   createProviderEntityId,
@@ -194,7 +198,6 @@ export function SettingsProvidersSection({
   }, [appSettings.codexProviders, appSettings.codexKeyProfiles]);
 
   const executionProviderId = appSettings.executionCredentialSelection?.providerId ?? null;
-  const usageProviderId = appSettings.usageCredentialSelection?.providerId ?? null;
   const singleCredentialDraft = providerWithSingleCredentialGroups(draft);
   const persistedProvider = providers.find((provider) => provider.id === draft.id) ?? null;
   const draftMatchesPersistedProvider = Boolean(
@@ -589,8 +592,7 @@ export function SettingsProvidersSection({
             </button>
             {providers.map((provider) => {
               const selected = !isNewDraft && selectedProviderId === provider.id;
-              const enabled =
-                executionProviderId === provider.id || usageProviderId === provider.id;
+              const enabled = executionProviderId === provider.id;
               return (
                 <div key={provider.id} className="settings-provider-list-row">
                   <button
@@ -989,7 +991,7 @@ export function SettingsProvidersSection({
                         setDraft({ ...draft, defaultReasoningEffort: event.target.value })
                       }
                     >
-                      {(["low", "medium", "high", "xhigh"] as const).map((effort) => (
+                      {PROVIDER_REASONING_EFFORT_VALUES.map((effort) => (
                         <option key={effort} value={effort}>
                           {t(`settings.codex.reasoningEffort.${effort}`)}
                         </option>

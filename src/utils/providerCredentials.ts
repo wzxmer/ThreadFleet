@@ -66,6 +66,54 @@ export function effectiveUsageCredentialSelection(
     : null;
 }
 
+type ProviderSelectionSettings = Pick<
+    AppSettings,
+    | "codexProviders"
+    | "codexKeyProfiles"
+    | "activeCodexKeyProfileId"
+    | "executionCredentialSelection"
+    | "usageCredentialSelection"
+  >;
+
+export function synchronizeUsageProviderSelection<T extends ProviderSelectionSettings>(
+  settings: T,
+  usageSelection: CredentialSelection | null,
+): T {
+  if (!usageSelection) {
+    return {
+      ...settings,
+      usageCredentialSelection: null,
+    };
+  }
+
+  const providers = providersFromSettings(settings);
+  const selectedCredential = credentialForSelection(providers, usageSelection);
+  if (!selectedCredential) {
+    return {
+      ...settings,
+      usageCredentialSelection: null,
+    };
+  }
+
+  const currentExecution = credentialForSelection(
+    providers,
+    settings.executionCredentialSelection,
+  );
+  const executionSelection =
+    currentExecution?.provider.id === selectedCredential.provider.id
+      ? settings.executionCredentialSelection ?? null
+      : usageSelection;
+
+  return {
+    ...settings,
+    usageCredentialSelection: usageSelection,
+    executionCredentialSelection: executionSelection,
+    activeCodexKeyProfileId: executionSelection
+      ? credentialSelectionId(executionSelection)
+      : null,
+  };
+}
+
 export function providerSelection(
   provider: CodexProvider,
   groupId?: string,
