@@ -17,6 +17,8 @@
     "doctor:win": "node scripts/doctor.mjs --strict",
     "lint": "eslint . --ext .ts,.tsx",
     "lint:ds": "eslint . --ext .ts,.tsx",
+    "check:temporary-instrumentation": "node scripts/check-temporary-instrumentation.mjs",
+    "test:temporary-instrumentation": "node --test scripts/check-temporary-instrumentation.test.mjs",
     "codemod:modal-shell": "node scripts/codemods/modal-shell-codemod.mjs",
     "codemod:panel-shell": "node scripts/codemods/panel-shell-codemod.mjs",
     "codemod:toast-shell": "node scripts/codemods/toast-shell-codemod.mjs",

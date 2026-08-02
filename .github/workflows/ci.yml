@@ -43,6 +43,18 @@ jobs:
       - name: Tests
         run: npm run test
 
+  temporary-instrumentation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Temporary instrumentation guard
+        run: npm run check:temporary-instrumentation
+      - name: Guard tests
+        run: npm run test:temporary-instrumentation
+
   test-tauri:
     name: Rust tests (${{ matrix.platform.name }})
     runs-on: ${{ matrix.platform.os }}
@@ -103,6 +115,7 @@ jobs:
       - lint
       - typecheck
       - test-js
+      - temporary-instrumentation
       - test-tauri
     strategy:
       fail-fast: false
