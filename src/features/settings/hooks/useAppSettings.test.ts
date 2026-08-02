@@ -319,6 +319,56 @@ describe("useAppSettings", () => {
     );
   });
 
+  it("drops a deleted usage credential override during settings normalization", async () => {
+    getAppSettingsMock.mockResolvedValue(
+      ({
+        codexProviders: [
+          {
+            id: "provider-a",
+            name: "Provider A",
+            baseUrlEnvVar: "OPENAI_BASE_URL",
+            baseUrl: "https://provider.example/v1",
+            groups: [
+              {
+                id: "group-a",
+                name: "Group A",
+                credentials: [
+                  {
+                    id: "key-a",
+                    name: "Key A",
+                    key: "secret",
+                    keyEnvVar: "OPENAI_API_KEY",
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+        executionCredentialSelection: {
+          providerId: "provider-a",
+          groupId: "group-a",
+          credentialId: "key-a",
+        },
+        usageCredentialSelection: {
+          providerId: "provider-a",
+          groupId: "group-a",
+          credentialId: "deleted-key",
+        },
+      } as unknown) as AppSettings,
+    );
+
+    const { result } = renderHook(() => useAppSettings());
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.settings.executionCredentialSelection).toEqual({
+      providerId: "provider-a",
+      groupId: "group-a",
+      credentialId: "key-a",
+    });
+    expect(result.current.settings.usageCredentialSelection).toBeNull();
+  });
+
   it("keeps defaults when getAppSettings fails", async () => {
     getAppSettingsMock.mockRejectedValue(new Error("boom"));
 

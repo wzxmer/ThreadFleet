@@ -5,6 +5,10 @@ import type {
   ModelOption,
 } from "@/types";
 import {
+  parseCredentialSelectionId,
+  providersToLegacyProfiles,
+} from "@/utils/providerCredentials";
+import {
   normalizeReasoningEffortValue,
   parseReasoningEffortOptions,
 } from "@utils/reasoningEfforts";
@@ -82,6 +86,26 @@ export function applyRefreshedCodexProviderModels(
   refreshedModels: readonly CodexProviderModel[],
   refreshedAtMs: number,
 ): AppSettings {
+  const selection = parseCredentialSelectionId(profileId);
+  if (selection && settings.codexProviders?.length) {
+    let providerChanged = false;
+    const codexProviders = settings.codexProviders.map((provider) => {
+      if (provider.id !== selection.providerId) return provider;
+      providerChanged = true;
+      return {
+        ...provider,
+        cachedModels: mergeCodexProviderModels(provider.cachedModels, refreshedModels),
+        lastModelRefreshAtMs: refreshedAtMs,
+      };
+    });
+    if (providerChanged) {
+      return {
+        ...settings,
+        codexProviders,
+        codexKeyProfiles: providersToLegacyProfiles(codexProviders),
+      };
+    }
+  }
   let changed = false;
   const codexKeyProfiles = settings.codexKeyProfiles.map((profile) => {
     if (profile.id !== profileId) {

@@ -54,8 +54,7 @@ const baseProps = {
   useTokenUsageStats: false,
   thirdPartyProviderUsage: null,
   codexKeyProfiles: [],
-  activeCodexKeyProfileId: null,
-  onSelectCodexKeyProfile: vi.fn(),
+  onSelectUsageCredential: vi.fn(),
   onAddWorkspace: vi.fn(),
   onSelectHome: vi.fn(),
   onSelectWorkspace: vi.fn(),
@@ -442,34 +441,55 @@ describe("Sidebar", () => {
     expect(screen.queryByText("余额")).toBeNull();
   });
 
-  it("switches third-party key profiles from the usage panel", () => {
-    const onSelectCodexKeyProfile = vi.fn();
+  it("uses the design-system control to select a usage provider by keyboard", () => {
+    const onSelectUsageCredential = vi.fn();
     render(
       <Sidebar
         {...baseProps}
         useTokenUsageStats
-        codexKeyProfiles={[
+        codexProviders={[
           {
-            id: "discount",
-            name: "Discount key",
-            groupName: "特惠分组",
-            keyEnvVar: "OPENAI_API_KEY",
-            key: "sk-discount",
+            id: "provider-a",
+            name: "Provider A",
             baseUrlEnvVar: "OPENAI_BASE_URL",
-            baseUrl: "https://example.com/v1",
+            baseUrl: "https://a.example/v1",
+            groups: [
+              {
+                id: "group-a",
+                name: "Group A",
+                credentials: [
+                  { id: "key-a", name: "Key A", key: "a", keyEnvVar: "OPENAI_API_KEY" },
+                ],
+              },
+            ],
           },
           {
-            id: "code",
-            name: "Code key",
-            groupName: "claude code",
-            keyEnvVar: "OPENAI_API_KEY",
-            key: "sk-code",
+            id: "provider-b",
+            name: "Provider B",
             baseUrlEnvVar: "OPENAI_BASE_URL",
-            baseUrl: "https://example.com/v1",
+            baseUrl: "https://b.example/v1",
+            groups: [
+              {
+                id: "group-b",
+                name: "Group B",
+                credentials: [
+                  { id: "key-b", name: "Key B", key: "b", keyEnvVar: "OPENAI_API_KEY" },
+                ],
+              },
+            ],
           },
         ]}
-        activeCodexKeyProfileId="discount"
-        onSelectCodexKeyProfile={onSelectCodexKeyProfile}
+        usageCredentialSelection={{
+          providerId: "provider-b",
+          groupId: "group-b",
+          credentialId: "key-b",
+        }}
+        effectiveUsageCredentialSelection={{
+          providerId: "provider-b",
+          groupId: "group-b",
+          credentialId: "key-b",
+        }}
+        onSelectUsageCredential={onSelectUsageCredential}
         activeTokenUsage={{
           total: {
             totalTokens: 1_000_000,
@@ -492,11 +512,113 @@ describe("Sidebar", () => {
       />,
     );
 
-    const groupSelect = screen.getByLabelText("服务商") as HTMLSelectElement;
-    expect(groupSelect.value).toBe("discount");
+    const providerSelect = screen.getByRole("button", { name: "服务商" });
+    expect(providerSelect.dataset.buttonElevation).toBe("none");
+    expect(document.querySelector(".sidebar-usage-panel select")).toBeNull();
 
-    fireEvent.change(groupSelect, { target: { value: "code" } });
-    expect(onSelectCodexKeyProfile).toHaveBeenCalledWith("code");
+    fireEvent.keyDown(providerSelect, { key: "ArrowDown" });
+    fireEvent.keyDown(screen.getByRole("option", { name: "Provider A" }), {
+      key: "Enter",
+    });
+
+    expect(onSelectUsageCredential).toHaveBeenCalledWith({
+      providerId: "provider-a",
+      groupId: "group-a",
+      credentialId: "key-a",
+    });
+  });
+
+  it("switches usage group and can follow the execution credential", () => {
+    const onSelectUsageCredential = vi.fn();
+    render(
+      <Sidebar
+        {...baseProps}
+        useTokenUsageStats
+        codexProviders={[
+          {
+            id: "provider-a",
+            name: "Provider A",
+            baseUrlEnvVar: "OPENAI_BASE_URL",
+            baseUrl: "https://a.example/v1",
+            groups: [
+              {
+                id: "group-a",
+                name: "Group A",
+                credentials: [
+                  { id: "key-a", name: "Key A", key: "a", keyEnvVar: "OPENAI_API_KEY" },
+                ],
+              },
+            ],
+          },
+          {
+            id: "provider-b",
+            name: "Provider B",
+            baseUrlEnvVar: "OPENAI_BASE_URL",
+            baseUrl: "https://b.example/v1",
+            groups: [
+              {
+                id: "group-b1",
+                name: "Group B1",
+                credentials: [
+                  { id: "key-b1", name: "Key B1", key: "b1", keyEnvVar: "OPENAI_API_KEY" },
+                ],
+              },
+              {
+                id: "group-b2",
+                name: "Group B2",
+                credentials: [
+                  { id: "key-b2a", name: "Key B2A", key: "b2a", keyEnvVar: "OPENAI_API_KEY" },
+                  { id: "key-b2b", name: "Key B2B", key: "b2b", keyEnvVar: "OPENAI_API_KEY" },
+                ],
+              },
+            ],
+          },
+        ]}
+        usageCredentialSelection={{
+          providerId: "provider-b",
+          groupId: "group-b2",
+          credentialId: "key-b2a",
+        }}
+        effectiveUsageCredentialSelection={{
+          providerId: "provider-b",
+          groupId: "group-b2",
+          credentialId: "key-b2a",
+        }}
+        onSelectUsageCredential={onSelectUsageCredential}
+        activeTokenUsage={{
+          total: {
+            totalTokens: 100,
+            inputTokens: 80,
+            cachedInputTokens: 0,
+            outputTokens: 20,
+            reasoningOutputTokens: 0,
+            costUsd: null,
+          },
+          last: {
+            totalTokens: 0,
+            inputTokens: 0,
+            cachedInputTokens: 0,
+            outputTokens: 0,
+            reasoningOutputTokens: 0,
+            costUsd: null,
+          },
+          modelContextWindow: null,
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "分组" }));
+    fireEvent.click(screen.getByRole("option", { name: "Group B1" }));
+    expect(onSelectUsageCredential).toHaveBeenLastCalledWith({
+      providerId: "provider-b",
+      groupId: "group-b1",
+      credentialId: "key-b1",
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "服务商" }));
+    fireEvent.click(screen.getByRole("option", { name: "跟随执行服务商" }));
+    expect(onSelectUsageCredential).toHaveBeenLastCalledWith(null);
+    expect(screen.queryByLabelText("API 密钥")).toBeNull();
   });
 
   it("does not duplicate the account entry in the object sidebar bottom rail", () => {

@@ -246,6 +246,7 @@ mod tests {
             context_window: Some(200_000),
             max_output_tokens: Some(16_384),
             use_gateway: true,
+            transport_mode: "auto".to_string(),
             supports_thinking: true,
             supports_reasoning_effort: true,
             last_model_refresh_at_ms: Some(1_725_000_000_000),

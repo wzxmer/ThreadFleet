@@ -1,4 +1,5 @@
 import { SettingsCodexSection } from "./SettingsCodexSection";
+import { SettingsProvidersSection } from "./SettingsProvidersSection";
 import { SettingsComposerSection } from "./SettingsComposerSection";
 import { SettingsDictationSection } from "./SettingsDictationSection";
 import { SettingsDisplaySection } from "./SettingsDisplaySection";
@@ -72,7 +73,15 @@ export function SettingsSectionContainers({
     return <SettingsCodexSection {...orchestration.codexSectionProps} />;
   }
   if (activeSection === "providers") {
-    return <SettingsCodexSection {...orchestration.codexSectionProps} mode="providers" />;
+    return (
+      <SettingsProvidersSection
+        appSettings={orchestration.codexSectionProps.appSettings}
+        onUpdateAppSettings={orchestration.codexSectionProps.onUpdateAppSettings}
+        providerSessionDiagnostics={
+          orchestration.codexSectionProps.providerSessionDiagnostics
+        }
+      />
+    );
   }
   if (activeSection === "features") {
     return <SettingsFeaturesSection {...orchestration.featuresSectionProps} />;

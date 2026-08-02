@@ -28,7 +28,7 @@ use crate::shared::turn_execution_summary_core::{
 use crate::shared::workflow_gate_adapter_core;
 use crate::shared::workflow_preflight_core;
 use crate::state::AppState;
-use crate::types::{AppSettings, WorkspaceEntry};
+use crate::types::{AppSettings, CredentialSelection, WorkspaceEntry};
 
 fn emit_thread_live_event(app: &AppHandle, workspace_id: &str, method: &str, params: Value) {
     let _ = app.emit(
@@ -2067,6 +2067,25 @@ pub(crate) async fn provider_model_list(
     }
 
     provider_profiles_core::provider_model_list_core(base_url, api_key).await
+}
+
+#[tauri::command]
+pub(crate) async fn provider_function_tool_probe(
+    selection: CredentialSelection,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<Value, String> {
+    if remote_backend::is_remote_mode(&*state).await {
+        return remote_backend::call_remote(
+            &*state,
+            app,
+            "provider_function_tool_probe",
+            json!({ "input": selection }),
+        )
+        .await;
+    }
+    let settings = state.app_settings.lock().await.clone();
+    provider_profiles_core::provider_function_tool_probe_core(&settings, selection).await
 }
 
 /// Generates a commit message in the background without showing in the main chat

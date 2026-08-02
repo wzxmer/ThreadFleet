@@ -13,6 +13,7 @@ import type {
 import type { ThreadState } from "@/features/threads/hooks/useThreadsReducer";
 import type { ThreadHistoryPageState } from "@/features/threads/hooks/useThreadActions";
 import { useSidebarProviderUsage } from "@app/hooks/useSidebarProviderUsage";
+import { effectiveUsageCredentialSelection } from "@/utils/providerCredentials";
 import type { ConversationAppearance } from "@app/utils/runtimeThemeAppearance";
 import type { WorkspaceLaunchScriptsState } from "@app/hooks/useWorkspaceLaunchScripts";
 import { REMOTE_THREAD_POLL_INTERVAL_MS } from "@app/hooks/useRemoteThreadRefreshOnFocus";
@@ -305,6 +306,8 @@ type MainAppLayoutSurfacesContext = UseMainAppLayoutSurfacesArgs & {
   sidebarRateLimits: SidebarProps["accountRateLimits"];
   codexProviderStatus: CodexProviderStatus | null;
   thirdPartyProviderUsage: SidebarProps["thirdPartyProviderUsage"];
+  hasThirdPartyUsageSource: boolean;
+  effectiveUsageSelection: AppSettings["executionCredentialSelection"];
   subagentResults: SubagentResultSummary[];
 };
 
@@ -353,6 +356,8 @@ function buildPrimarySurface({
   sidebarRateLimits,
   codexProviderStatus,
   thirdPartyProviderUsage,
+  hasThirdPartyUsageSource,
+  effectiveUsageSelection,
   activeAccount,
   homeRateLimits,
   homeAccount,
@@ -619,20 +624,21 @@ function buildPrimarySurface({
       activeTokenUsage: activeTokenUsage ?? null,
       showCodexUsage: appSettings.showCodexUsage,
       usageShowRemaining: appSettings.usageShowRemaining,
-      useTokenUsageStats:
-        codexProviderStatus?.isConfigured === true &&
-        codexProviderStatus.isThirdParty,
+      useTokenUsageStats: hasThirdPartyUsageSource,
       thirdPartyProviderUsage,
       codexKeyProfiles: appSettings.codexKeyProfiles,
-      activeCodexKeyProfileId: appSettings.activeCodexKeyProfileId,
-      onSelectCodexKeyProfile: (profileId) => {
+      codexProviders: appSettings.codexProviders,
+      usageCredentialSelection: appSettings.usageCredentialSelection,
+      effectiveUsageCredentialSelection: effectiveUsageSelection,
+      onSelectUsageCredential: (usageSelection) => {
         void onUpdateAppSettings({
           ...appSettings,
-          activeCodexKeyProfileId: profileId || null,
+          usageCredentialSelection: usageSelection,
         });
       },
       usageConfigurationWarning:
         activeWorkspaceId &&
+        !hasThirdPartyUsageSource &&
         (!codexProviderStatus || !codexProviderStatus.isConfigured)
           ? (codexProviderStatus?.error ?? "Codex provider status is not ready")
           : null,
@@ -1584,12 +1590,17 @@ export function useMainAppLayoutSurfaces({
   onUpdateAppSettings,
 }: UseMainAppLayoutSurfacesArgs): LayoutNodesOptions {
   const { t } = useI18n();
-  const { codexProviderStatus, thirdPartyProviderUsage } = useSidebarProviderUsage({
+  const {
+    codexProviderStatus,
+    thirdPartyProviderUsage,
+    hasThirdPartyUsageSource,
+  } = useSidebarProviderUsage({
     appSettings,
     activeWorkspaceId,
     homeAccountWorkspaceId,
     statusDelayMs: activeWorkspaceId ? 0 : 800,
   });
+  const effectiveUsageSelection = effectiveUsageCredentialSelection(appSettings);
   const sidebarRateLimits = resolveSidebarRateLimits(
     activeRateLimits,
     homeRateLimits,
@@ -1819,6 +1830,8 @@ export function useMainAppLayoutSurfaces({
     sidebarRateLimits,
     codexProviderStatus,
     thirdPartyProviderUsage,
+    hasThirdPartyUsageSource,
+    effectiveUsageSelection,
     subagentResults,
   };
 

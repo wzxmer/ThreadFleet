@@ -93,9 +93,10 @@ use shared::{
 };
 use storage::{read_settings, read_workspaces};
 use types::{
-    AppSettings, GitCommitDiff, GitFileDiff, GitHubIssuesResponse, GitHubPullRequestComment,
-    GitHubPullRequestDiff, GitHubPullRequestsResponse, GitLogResponse, LocalUsageSnapshot,
-    SessionSource, WorkspaceEntry, WorkspaceInfo, WorkspaceSettings, WorktreeSetupStatus,
+    AppSettings, CredentialSelection, GitCommitDiff, GitFileDiff, GitHubIssuesResponse,
+    GitHubPullRequestComment, GitHubPullRequestDiff, GitHubPullRequestsResponse, GitLogResponse,
+    LocalUsageSnapshot, SessionSource, WorkspaceEntry, WorkspaceInfo, WorkspaceSettings,
+    WorktreeSetupStatus,
 };
 use workspace_settings::apply_workspace_settings_update;
 
@@ -2069,6 +2070,14 @@ impl DaemonState {
             day_start_unix,
         )
         .await
+    }
+
+    async fn provider_function_tool_probe(
+        &self,
+        selection: CredentialSelection,
+    ) -> Result<Value, String> {
+        let settings = self.app_settings.lock().await.clone();
+        provider_profiles_core::provider_function_tool_probe_core(&settings, selection).await
     }
 
     async fn add_clone(

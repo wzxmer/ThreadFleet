@@ -101,6 +101,51 @@ describe("resolveCodexProviderBaseUrl", () => {
     });
   });
 
+  it("updates the owning provider model cache for a credential selection", () => {
+    const settings = {
+      codexProviders: [
+        {
+          id: "provider-a",
+          name: "Provider A",
+          baseUrlEnvVar: "OPENAI_BASE_URL",
+          baseUrl: "https://example.test/v1",
+          groups: [
+            {
+              id: "group-a",
+              name: "Group A",
+              credentials: [
+                {
+                  id: "key-a",
+                  name: "Key A",
+                  key: "secret",
+                  keyEnvVar: "OPENAI_API_KEY",
+                },
+              ],
+            },
+          ],
+          cachedModels: [{ id: "model-a", name: "Model A", contextWindow: null }],
+        },
+      ],
+      codexKeyProfiles: [],
+    } as unknown as import("@/types").AppSettings;
+
+    const next = applyRefreshedCodexProviderModels(
+      settings,
+      "provider-a:group-a:key-a",
+      [{ id: "model-b", name: "Model B", contextWindow: 128000 }],
+      456,
+    );
+
+    expect(next.codexProviders?.[0]).toMatchObject({
+      lastModelRefreshAtMs: 456,
+      cachedModels: [
+        { id: "model-a", name: "Model A", contextWindow: null },
+        { id: "model-b", name: "Model B", contextWindow: 128000 },
+      ],
+    });
+    expect(next.codexKeyProfiles[0]?.id).toBe("provider-a:group-a:key-a");
+  });
+
   it("builds an authoritative model list from the active provider profile", () => {
     expect(
       resolveCodexProviderModelOptions({

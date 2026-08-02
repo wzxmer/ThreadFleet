@@ -10,6 +10,8 @@ import type {
   ArchiveManagedSessionsResponse,
   CodexProviderStatus,
   CodexProviderModel,
+  CodexFunctionToolCapability,
+  CredentialSelection,
   CodexSyncDiagnostics,
   CodexStatus,
   CodexUpdateResult,
@@ -586,6 +588,12 @@ export async function getProviderModels(
     apiKey,
   });
   return normalizeProviderModelPayload(response);
+}
+
+export async function probeProviderFunctionCalling(
+  selection: CredentialSelection,
+): Promise<CodexFunctionToolCapability> {
+  return invoke<CodexFunctionToolCapability>("provider_function_tool_probe", { selection });
 }
 
 export async function addWorkspace(path: string): Promise<WorkspaceInfo> {

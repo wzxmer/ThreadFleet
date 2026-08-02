@@ -681,11 +681,66 @@ export type CodexKeyProfile = {
   contextWindow?: number | null;
   maxOutputTokens?: number | null;
   useGateway?: boolean;
+  transportMode?: CodexProviderTransportMode;
   supportsThinking?: boolean;
   supportsReasoningEffort?: boolean;
   lastModelRefreshAtMs?: number | null;
   cachedModels?: CodexProviderModel[];
   groupName?: string | null;
+};
+
+export type CredentialSelection = {
+  providerId: string;
+  groupId: string;
+  credentialId: string;
+};
+
+export type CodexCredential = {
+  id: string;
+  name: string;
+  key: string;
+  newApiAccessToken?: string | null;
+  keyEnvVar: string;
+  functionToolCapability?: CodexFunctionToolCapability | null;
+};
+
+export type CodexFunctionToolCapability = {
+  state: "unknown" | "verified" | "unsupported" | "incompatible" | "error";
+  model?: string | null;
+  transport?: "responses" | "chat-completions-gateway" | null;
+  checkedAtMs?: number | null;
+  failureCode?: string | null;
+};
+
+export type CodexProviderTransportMode =
+  | "auto"
+  | "responses"
+  | "chat-completions-gateway";
+
+export type CodexCredentialGroup = {
+  id: string;
+  name: string;
+  credentials: CodexCredential[];
+};
+
+export type CodexProvider = {
+  id: string;
+  name: string;
+  providerKind?: CodexProviderKind;
+  usageProtocol?: "auto" | "sub2" | "new-api" | "disabled";
+  baseUrlEnvVar: string;
+  baseUrl: string | null;
+  model?: string | null;
+  contextWindow?: number | null;
+  maxOutputTokens?: number | null;
+  useGateway?: boolean;
+  transportMode?: CodexProviderTransportMode;
+  supportsThinking?: boolean;
+  supportsReasoningEffort?: boolean;
+  defaultReasoningEffort?: string | null;
+  lastModelRefreshAtMs?: number | null;
+  cachedModels?: CodexProviderModel[];
+  groups: CodexCredentialGroup[];
 };
 
 export type CodexProviderStatus = {
@@ -734,6 +789,9 @@ export type AppSettings = {
   sessionSources: SessionSource[];
   codexKeyProfiles: CodexKeyProfile[];
   activeCodexKeyProfileId: string | null;
+  codexProviders?: CodexProvider[];
+  executionCredentialSelection?: CredentialSelection | null;
+  usageCredentialSelection?: CredentialSelection | null;
   preserveSessionLibraryOnProviderSwitch: boolean;
   syncProviderProfileToLocalConfig: boolean;
   backendMode: BackendMode;

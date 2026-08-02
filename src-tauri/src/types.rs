@@ -835,6 +835,8 @@ pub(crate) struct CodexKeyProfile {
     pub(crate) max_output_tokens: Option<u64>,
     #[serde(default)]
     pub(crate) use_gateway: bool,
+    #[serde(default = "default_provider_transport_mode")]
+    pub(crate) transport_mode: String,
     #[serde(default)]
     pub(crate) supports_thinking: bool,
     #[serde(default)]
@@ -845,6 +847,90 @@ pub(crate) struct CodexKeyProfile {
     pub(crate) cached_models: Vec<CodexProviderModel>,
     #[serde(default)]
     pub(crate) group_name: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CredentialSelection {
+    pub(crate) provider_id: String,
+    pub(crate) group_id: String,
+    pub(crate) credential_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CodexCredential {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    #[serde(default)]
+    pub(crate) key: String,
+    #[serde(default)]
+    pub(crate) new_api_access_token: Option<String>,
+    #[serde(default = "default_codex_key_env_var")]
+    pub(crate) key_env_var: String,
+    #[serde(default)]
+    pub(crate) function_tool_capability: Option<CodexFunctionToolCapability>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CodexFunctionToolCapability {
+    #[serde(default = "default_function_tool_capability_state")]
+    pub(crate) state: String,
+    #[serde(default)]
+    pub(crate) model: Option<String>,
+    #[serde(default)]
+    pub(crate) transport: Option<String>,
+    #[serde(default)]
+    pub(crate) checked_at_ms: Option<i64>,
+    #[serde(default)]
+    pub(crate) failure_code: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CodexCredentialGroup {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    #[serde(default)]
+    pub(crate) credentials: Vec<CodexCredential>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CodexProvider {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    #[serde(default = "default_codex_provider_kind")]
+    pub(crate) provider_kind: String,
+    #[serde(default = "default_provider_usage_protocol")]
+    pub(crate) usage_protocol: String,
+    #[serde(default = "default_codex_base_url_env_var")]
+    pub(crate) base_url_env_var: String,
+    #[serde(default)]
+    pub(crate) base_url: Option<String>,
+    #[serde(default)]
+    pub(crate) model: Option<String>,
+    #[serde(default)]
+    pub(crate) context_window: Option<u64>,
+    #[serde(default)]
+    pub(crate) max_output_tokens: Option<u64>,
+    #[serde(default)]
+    pub(crate) use_gateway: bool,
+    #[serde(default = "default_provider_transport_mode")]
+    pub(crate) transport_mode: String,
+    #[serde(default = "default_supports_thinking")]
+    pub(crate) supports_thinking: bool,
+    #[serde(default)]
+    pub(crate) supports_reasoning_effort: bool,
+    #[serde(default)]
+    pub(crate) default_reasoning_effort: Option<String>,
+    #[serde(default)]
+    pub(crate) last_model_refresh_at_ms: Option<i64>,
+    #[serde(default)]
+    pub(crate) cached_models: Vec<CodexProviderModel>,
+    #[serde(default)]
+    pub(crate) groups: Vec<CodexCredentialGroup>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -883,6 +969,12 @@ pub(crate) struct AppSettings {
     pub(crate) codex_key_profiles: Vec<CodexKeyProfile>,
     #[serde(default, rename = "activeCodexKeyProfileId")]
     pub(crate) active_codex_key_profile_id: Option<String>,
+    #[serde(default, rename = "codexProviders")]
+    pub(crate) codex_providers: Vec<CodexProvider>,
+    #[serde(default, rename = "executionCredentialSelection")]
+    pub(crate) execution_credential_selection: Option<CredentialSelection>,
+    #[serde(default, rename = "usageCredentialSelection")]
+    pub(crate) usage_credential_selection: Option<CredentialSelection>,
     #[serde(
         default = "default_preserve_session_library_on_provider_switch",
         rename = "preserveSessionLibraryOnProviderSwitch"
@@ -1881,6 +1973,18 @@ fn default_provider_usage_protocol() -> String {
     "auto".to_string()
 }
 
+fn default_provider_transport_mode() -> String {
+    "auto".to_string()
+}
+
+fn default_function_tool_capability_state() -> String {
+    "unknown".to_string()
+}
+
+fn default_supports_thinking() -> bool {
+    true
+}
+
 fn default_token_efficiency_mode() -> String {
     "quality".to_string()
 }
@@ -1906,6 +2010,9 @@ impl Default for AppSettings {
             session_sources: Vec::new(),
             codex_key_profiles: Vec::new(),
             active_codex_key_profile_id: None,
+            codex_providers: Vec::new(),
+            execution_credential_selection: None,
+            usage_credential_selection: None,
             preserve_session_library_on_provider_switch:
                 default_preserve_session_library_on_provider_switch(),
             sync_provider_profile_to_local_config: false,

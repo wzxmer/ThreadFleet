@@ -159,6 +159,7 @@ mod tests {
             context_window: None,
             max_output_tokens: None,
             use_gateway: false,
+            transport_mode: "auto".to_string(),
             supports_thinking: false,
             supports_reasoning_effort: false,
             last_model_refresh_at_ms: None,

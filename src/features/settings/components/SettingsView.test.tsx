@@ -1969,7 +1969,7 @@ describe("SettingsView Codex defaults", () => {
     ).toBe("true");
   });
 
-  it("renders provider profiles as compact URL buttons and switches the active profile", () => {
+  it("opens provider details without changing the active execution profile", () => {
     const onUpdateAppSettings = vi.fn().mockResolvedValue(undefined);
     renderCodexSection({
       initialSection: "providers",
@@ -1998,12 +1998,57 @@ describe("SettingsView Codex defaults", () => {
 
     const profileButton = screen.getByRole("button", { name: /配置 A.*https:\/\/api\.example\.com\/v1/ });
     expect(screen.getByText("https://api.example.com/v1")).toBeTruthy();
-    expect(profileButton.getAttribute("aria-pressed")).toBe("false");
+    expect(profileButton.getAttribute("aria-pressed")).toBe("true");
 
     fireEvent.click(profileButton);
 
-    expect(onUpdateAppSettings).toHaveBeenCalledWith(
-      expect.objectContaining({ activeCodexKeyProfileId: "profile-a" }),
+    expect(onUpdateAppSettings).not.toHaveBeenCalled();
+    expect((screen.getByLabelText("模型服务商配置名称") as HTMLInputElement).value).toBe(
+      "配置 A",
+    );
+  });
+
+  it("saves a provider profile without changing the execution selection", () => {
+    const onUpdateAppSettings = vi.fn().mockResolvedValue(undefined);
+    renderCodexSection({ initialSection: "providers", onUpdateAppSettings });
+
+    fireEvent.change(screen.getByLabelText("模型服务商配置名称"), {
+      target: { value: "Draft provider" },
+    });
+    fireEvent.change(screen.getByLabelText("API 密钥"), {
+      target: { value: "draft-secret" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    const nextSettings = onUpdateAppSettings.mock.calls[onUpdateAppSettings.mock.calls.length - 1]?.[0] as AppSettings;
+    expect(nextSettings.activeCodexKeyProfileId).toBeNull();
+    expect(nextSettings.executionCredentialSelection).toBeNull();
+    expect(nextSettings.codexProviders?.[nextSettings.codexProviders.length - 1]?.name).toBe("Draft provider");
+  });
+
+  it("saves and enables a provider with an explicit execution selection", () => {
+    const onUpdateAppSettings = vi.fn().mockResolvedValue(undefined);
+    renderCodexSection({ initialSection: "providers", onUpdateAppSettings });
+
+    fireEvent.change(screen.getByLabelText("模型服务商配置名称"), {
+      target: { value: "Active provider" },
+    });
+    fireEvent.change(screen.getByLabelText("API 密钥"), {
+      target: { value: "active-secret" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存并启用" }));
+
+    const nextSettings = onUpdateAppSettings.mock.calls[onUpdateAppSettings.mock.calls.length - 1]?.[0] as AppSettings;
+    const provider = nextSettings.codexProviders?.[nextSettings.codexProviders.length - 1];
+    const group = provider?.groups[0];
+    const credential = group?.credentials[0];
+    expect(nextSettings.executionCredentialSelection).toEqual({
+      providerId: provider?.id,
+      groupId: group?.id,
+      credentialId: credential?.id,
+    });
+    expect(nextSettings.activeCodexKeyProfileId).toBe(
+      nextSettings.codexKeyProfiles[nextSettings.codexKeyProfiles.length - 1]?.id,
     );
   });
 
@@ -2040,16 +2085,22 @@ describe("SettingsView Codex defaults", () => {
       "用于读取 New API 账户余额；API 密钥仍用于读取令牌消费。未填写或验证失败时回退显示令牌额度。",
     );
     expect(
-      accessTokenHelp.closest(".settings-key-profile-secret")?.contains(accessTokenField),
+      accessTokenHelp.closest(".settings-provider-access-token-field")?.contains(accessTokenField),
     ).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "添加并启用" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存并启用" }));
 
     const calls = onUpdateAppSettings.mock.calls;
     const nextSettings = calls[calls.length - 1]?.[0] as AppSettings;
-    expect(nextSettings.codexKeyProfiles[nextSettings.codexKeyProfiles.length - 1]).toMatchObject({
+    expect(nextSettings.codexProviders?.[nextSettings.codexProviders.length - 1]).toMatchObject({
       name: "New API",
       usageProtocol: "new-api",
-      newApiAccessToken: "access-secret",
+      groups: [
+        expect.objectContaining({
+          credentials: [
+            expect.objectContaining({ newApiAccessToken: "access-secret" }),
+          ],
+        }),
+      ],
     });
   });
 
@@ -2105,10 +2156,9 @@ describe("SettingsView Codex defaults", () => {
       },
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /编辑 OpenCode/ }));
     fireEvent.click(screen.getByRole("button", { name: "获取模型" }));
     await waitFor(() => expect(getProviderModelsMock).toHaveBeenCalledTimes(1));
-    fireEvent.click(screen.getByRole("button", { name: /保存/ }));
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
 
     await waitFor(() => {
       const lastCall = onUpdateAppSettings.mock.calls[onUpdateAppSettings.mock.calls.length - 1];
@@ -2148,10 +2198,9 @@ describe("SettingsView Codex defaults", () => {
       },
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /编辑 OpenCode/ }));
     fireEvent.click(screen.getByRole("checkbox", { name: "支持思考模式" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "支持思考等级" }));
-    fireEvent.click(screen.getByRole("button", { name: /保存/ }));
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
 
     await waitFor(() => {
       const lastCall = onUpdateAppSettings.mock.calls[onUpdateAppSettings.mock.calls.length - 1];
@@ -2196,7 +2245,7 @@ describe("SettingsView Codex defaults", () => {
     expect(modelSelect.value).toBe("model-b");
   });
 
-  it("clears provider drafts when deleting the profile being edited", () => {
+  it("clears provider drafts when deleting the profile being edited", async () => {
     renderCodexSection({
       initialSection: "providers",
       appSettings: {
@@ -2221,16 +2270,195 @@ describe("SettingsView Codex defaults", () => {
       },
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /编辑 配置 A/ }));
     expect((screen.getByLabelText("模型服务商配置名称") as HTMLInputElement).value).toBe(
       "配置 A",
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /删除 配置 A/ }));
+    fireEvent.click(screen.getAllByRole("button", { name: /删除 配置 A/ })[0]);
 
-    expect((screen.getByLabelText("模型服务商配置名称") as HTMLInputElement).value).toBe("");
+    await waitFor(() =>
+      expect((screen.getByLabelText("模型服务商配置名称") as HTMLInputElement).value).toBe(""),
+    );
     expect((screen.getByLabelText("服务商模型") as HTMLInputElement).value).toBe("");
     expect(screen.queryByRole("button", { name: "取消" })).toBeNull();
+  });
+
+  it("shows a generic error and keeps the provider draft when provider deletion fails", async () => {
+    const onUpdateAppSettings = vi
+      .fn()
+      .mockRejectedValue(new Error("diagnostic-secret backend detail"));
+    renderCodexSection({
+      initialSection: "providers",
+      onUpdateAppSettings,
+      appSettings: {
+        codexKeyProfiles: [
+          {
+            id: "profile-a",
+            name: "配置 A",
+            providerKind: "custom",
+            keyEnvVar: "OPENAI_API_KEY",
+            key: "secret",
+            baseUrlEnvVar: "OPENAI_BASE_URL",
+            baseUrl: "https://api.example.com/v1",
+            model: "model-a",
+            contextWindow: null,
+            maxOutputTokens: null,
+            useGateway: true,
+            lastModelRefreshAtMs: null,
+            cachedModels: [],
+            groupName: "配置 A",
+          },
+        ],
+      },
+    });
+
+    fireEvent.click(screen.getAllByRole("button", { name: /删除 配置 A/ })[0]);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toBe("设置保存失败，原值保持不变。");
+    expect(alert.textContent).not.toContain("diagnostic-secret");
+    expect((screen.getByLabelText("模型服务商配置名称") as HTMLInputElement).value).toBe(
+      "配置 A",
+    );
+    expect(screen.getByRole("button", { name: /配置 A.*https:\/\/api\.example\.com\/v1/ })).toBeTruthy();
+  });
+
+  it("creates multiple groups and keys without flattening the provider", async () => {
+    const onUpdateAppSettings = vi.fn().mockResolvedValue(undefined);
+    renderCodexSection({ initialSection: "providers", onUpdateAppSettings });
+
+    fireEvent.change(screen.getByLabelText("模型服务商配置名称"), {
+      target: { value: "Layered provider" },
+    });
+    fireEvent.change(screen.getByLabelText("API 密钥"), {
+      target: { value: "key-a" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "新增 API 密钥" }));
+    fireEvent.change(screen.getAllByLabelText("API 密钥")[1], {
+      target: { value: "key-b" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "新增 API 密钥" }));
+    fireEvent.change(screen.getAllByLabelText("API 密钥")[2], {
+      target: { value: "key-c" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    await waitFor(() => expect(onUpdateAppSettings).toHaveBeenCalled());
+    const calls = onUpdateAppSettings.mock.calls;
+    const nextSettings = calls[calls.length - 1]?.[0] as AppSettings;
+    const provider = nextSettings.codexProviders?.[0];
+    expect(provider?.groups.map((group) => group.credentials.length)).toEqual([1, 1, 1]);
+    expect(nextSettings.codexKeyProfiles).toHaveLength(3);
+  });
+
+  it("duplicates provider structure without copying credentials", () => {
+    renderCodexSection({
+      initialSection: "providers",
+      appSettings: {
+        codexProviders: [
+          {
+            id: "provider-a",
+            name: "Provider A",
+            providerKind: "custom",
+            usageProtocol: "new-api",
+            baseUrlEnvVar: "OPENAI_BASE_URL",
+            baseUrl: "https://example.test/v1",
+            model: "model-a",
+            groups: [
+              {
+                id: "group-a",
+                name: "Group A",
+                credentials: [
+                  {
+                    id: "credential-a",
+                    name: "Key A",
+                    key: "secret-key",
+                    newApiAccessToken: "secret-token",
+                    keyEnvVar: "OPENAI_API_KEY",
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "复制服务商配置" }));
+
+    expect((screen.getByLabelText("模型服务商配置名称") as HTMLInputElement).value).toBe(
+      "Provider A 副本",
+    );
+    expect((screen.getByLabelText("API 密钥") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("New API Access Token") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("用量分组名称") as HTMLInputElement).value).toBe("Group A");
+  });
+
+  it("uses recommended reasoning defaults for a new provider", () => {
+    renderCodexSection({ initialSection: "providers" });
+
+    expect((screen.getByRole("checkbox", { name: "支持思考模式" }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole("checkbox", { name: "支持思考等级" }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText("默认思考等级") as HTMLSelectElement).value).toBe("medium");
+  });
+
+  it("clears only selections whose group was removed", async () => {
+    const onUpdateAppSettings = vi.fn().mockResolvedValue(undefined);
+    renderCodexSection({
+      initialSection: "providers",
+      onUpdateAppSettings,
+      appSettings: {
+        codexProviders: [
+          {
+            id: "provider-a",
+            name: "Provider A",
+            baseUrlEnvVar: "OPENAI_BASE_URL",
+            baseUrl: "https://example.test/v1",
+            groups: [
+              {
+                id: "group-a",
+                name: "Group A",
+                credentials: [
+                  { id: "key-a", name: "Key A", key: "a", keyEnvVar: "OPENAI_API_KEY" },
+                ],
+              },
+              {
+                id: "group-b",
+                name: "Group B",
+                credentials: [
+                  { id: "key-b", name: "Key B", key: "b", keyEnvVar: "OPENAI_API_KEY" },
+                ],
+              },
+            ],
+          },
+        ],
+        executionCredentialSelection: {
+          providerId: "provider-a",
+          groupId: "group-a",
+          credentialId: "key-a",
+        },
+        usageCredentialSelection: {
+          providerId: "provider-a",
+          groupId: "group-b",
+          credentialId: "key-b",
+        },
+      },
+    });
+
+    expect(screen.getAllByText("已启用")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "删除 Group A" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    await waitFor(() => expect(onUpdateAppSettings).toHaveBeenCalled());
+    const calls = onUpdateAppSettings.mock.calls;
+    const nextSettings = calls[calls.length - 1]?.[0] as AppSettings;
+    expect(nextSettings.executionCredentialSelection).toBeNull();
+    expect(nextSettings.activeCodexKeyProfileId).toBeNull();
+    expect(nextSettings.usageCredentialSelection).toEqual({
+      providerId: "provider-a",
+      groupId: "group-b",
+      credentialId: "key-b",
+    });
   });
 
   it("uses the latest model and medium effort by default (no Default option)", async () => {

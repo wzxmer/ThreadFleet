@@ -7,6 +7,11 @@ import type {
 import type { ThirdPartyKeyUsageSnapshot } from "@app/utils/thirdPartyKeyUsage";
 import { getProviderStatus } from "@/services/tauri";
 import { resolveCodexProviderBaseUrl } from "@/utils/providerProfiles";
+import {
+  credentialForSelection,
+  credentialSelectionId,
+  effectiveUsageCredentialSelection,
+} from "@/utils/providerCredentials";
 import { useThirdPartyKeyUsage } from "@app/hooks/useThirdPartyKeyUsage";
 
 type UseSidebarProviderUsageArgs = {
@@ -25,6 +30,7 @@ type SidebarProviderUsage = {
   workspaceId: string | null;
   codexProviderStatus: CodexProviderStatus | null;
   thirdPartyProviderUsage: ThirdPartyKeyUsageSnapshot | null;
+  hasThirdPartyUsageSource: boolean;
 };
 
 function profileUsageSignature(profile: CodexKeyProfile | null) {
@@ -48,27 +54,68 @@ export function useSidebarProviderUsage({
   statusDelayMs = 0,
 }: UseSidebarProviderUsageArgs): SidebarProviderUsage {
   const workspaceId = activeWorkspaceId ?? homeAccountWorkspaceId;
+  const activeExecutionProfileId = appSettings.executionCredentialSelection
+    ? credentialSelectionId(appSettings.executionCredentialSelection)
+    : appSettings.activeCodexKeyProfileId;
   const activeProfile = useMemo(
     () =>
       appSettings.codexKeyProfiles.find(
-        (profile) => profile.id === appSettings.activeCodexKeyProfileId,
+        (profile) => profile.id === activeExecutionProfileId,
       ) ?? null,
-    [appSettings.activeCodexKeyProfileId, appSettings.codexKeyProfiles],
+    [activeExecutionProfileId, appSettings.codexKeyProfiles],
+  );
+  const usageSelection = effectiveUsageCredentialSelection(appSettings);
+  const usageCredential = useMemo(
+    () => credentialForSelection(appSettings.codexProviders ?? [], usageSelection),
+    [appSettings.codexProviders, usageSelection],
+  );
+  const usageProvider = usageCredential?.provider ?? null;
+  const usageProfile = useMemo(
+    () =>
+      usageCredential
+        ? null
+        : appSettings.codexKeyProfiles.find(
+            (profile) =>
+              profile.id ===
+              (usageSelection
+                ? credentialSelectionId(usageSelection)
+                : activeExecutionProfileId),
+          ) ?? activeProfile,
+    [
+      activeExecutionProfileId,
+      activeProfile,
+      appSettings.codexKeyProfiles,
+      usageCredential,
+      usageSelection,
+    ],
+  );
+  const usageProfileSignature = useMemo(
+    () =>
+      usageCredential
+        ? JSON.stringify({
+            providerId: usageCredential.provider.id,
+            providerKind: usageCredential.provider.providerKind ?? null,
+            baseUrl: usageCredential.provider.baseUrl ?? null,
+            usageProtocol: usageCredential.provider.usageProtocol ?? null,
+            groupId: usageCredential.groupId,
+            credentialId: usageCredential.credential.id,
+            key: usageCredential.credential.key,
+            newApiAccessToken: usageCredential.credential.newApiAccessToken ?? null,
+          })
+        : profileUsageSignature(usageProfile),
+    [usageCredential, usageProfile],
   );
   const activeProfileSignature = useMemo(
     () => profileUsageSignature(activeProfile),
     [activeProfile],
   );
-  const activeProfileBaseUrl = activeProfile
-    ? resolveCodexProviderBaseUrl(activeProfile.providerKind, activeProfile.baseUrl)
-    : null;
   const requestKey = workspaceId
     ? JSON.stringify([
         workspaceId,
         appSettings.codexHome ?? "",
-        appSettings.activeCodexKeyProfileId ?? "__default__",
+        activeExecutionProfileId ?? "__default__",
         activeProfileSignature,
-        activeProfileBaseUrl ?? "",
+        resolveCodexProviderBaseUrl(activeProfile?.providerKind, activeProfile?.baseUrl) ?? "",
       ])
     : null;
   const [statusState, setStatusState] = useState<ProviderStatusState | null>(null);
@@ -132,16 +179,28 @@ export function useSidebarProviderUsage({
   const thirdPartyProviderUsage = useThirdPartyKeyUsage({
     enabled:
       Boolean(workspaceId) &&
-      codexProviderStatus?.isConfigured === true &&
-      codexProviderStatus.isThirdParty,
+      (usageProvider
+        ? usageProvider.providerKind !== "openai"
+        : usageProfile
+          ? usageProfile.providerKind !== "openai"
+          : codexProviderStatus?.isConfigured === true && codexProviderStatus.isThirdParty),
     workspaceId,
-    profileId: appSettings.activeCodexKeyProfileId,
-    profileRevision: activeProfileSignature,
+    profileId: usageSelection
+      ? credentialSelectionId(usageSelection)
+      : activeExecutionProfileId,
+    profileRevision: usageProfileSignature,
   });
 
   return {
     workspaceId,
     codexProviderStatus,
     thirdPartyProviderUsage,
+    hasThirdPartyUsageSource: Boolean(
+      usageProvider
+        ? usageProvider.providerKind !== "openai"
+        : usageProfile
+          ? usageProfile.providerKind !== "openai"
+          : codexProviderStatus?.isConfigured === true && codexProviderStatus.isThirdParty,
+    ),
   };
 }

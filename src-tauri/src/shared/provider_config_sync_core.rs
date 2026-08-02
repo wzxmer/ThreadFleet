@@ -232,29 +232,19 @@ pub(crate) fn apply_active_provider_profile(
     if !settings.sync_provider_profile_to_local_config {
         return Ok(ProviderConfigSyncOutcome::Disabled);
     }
-    let Some(active_id) = settings
-        .active_codex_key_profile_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    else {
+    let Some(profile) = provider_profiles_core::effective_execution_profile(settings) else {
         return Ok(ProviderConfigSyncOutcome::NoActiveProfile);
     };
-    let profile = settings
-        .codex_key_profiles
-        .iter()
-        .find(|profile| profile.id.trim() == active_id)
-        .ok_or_else(|| format!("Active Provider profile `{active_id}` was not found"))?;
     if profile.key.trim().is_empty() {
         return Err("Active Provider profiles require a non-empty API key".to_string());
     }
-    if provider_profiles_core::profile_uses_gateway(profile) {
+    if provider_profiles_core::profile_uses_gateway(&profile) {
         return Err(
             "Provider profiles that require the compatibility gateway cannot be written to config.toml"
                 .to_string(),
         );
     }
-    let base_url = provider_profiles_core::resolve_profile_base_url(profile)
+    let base_url = provider_profiles_core::resolve_profile_base_url(&profile)
         .ok_or_else(|| "Provider profiles require a provider base URL".to_string())?;
     let key_env_var = profile.key_env_var.trim();
     if key_env_var.is_empty() {
@@ -424,12 +414,7 @@ pub(crate) fn sync_active_provider_profile_to_local_config(
     if !settings.sync_provider_profile_to_local_config && existing_state.is_none() {
         return Ok(ProviderConfigSyncOutcome::Disabled);
     }
-    let has_active_profile = settings
-        .active_codex_key_profile_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .is_some();
+    let has_active_profile = provider_profiles_core::effective_execution_profile(settings).is_some();
 
     let snapshot = config_toml_core::load_global_config_snapshot(codex_home)?;
     let current = ProviderOwnedConfig::capture(&snapshot.document)?;
@@ -491,7 +476,10 @@ mod tests {
 
     use super::*;
     use crate::shared::config_toml_core;
-    use crate::types::CodexKeyProfile;
+    use crate::types::{
+        CodexCredential, CodexCredentialGroup, CodexKeyProfile, CodexProvider,
+        CredentialSelection,
+    };
 
     fn temp_dir(prefix: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
@@ -520,6 +508,7 @@ mod tests {
             context_window: Some(131_072),
             max_output_tokens: Some(8_192),
             use_gateway,
+            transport_mode: "auto".to_string(),
             supports_thinking: true,
             supports_reasoning_effort: true,
             last_model_refresh_at_ms: None,
@@ -596,6 +585,55 @@ base_url = "https://old.example/v1"
             ProviderConfigSyncOutcome::NoActiveProfile
         );
         assert_eq!(document.to_string(), original);
+    }
+
+    #[test]
+    fn execution_credential_selection_overrides_a_stale_legacy_profile() {
+        let mut settings = enabled_settings(false);
+        settings.codex_providers = vec![CodexProvider {
+            id: "provider-new".to_string(),
+            name: "New provider".to_string(),
+            provider_kind: "custom".to_string(),
+            usage_protocol: "auto".to_string(),
+            base_url_env_var: "NEW_BASE_URL".to_string(),
+            base_url: Some("https://new.example.com/v1".to_string()),
+            model: Some("new-model".to_string()),
+            context_window: None,
+            max_output_tokens: None,
+            use_gateway: false,
+            transport_mode: "auto".to_string(),
+            supports_thinking: false,
+            supports_reasoning_effort: false,
+            default_reasoning_effort: None,
+            last_model_refresh_at_ms: None,
+            cached_models: Vec::new(),
+            groups: vec![CodexCredentialGroup {
+                id: "group-new".to_string(),
+                name: "New group".to_string(),
+                credentials: vec![CodexCredential {
+                    id: "key-new".to_string(),
+                    name: "New key".to_string(),
+                    key: "new-secret".to_string(),
+                    new_api_access_token: None,
+                    key_env_var: "NEW_API_KEY".to_string(),
+                    function_tool_capability: None,
+                }],
+            }],
+        }];
+        settings.execution_credential_selection = Some(CredentialSelection {
+            provider_id: "provider-new".to_string(),
+            group_id: "group-new".to_string(),
+            credential_id: "key-new".to_string(),
+        });
+
+        let mut document = Document::new();
+        apply_active_provider_profile(&mut document, &settings).expect("apply selection");
+        let rendered = document.to_string();
+
+        assert!(rendered.contains("model = \"new-model\""));
+        assert!(rendered.contains("base_url = \"https://new.example.com/v1\""));
+        assert!(rendered.contains("env_key = \"NEW_API_KEY\""));
+        assert!(!rendered.contains("company-model"));
     }
 
     #[test]

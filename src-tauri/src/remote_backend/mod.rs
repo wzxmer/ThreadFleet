@@ -179,6 +179,7 @@ fn can_retry_after_disconnect(method: &str) -> bool {
             | "get_provider_status"
             | "get_thread_token_usage"
             | "provider_model_list"
+            | "provider_function_tool_probe"
             | "third_party_key_usage"
             | "workspace_third_party_key_usage"
             | "get_git_commit_diff"

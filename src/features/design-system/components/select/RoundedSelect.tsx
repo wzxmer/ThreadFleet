@@ -158,6 +158,7 @@ export function RoundedSelect({
         aria-haspopup="listbox"
         aria-expanded={isOpen}
         aria-controls={listboxId}
+        data-button-elevation="none"
         disabled={disabled}
         title={selectedOption?.title}
         onClick={() => setIsOpen((current) => !current)}

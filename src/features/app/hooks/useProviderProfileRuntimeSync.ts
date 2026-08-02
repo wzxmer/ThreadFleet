@@ -1,32 +1,103 @@
 import { useEffect, useRef } from "react";
-import type { AppSettings, CodexKeyProfile, WorkspaceInfo } from "@/types";
+import type {
+  AppSettings,
+  CodexKeyProfile,
+  CodexProvider,
+  CredentialSelection,
+  WorkspaceInfo,
+} from "@/types";
+import {
+  credentialForSelection,
+  providersFromSettings,
+  providersToLegacyProfiles,
+} from "@/utils/providerCredentials";
 
 export type ProviderRuntimeSettingsSnapshot = {
   activeCodexKeyProfileId: string | null;
-  activeProfile: CodexKeyProfile | null;
+  executionCredentialSelection: CredentialSelection | null;
+  codexProviders: CodexProvider[];
   syncProviderProfileToLocalConfig: boolean;
 };
+
+function restoreExecutionProvider(
+  currentProviders: CodexProvider[],
+  snapshot: ProviderRuntimeSettingsSnapshot,
+): CodexProvider[] {
+  const selection = snapshot.executionCredentialSelection;
+  const snapshotCredential = credentialForSelection(
+    snapshot.codexProviders,
+    selection,
+  );
+  if (!selection || !snapshotCredential) {
+    return currentProviders;
+  }
+
+  const snapshotProvider = snapshotCredential.provider;
+  const snapshotGroup = snapshotProvider.groups.find(
+    (group) => group.id === selection.groupId,
+  );
+  const currentProviderIndex = currentProviders.findIndex(
+    (provider) => provider.id === selection.providerId,
+  );
+  if (currentProviderIndex < 0 || !snapshotGroup) {
+    return [...currentProviders, snapshotProvider];
+  }
+
+  const currentProvider = currentProviders[currentProviderIndex];
+  const currentGroupIndex = currentProvider.groups.findIndex(
+    (group) => group.id === selection.groupId,
+  );
+  const groups = [...currentProvider.groups];
+  if (currentGroupIndex < 0) {
+    groups.push({
+      ...snapshotGroup,
+      credentials: [snapshotCredential.credential],
+    });
+  } else {
+    const currentGroup = groups[currentGroupIndex];
+    const credentialIndex = currentGroup.credentials.findIndex(
+      (credential) => credential.id === selection.credentialId,
+    );
+    const credentials = [...currentGroup.credentials];
+    if (credentialIndex < 0) {
+      credentials.push(snapshotCredential.credential);
+    } else {
+      credentials[credentialIndex] = snapshotCredential.credential;
+    }
+    groups[currentGroupIndex] = {
+      ...currentGroup,
+      name: snapshotGroup.name,
+      credentials,
+    };
+  }
+
+  const nextProviders = [...currentProviders];
+  nextProviders[currentProviderIndex] = {
+    ...snapshotProvider,
+    groups,
+  };
+  return nextProviders;
+}
 
 export function restoreProviderRuntimeSettings(
   current: AppSettings,
   snapshot: ProviderRuntimeSettingsSnapshot,
 ): AppSettings {
-  const profiles = [...current.codexKeyProfiles];
-  const activeProfile = snapshot.activeProfile;
-  if (activeProfile) {
-    const profileIndex = profiles.findIndex(
-      (profile) => profile.id === activeProfile.id,
-    );
-    if (profileIndex >= 0) {
-      profiles[profileIndex] = activeProfile;
-    } else {
-      profiles.push(activeProfile);
-    }
-  }
+  const currentProviders = providersFromSettings(current);
+  const providers = restoreExecutionProvider(currentProviders, snapshot);
+  const hasExecutionProvider = Boolean(
+    credentialForSelection(snapshot.codexProviders, snapshot.executionCredentialSelection),
+  );
   return {
     ...current,
-    codexKeyProfiles: profiles,
+    ...(hasExecutionProvider
+      ? {
+          codexProviders: providers,
+          codexKeyProfiles: providersToLegacyProfiles(providers),
+        }
+      : {}),
     activeCodexKeyProfileId: snapshot.activeCodexKeyProfileId,
+    executionCredentialSelection: snapshot.executionCredentialSelection,
     syncProviderProfileToLocalConfig: snapshot.syncProviderProfileToLocalConfig,
   };
 }

@@ -7,9 +7,13 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 
 use crate::shared::provider_gateway_core::{
-    start_provider_gateway, ProviderGatewayConfig, ProviderGatewayShutdown,
+    probe_provider_function_calling, start_provider_gateway, ProviderFunctionToolProbe,
+    ProviderGatewayConfig, ProviderGatewayShutdown,
 };
-use crate::types::AppSettings;
+use crate::types::{
+    AppSettings, CodexCredential, CodexCredentialGroup, CodexKeyProfile, CodexProvider,
+    CredentialSelection,
+};
 
 pub(crate) struct CodexKeyRuntime {
     pub(crate) env: Vec<(String, String)>,
@@ -23,6 +27,242 @@ pub(crate) const CODEX_MONITOR_PROVIDER_ID: &str = "codex_monitor";
 const CODEX_MONITOR_PROVIDER_KEY_ENV: &str = "CODEX_MONITOR_PROVIDER_KEY";
 const MAX_PROVIDER_USAGE_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 const NEW_API_LOG_LIMIT: usize = 1_000;
+
+fn migrated_id(prefix: &str, id: &str) -> String {
+    format!("{prefix}-{}", id.trim())
+}
+
+fn legacy_profile_id(provider_id: &str, group_id: &str, credential_id: &str) -> String {
+    format!("{provider_id}:{group_id}:{credential_id}")
+}
+
+fn selection_from_profile_id(profile_id: &str) -> Option<CredentialSelection> {
+    let mut parts = profile_id.split(':');
+    let provider_id = parts.next()?.trim();
+    let group_id = parts.next()?.trim();
+    let credential_id = parts.next()?.trim();
+    if provider_id.is_empty()
+        || group_id.is_empty()
+        || credential_id.is_empty()
+        || parts.next().is_some()
+    {
+        return None;
+    }
+    Some(CredentialSelection {
+        provider_id: provider_id.to_string(),
+        group_id: group_id.to_string(),
+        credential_id: credential_id.to_string(),
+    })
+}
+
+fn profile_to_provider(profile: &CodexKeyProfile) -> CodexProvider {
+    let provider_id = migrated_id("provider", &profile.id);
+    let group_id = migrated_id("group", &profile.id);
+    let credential_id = migrated_id("credential", &profile.id);
+    CodexProvider {
+        id: provider_id,
+        name: profile.name.clone(),
+        provider_kind: profile.provider_kind.clone(),
+        usage_protocol: profile.usage_protocol.clone(),
+        base_url_env_var: profile.base_url_env_var.clone(),
+        base_url: profile.base_url.clone(),
+        model: profile.model.clone(),
+        context_window: profile.context_window,
+        max_output_tokens: profile.max_output_tokens,
+        use_gateway: profile.use_gateway,
+        transport_mode: if profile.transport_mode.trim().eq_ignore_ascii_case("auto")
+            && profile.use_gateway
+        {
+            "chat-completions-gateway".to_string()
+        } else {
+            profile.transport_mode.clone()
+        },
+        supports_thinking: profile.supports_thinking,
+        supports_reasoning_effort: profile.supports_reasoning_effort,
+        default_reasoning_effort: profile
+            .cached_models
+            .iter()
+            .find(|model| model.id == profile.model.as_deref().unwrap_or_default())
+            .and_then(|model| model.default_reasoning_effort.clone()),
+        last_model_refresh_at_ms: profile.last_model_refresh_at_ms,
+        cached_models: profile.cached_models.clone(),
+        groups: vec![CodexCredentialGroup {
+            id: group_id,
+            name: profile
+                .group_name
+                .clone()
+                .unwrap_or_else(|| profile.name.clone()),
+            credentials: vec![CodexCredential {
+                id: credential_id,
+                name: profile.name.clone(),
+                key: profile.key.clone(),
+                new_api_access_token: profile.new_api_access_token.clone(),
+                key_env_var: profile.key_env_var.clone(),
+                function_tool_capability: None,
+            }],
+        }],
+    }
+}
+
+pub(crate) fn provider_to_profiles(provider: &CodexProvider) -> Vec<CodexKeyProfile> {
+    provider
+        .groups
+        .iter()
+        .flat_map(|group| {
+            group.credentials.iter().map(|credential| CodexKeyProfile {
+                id: legacy_profile_id(&provider.id, &group.id, &credential.id),
+                name: credential.name.clone(),
+                provider_kind: provider.provider_kind.clone(),
+                usage_protocol: provider.usage_protocol.clone(),
+                new_api_access_token: credential.new_api_access_token.clone(),
+                key_env_var: credential.key_env_var.clone(),
+                key: credential.key.clone(),
+                base_url_env_var: provider.base_url_env_var.clone(),
+                base_url: provider.base_url.clone(),
+                model: provider.model.clone(),
+                context_window: provider.context_window,
+                max_output_tokens: provider.max_output_tokens,
+                use_gateway: provider_uses_gateway(provider),
+                transport_mode: provider.transport_mode.clone(),
+                supports_thinking: provider.supports_thinking,
+                supports_reasoning_effort: provider.supports_reasoning_effort,
+                last_model_refresh_at_ms: provider.last_model_refresh_at_ms,
+                cached_models: provider.cached_models.clone(),
+                group_name: Some(group.name.clone()),
+            })
+        })
+        .collect()
+}
+
+pub(crate) fn legacy_profiles_from_providers(providers: &[CodexProvider]) -> Vec<CodexKeyProfile> {
+    providers.iter().flat_map(provider_to_profiles).collect()
+}
+
+pub(crate) fn migrate_provider_settings(settings: &mut AppSettings) -> bool {
+    let mut changed = false;
+    if settings.codex_providers.is_empty() && !settings.codex_key_profiles.is_empty() {
+        settings.codex_providers = settings
+            .codex_key_profiles
+            .iter()
+            .map(profile_to_provider)
+            .collect();
+        changed = true;
+    }
+
+    if !settings.codex_providers.is_empty() {
+        let projected = legacy_profiles_from_providers(&settings.codex_providers);
+        if settings.codex_key_profiles != projected {
+            settings.codex_key_profiles = projected;
+            changed = true;
+        }
+    }
+
+    if settings.execution_credential_selection.is_none() {
+        if let Some(active_id) = settings.active_codex_key_profile_id.as_deref() {
+            if let Some(selection) = selection_from_profile_id(active_id) {
+                settings.execution_credential_selection = Some(selection);
+                changed = true;
+            } else if let Some(provider) = settings
+                .codex_providers
+                .iter()
+                .find(|provider| provider.id == migrated_id("provider", active_id))
+            {
+                if let Some(group) = provider.groups.first() {
+                    if let Some(credential) = group.credentials.first() {
+                        settings.execution_credential_selection = Some(CredentialSelection {
+                            provider_id: provider.id.clone(),
+                            group_id: group.id.clone(),
+                            credential_id: credential.id.clone(),
+                        });
+                        changed = true;
+                    }
+                }
+            }
+        }
+    }
+
+    if settings
+        .execution_credential_selection
+        .as_ref()
+        .is_some_and(|selection| profile_for_selection(settings, Some(selection)).is_none())
+    {
+        settings.execution_credential_selection = None;
+        changed = true;
+    }
+
+    if settings
+        .usage_credential_selection
+        .as_ref()
+        .is_some_and(|selection| profile_for_selection(settings, Some(selection)).is_none())
+    {
+        settings.usage_credential_selection = None;
+        changed = true;
+    }
+
+    changed
+}
+
+pub(crate) fn profile_for_selection(
+    settings: &AppSettings,
+    selection: Option<&CredentialSelection>,
+) -> Option<CodexKeyProfile> {
+    let selection = selection?;
+    let provider = settings
+        .codex_providers
+        .iter()
+        .find(|provider| provider.id == selection.provider_id)?;
+    let group = provider
+        .groups
+        .iter()
+        .find(|group| group.id == selection.group_id)?;
+    let credential = group
+        .credentials
+        .iter()
+        .find(|credential| credential.id == selection.credential_id)?;
+    Some(CodexKeyProfile {
+        id: credential.id.clone(),
+        name: credential.name.clone(),
+        provider_kind: provider.provider_kind.clone(),
+        usage_protocol: provider.usage_protocol.clone(),
+        new_api_access_token: credential.new_api_access_token.clone(),
+        key_env_var: credential.key_env_var.clone(),
+        key: credential.key.clone(),
+        base_url_env_var: provider.base_url_env_var.clone(),
+        base_url: provider.base_url.clone(),
+        model: provider.model.clone(),
+        context_window: provider.context_window,
+        max_output_tokens: provider.max_output_tokens,
+        use_gateway: provider_uses_gateway(provider),
+        transport_mode: provider.transport_mode.clone(),
+        supports_thinking: provider.supports_thinking,
+        supports_reasoning_effort: provider.supports_reasoning_effort,
+        last_model_refresh_at_ms: provider.last_model_refresh_at_ms,
+        cached_models: provider.cached_models.clone(),
+        group_name: Some(group.name.clone()),
+    })
+}
+
+pub(crate) fn effective_execution_profile(settings: &AppSettings) -> Option<CodexKeyProfile> {
+    profile_for_selection(settings, settings.execution_credential_selection.as_ref()).or_else(
+        || {
+            settings
+                .active_codex_key_profile_id
+                .as_deref()
+                .and_then(|active_id| {
+                    settings
+                        .codex_key_profiles
+                        .iter()
+                        .find(|p| p.id == active_id)
+                })
+                .cloned()
+        },
+    )
+}
+
+pub(crate) fn effective_usage_profile(settings: &AppSettings) -> Option<CodexKeyProfile> {
+    profile_for_selection(settings, settings.usage_credential_selection.as_ref())
+        .or_else(|| effective_execution_profile(settings))
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ProviderUsageProtocol {
@@ -240,6 +480,39 @@ pub(crate) async fn provider_model_list_core(
         return Err(last_error.unwrap_or_else(|| "Failed to fetch provider models".to_string()));
     }
     Ok(merge_provider_model_payloads(successful_payloads))
+}
+
+pub(crate) async fn provider_function_tool_probe_core(
+    settings: &AppSettings,
+    selection: CredentialSelection,
+) -> Result<Value, String> {
+    let profile = profile_for_selection(settings, Some(&selection))
+        .ok_or_else(|| "Selected provider credential was not found".to_string())?;
+    let base_url = resolve_profile_base_url(&profile)
+        .ok_or_else(|| "Selected provider has no base URL".to_string())?;
+    if profile.key.trim().is_empty() {
+        return Err("Selected provider credential has no API key".to_string());
+    }
+    let probe = match probe_provider_function_calling(
+        &base_url,
+        &profile.key,
+        profile.model.as_deref().unwrap_or_default(),
+        profile_uses_gateway(&profile),
+    )
+    .await
+    {
+        Ok(probe) => probe,
+        Err(_) => ProviderFunctionToolProbe {
+            state: "error".to_string(),
+            transport: if profile_uses_gateway(&profile) {
+                "chat-completions-gateway".to_string()
+            } else {
+                "responses".to_string()
+            },
+            failure_code: Some("request_failed".to_string()),
+        },
+    };
+    serde_json::to_value(probe).map_err(|err| err.to_string())
 }
 
 async fn read_provider_usage_json(
@@ -659,25 +932,7 @@ pub(crate) async fn active_codex_key_runtime(
     settings: &AppSettings,
     codex_args: Option<String>,
 ) -> Result<CodexKeyRuntime, String> {
-    let Some(active_id) = settings
-        .active_codex_key_profile_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    else {
-        return Ok(CodexKeyRuntime {
-            env: Vec::new(),
-            codex_args,
-            comparison_codex_args: None,
-            provider_runtime_fingerprint: None,
-            gateway_shutdown: None,
-        });
-    };
-    let Some(profile) = settings
-        .codex_key_profiles
-        .iter()
-        .find(|profile| profile.id == active_id)
-    else {
+    let Some(profile) = effective_execution_profile(settings) else {
         return Ok(CodexKeyRuntime {
             env: Vec::new(),
             codex_args,
@@ -696,11 +951,11 @@ pub(crate) async fn active_codex_key_runtime(
             gateway_shutdown: None,
         });
     }
-    let provider_runtime_fingerprint = Some(profile_runtime_fingerprint(profile));
-    let base_url = resolve_profile_base_url(profile);
+    let provider_runtime_fingerprint = Some(profile_runtime_fingerprint(&profile));
+    let base_url = resolve_profile_base_url(&profile);
     let comparison_codex_args =
-        merge_profile_codex_args(codex_args.clone(), profile, base_url.as_deref())?;
-    let use_gateway = profile_uses_gateway(profile);
+        merge_profile_codex_args(codex_args.clone(), &profile, base_url.as_deref())?;
+    let use_gateway = profile_uses_gateway(&profile);
     if use_gateway && base_url.is_none() {
         return Err("Gateway profiles require a provider base URL".to_string());
     }
@@ -715,7 +970,7 @@ pub(crate) async fn active_codex_key_runtime(
         })
         .await?;
         let codex_args =
-            merge_profile_codex_args(codex_args, profile, Some(gateway.base_url.as_str()))?;
+            merge_profile_codex_args(codex_args, &profile, Some(gateway.base_url.as_str()))?;
         return Ok(CodexKeyRuntime {
             env: vec![(
                 CODEX_MONITOR_PROVIDER_KEY_ENV.to_string(),
@@ -727,7 +982,7 @@ pub(crate) async fn active_codex_key_runtime(
             gateway_shutdown: Some(gateway.shutdown),
         });
     }
-    let codex_args = merge_profile_codex_args(codex_args, profile, base_url.as_deref())?;
+    let codex_args = merge_profile_codex_args(codex_args, &profile, base_url.as_deref())?;
     let mut env = vec![(CODEX_MONITOR_PROVIDER_KEY_ENV.to_string(), key.to_string())];
     let legacy_key_env = profile.key_env_var.trim();
     if !legacy_key_env.is_empty() && legacy_key_env != CODEX_MONITOR_PROVIDER_KEY_ENV {
@@ -750,41 +1005,23 @@ pub(crate) async fn active_codex_key_runtime(
 }
 
 pub(crate) fn active_profile_runtime_fingerprint(settings: &AppSettings) -> Option<String> {
-    let active_id = settings
-        .active_codex_key_profile_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())?;
-    let profile = settings
-        .codex_key_profiles
-        .iter()
-        .find(|profile| profile.id == active_id && !profile.key.trim().is_empty())?;
-    Some(profile_runtime_fingerprint(profile))
+    let profile = effective_execution_profile(settings)?;
+    (!profile.key.trim().is_empty()).then(|| profile_runtime_fingerprint(&profile))
 }
 
 pub(crate) fn active_profile_codex_args(
     settings: &AppSettings,
     codex_args: Option<String>,
 ) -> Result<Option<String>, String> {
-    let Some(active_id) = settings
-        .active_codex_key_profile_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    else {
-        return Ok(codex_args);
-    };
-    let Some(profile) = settings
-        .codex_key_profiles
-        .iter()
-        .find(|profile| profile.id == active_id && !profile.key.trim().is_empty())
+    let Some(profile) =
+        effective_execution_profile(settings).filter(|profile| !profile.key.trim().is_empty())
     else {
         return Ok(codex_args);
     };
     merge_profile_codex_args(
         codex_args,
-        profile,
-        resolve_profile_base_url(profile).as_deref(),
+        &profile,
+        resolve_profile_base_url(&profile).as_deref(),
     )
 }
 
@@ -807,11 +1044,36 @@ pub(crate) fn resolve_profile_base_url(profile: &crate::types::CodexKeyProfile) 
 }
 
 pub(crate) fn profile_uses_gateway(profile: &crate::types::CodexKeyProfile) -> bool {
-    profile.use_gateway
-        || profile
-            .provider_kind
-            .trim()
-            .eq_ignore_ascii_case("opencode")
+    match profile.transport_mode.trim().to_ascii_lowercase().as_str() {
+        "chat-completions-gateway" => true,
+        "responses" => false,
+        _ => {
+            profile.use_gateway
+                || profile
+                    .provider_kind
+                    .trim()
+                    .eq_ignore_ascii_case("opencode")
+                || resolve_profile_base_url(profile)
+                    .and_then(|base_url| {
+                        normalize_http_url(
+                            &base_url,
+                            "Invalid provider base URL",
+                            "Provider base URL must use HTTP or HTTPS",
+                        )
+                        .ok()
+                    })
+                    .and_then(|url| url.host_str().map(str::to_string))
+                    .is_some_and(|host| host.eq_ignore_ascii_case("api.duckcoding.ai"))
+        }
+    }
+}
+
+fn provider_uses_gateway(provider: &CodexProvider) -> bool {
+    match provider.transport_mode.trim().to_ascii_lowercase().as_str() {
+        "chat-completions-gateway" => true,
+        "responses" => false,
+        _ => provider.use_gateway,
+    }
 }
 
 fn profile_runtime_fingerprint(profile: &crate::types::CodexKeyProfile) -> String {
@@ -844,14 +1106,7 @@ fn profile_runtime_fingerprint(profile: &crate::types::CodexKeyProfile) -> Strin
         &mut hasher,
         &profile.max_output_tokens.unwrap_or_default().to_string(),
     );
-    update_field(
-        &mut hasher,
-        if profile_uses_gateway(profile) {
-            "1"
-        } else {
-            "0"
-        },
-    );
+    update_field(&mut hasher, profile.transport_mode.trim());
     update_field(
         &mut hasher,
         if profile.supports_thinking || profile.supports_reasoning_effort {
@@ -927,11 +1182,130 @@ fn merge_profile_codex_args(
 mod tests {
     use super::{
         active_codex_key_runtime, build_new_api_url, build_provider_models_url,
-        build_provider_usage_url, merge_provider_model_payloads, normalize_new_api_usage_payload,
-        normalize_sub2_usage_payload, summarize_new_api_logs,
+        build_provider_usage_url, merge_provider_model_payloads, migrate_provider_settings,
+        normalize_new_api_usage_payload, normalize_sub2_usage_payload, profile_for_selection,
+        profile_uses_gateway, summarize_new_api_logs,
     };
     use crate::codex::args::parse_codex_args;
-    use crate::types::{AppSettings, CodexKeyProfile};
+    use crate::types::{AppSettings, CodexKeyProfile, CredentialSelection};
+
+    #[test]
+    fn legacy_profiles_migrate_to_provider_group_credentials_idempotently() {
+        let mut settings = AppSettings::default();
+        settings.codex_key_profiles = vec![CodexKeyProfile {
+            id: "legacy".to_string(),
+            name: "Legacy provider".to_string(),
+            provider_kind: "custom".to_string(),
+            usage_protocol: "auto".to_string(),
+            new_api_access_token: None,
+            key_env_var: "OPENAI_API_KEY".to_string(),
+            key: "secret".to_string(),
+            base_url_env_var: "OPENAI_BASE_URL".to_string(),
+            base_url: Some("https://provider.example/v1".to_string()),
+            model: Some("model".to_string()),
+            context_window: Some(128000),
+            max_output_tokens: None,
+            use_gateway: false,
+            transport_mode: "auto".to_string(),
+            supports_thinking: true,
+            supports_reasoning_effort: true,
+            last_model_refresh_at_ms: None,
+            cached_models: Vec::new(),
+            group_name: Some("Team".to_string()),
+        }];
+        settings.active_codex_key_profile_id = Some("legacy".to_string());
+
+        assert!(migrate_provider_settings(&mut settings));
+        assert_eq!(settings.codex_providers.len(), 1);
+        assert_eq!(settings.codex_providers[0].groups[0].name, "Team");
+        assert_eq!(
+            settings
+                .execution_credential_selection
+                .as_ref()
+                .map(|selection| selection.credential_id.as_str()),
+            Some("credential-legacy")
+        );
+        let snapshot = settings.codex_providers.clone();
+        assert!(!migrate_provider_settings(&mut settings));
+        assert_eq!(settings.codex_providers, snapshot);
+        let profile =
+            profile_for_selection(&settings, settings.execution_credential_selection.as_ref())
+                .expect("migrated selection resolves");
+        assert_eq!(profile.key, "secret");
+        assert_eq!(
+            profile.base_url.as_deref(),
+            Some("https://provider.example/v1")
+        );
+    }
+
+    #[test]
+    fn legacy_gateway_flag_migrates_to_explicit_chat_completions_transport() {
+        let mut settings = AppSettings::default();
+        settings.codex_key_profiles = vec![CodexKeyProfile {
+            id: "legacy-gateway".to_string(),
+            name: "Legacy gateway".to_string(),
+            provider_kind: "custom".to_string(),
+            usage_protocol: "auto".to_string(),
+            new_api_access_token: None,
+            key_env_var: "OPENAI_API_KEY".to_string(),
+            key: "secret".to_string(),
+            base_url_env_var: "OPENAI_BASE_URL".to_string(),
+            base_url: Some("https://provider.example/v1".to_string()),
+            model: Some("model".to_string()),
+            context_window: None,
+            max_output_tokens: None,
+            use_gateway: true,
+            transport_mode: "auto".to_string(),
+            supports_thinking: true,
+            supports_reasoning_effort: true,
+            last_model_refresh_at_ms: None,
+            cached_models: Vec::new(),
+            group_name: None,
+        }];
+
+        assert!(migrate_provider_settings(&mut settings));
+        assert_eq!(
+            settings.codex_providers[0].transport_mode,
+            "chat-completions-gateway"
+        );
+    }
+
+    #[test]
+    fn migration_clears_stale_credential_selections() {
+        let mut settings = AppSettings::default();
+        settings.codex_key_profiles = vec![CodexKeyProfile {
+            id: "legacy".to_string(),
+            name: "Legacy provider".to_string(),
+            provider_kind: "custom".to_string(),
+            usage_protocol: "auto".to_string(),
+            new_api_access_token: None,
+            key_env_var: "OPENAI_API_KEY".to_string(),
+            key: "secret".to_string(),
+            base_url_env_var: "OPENAI_BASE_URL".to_string(),
+            base_url: Some("https://provider.example/v1".to_string()),
+            model: None,
+            context_window: None,
+            max_output_tokens: None,
+            use_gateway: false,
+            transport_mode: "auto".to_string(),
+            supports_thinking: false,
+            supports_reasoning_effort: false,
+            last_model_refresh_at_ms: None,
+            cached_models: Vec::new(),
+            group_name: None,
+        }];
+        let missing = CredentialSelection {
+            provider_id: "missing-provider".to_string(),
+            group_id: "missing-group".to_string(),
+            credential_id: "missing-key".to_string(),
+        };
+        settings.execution_credential_selection = Some(missing.clone());
+        settings.usage_credential_selection = Some(missing);
+
+        assert!(migrate_provider_settings(&mut settings));
+        assert!(settings.execution_credential_selection.is_none());
+        assert!(settings.usage_credential_selection.is_none());
+    }
 
     #[test]
     fn provider_models_url_preserves_explicit_api_path() {
@@ -1154,6 +1528,7 @@ mod tests {
             context_window: Some(128_000),
             max_output_tokens: None,
             use_gateway: true,
+            transport_mode: "auto".to_string(),
             supports_thinking: true,
             supports_reasoning_effort: true,
             last_model_refresh_at_ms: None,
@@ -1217,6 +1592,7 @@ mod tests {
             context_window: None,
             max_output_tokens: None,
             use_gateway: false,
+            transport_mode: "auto".to_string(),
             supports_thinking: false,
             supports_reasoning_effort: false,
             last_model_refresh_at_ms: None,
@@ -1241,6 +1617,88 @@ mod tests {
     }
 
     #[test]
+    fn duckcoding_profiles_force_the_compatibility_gateway() {
+        let mut profile = CodexKeyProfile {
+            id: "duckcoding".to_string(),
+            name: "DuckCoding".to_string(),
+            provider_kind: "custom".to_string(),
+            usage_protocol: "auto".to_string(),
+            new_api_access_token: None,
+            key_env_var: "OPENAI_API_KEY".to_string(),
+            key: "sk-provider".to_string(),
+            base_url_env_var: "OPENAI_BASE_URL".to_string(),
+            base_url: Some("https://api.duckcoding.ai".to_string()),
+            model: Some("gpt-5.6-sol".to_string()),
+            context_window: None,
+            max_output_tokens: None,
+            use_gateway: false,
+            transport_mode: "auto".to_string(),
+            supports_thinking: true,
+            supports_reasoning_effort: true,
+            last_model_refresh_at_ms: None,
+            cached_models: Vec::new(),
+            group_name: None,
+        };
+
+        assert!(profile_uses_gateway(&profile));
+
+        profile.base_url = Some("https://api.duckcoding.ai/v1".to_string());
+        assert!(profile_uses_gateway(&profile));
+
+        profile.base_url = Some("https://api.example.com/v1".to_string());
+        assert!(!profile_uses_gateway(&profile));
+    }
+
+    #[test]
+    fn active_duckcoding_profile_starts_the_compatibility_gateway() {
+        let mut settings = AppSettings::default();
+        settings.codex_key_profiles = vec![CodexKeyProfile {
+            id: "duckcoding".to_string(),
+            name: "DuckCoding".to_string(),
+            provider_kind: "custom".to_string(),
+            usage_protocol: "auto".to_string(),
+            new_api_access_token: None,
+            key_env_var: "OPENAI_API_KEY".to_string(),
+            key: "sk-provider".to_string(),
+            base_url_env_var: "OPENAI_BASE_URL".to_string(),
+            base_url: Some("https://api.duckcoding.ai".to_string()),
+            model: Some("gpt-5.6-sol".to_string()),
+            context_window: None,
+            max_output_tokens: None,
+            use_gateway: false,
+            transport_mode: "auto".to_string(),
+            supports_thinking: true,
+            supports_reasoning_effort: true,
+            last_model_refresh_at_ms: None,
+            cached_models: Vec::new(),
+            group_name: None,
+        }];
+        settings.active_codex_key_profile_id = Some("duckcoding".to_string());
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_io()
+            .enable_time()
+            .build()
+            .expect("runtime");
+        let runtime_env = runtime
+            .block_on(active_codex_key_runtime(&settings, None))
+            .expect("runtime env");
+
+        assert!(runtime_env.gateway_shutdown.is_some());
+        let args = parse_codex_args(runtime_env.codex_args.as_deref()).expect("merged args");
+        assert!(args.windows(2).any(|pair| {
+            pair[0] == "-c"
+                && pair[1].starts_with("model_providers.codex_monitor.base_url=http://127.0.0.1:")
+                && pair[1].ends_with("/v1")
+        }));
+        assert!(runtime_env.env.iter().any(|(name, value)| {
+            name == "CODEX_MONITOR_PROVIDER_KEY"
+                && value.starts_with("codex-monitor-")
+                && value != "sk-provider"
+        }));
+    }
+
+    #[test]
     fn active_profile_keeps_legacy_env_aliases_with_custom_provider() {
         let mut settings = AppSettings::default();
         settings.codex_key_profiles = vec![CodexKeyProfile {
@@ -1257,6 +1715,7 @@ mod tests {
             context_window: None,
             max_output_tokens: None,
             use_gateway: false,
+            transport_mode: "auto".to_string(),
             supports_thinking: false,
             supports_reasoning_effort: false,
             last_model_refresh_at_ms: None,
@@ -1308,6 +1767,7 @@ mod tests {
             context_window: None,
             max_output_tokens: None,
             use_gateway: false,
+            transport_mode: "auto".to_string(),
             supports_thinking: false,
             supports_reasoning_effort: false,
             last_model_refresh_at_ms: None,
@@ -1365,6 +1825,7 @@ mod tests {
             context_window: None,
             max_output_tokens: None,
             use_gateway: true,
+            transport_mode: "auto".to_string(),
             supports_thinking: false,
             supports_reasoning_effort: false,
             last_model_refresh_at_ms: None,

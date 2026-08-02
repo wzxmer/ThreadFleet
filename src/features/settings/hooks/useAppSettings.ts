@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { AppSettings, CodexKeyProfile } from "@/types";
+import type {
+  AppSettings,
+  CodexKeyProfile,
+  CodexProvider,
+  CredentialSelection,
+} from "@/types";
 import { getAppSettings, runCodexDoctor, updateAppSettings } from "@services/tauri";
 import { clampUiScale, UI_SCALE_DEFAULT } from "@utils/uiScale";
 import { CHAT_SCROLLBACK_DEFAULT, normalizeChatHistoryScrollbackItems } from "@utils/chatScrollback";
@@ -36,6 +41,10 @@ import {
   normalizeReasoningEffortValue,
   parseReasoningEffortOptions,
 } from "@utils/reasoningEfforts";
+import {
+  credentialForSelection,
+  providersFromSettings,
+} from "@/utils/providerCredentials";
 
 const allowedAppLanguages = new Set(["system", "zh", "en"]);
 const allowedPersonality = new Set(["friendly", "pragmatic"]);
@@ -279,6 +288,53 @@ function normalizeCodexKeyProfiles(
     .filter((profile) => profile.key.length > 0);
 }
 
+function normalizeCodexProviders(
+  providers: AppSettings["codexProviders"] | undefined,
+): CodexProvider[] {
+  if (!Array.isArray(providers)) return [];
+  const usedIds = new Set<string>();
+  return providers.map((provider, index) => {
+    const baseId = provider.id?.trim() || `provider-${index + 1}`;
+    let id = baseId;
+    let suffix = 2;
+    while (usedIds.has(id)) id = `${baseId}-${suffix++}`;
+    usedIds.add(id);
+    return {
+      ...provider,
+      id,
+      name: provider.name?.trim() || `Provider ${index + 1}`,
+      baseUrlEnvVar: provider.baseUrlEnvVar?.trim() || DEFAULT_CODEX_BASE_URL_ENV_VAR,
+      baseUrl: provider.baseUrl?.trim() || null,
+      groups: Array.isArray(provider.groups)
+        ? provider.groups.map((group, groupIndex) => ({
+            ...group,
+            id: group.id?.trim() || `${id}-group-${groupIndex + 1}`,
+            name: group.name?.trim() || `Group ${groupIndex + 1}`,
+            credentials: Array.isArray(group.credentials)
+              ? group.credentials.map((credential, credentialIndex) => ({
+                  ...credential,
+                  id:
+                    credential.id?.trim() ||
+                    `${id}-credential-${groupIndex + 1}-${credentialIndex + 1}`,
+                  name: credential.name?.trim() || `Key ${credentialIndex + 1}`,
+                  key: credential.key?.trim() || "",
+                  keyEnvVar: credential.keyEnvVar?.trim() || DEFAULT_CODEX_KEY_ENV_VAR,
+                  newApiAccessToken: credential.newApiAccessToken?.trim() || null,
+                }))
+              : [],
+          }))
+        : [],
+    };
+  });
+}
+
+function normalizeCredentialSelection(
+  providers: CodexProvider[],
+  selection: CredentialSelection | null | undefined,
+): CredentialSelection | null {
+  return credentialForSelection(providers, selection) ? selection ?? null : null;
+}
+
 function buildDefaultSettings(): AppSettings {
   const isMac = isMacPlatform();
   const isMobile = isMobilePlatform();
@@ -297,6 +353,9 @@ function buildDefaultSettings(): AppSettings {
     sessionSources: [],
     codexKeyProfiles: [],
     activeCodexKeyProfileId: null,
+    codexProviders: [],
+    executionCredentialSelection: null,
+    usageCredentialSelection: null,
     preserveSessionLibraryOnProviderSwitch: true,
     syncProviderProfileToLocalConfig: false,
     backendMode: isMobile ? "remote" : "local",
@@ -436,6 +495,19 @@ function normalizeAppSettings(settings: AppSettings): AppSettings {
     settings.chatHistoryScrollbackItems,
   );
   const codexKeyProfiles = normalizeCodexKeyProfiles(settings.codexKeyProfiles);
+  const codexProviders = normalizeCodexProviders(settings.codexProviders);
+  const providersForSelection = providersFromSettings({
+    codexProviders,
+    codexKeyProfiles,
+  });
+  const executionCredentialSelection = normalizeCredentialSelection(
+    providersForSelection,
+    settings.executionCredentialSelection,
+  );
+  const usageCredentialSelection = normalizeCredentialSelection(
+    providersForSelection,
+    settings.usageCredentialSelection,
+  );
   const activeCodexKeyProfileId = codexKeyProfiles.some(
     (profile) => profile.id === settings.activeCodexKeyProfileId,
   )
@@ -451,6 +523,9 @@ function normalizeAppSettings(settings: AppSettings): AppSettings {
         ? settings.sessionSources
         : [],
       codexKeyProfiles,
+    codexProviders,
+    executionCredentialSelection,
+    usageCredentialSelection,
     activeCodexKeyProfileId,
     preserveSessionLibraryOnProviderSwitch:
       typeof settings.preserveSessionLibraryOnProviderSwitch === "boolean"

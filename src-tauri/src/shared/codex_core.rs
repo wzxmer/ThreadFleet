@@ -2483,15 +2483,7 @@ pub(crate) async fn get_provider_status_core(
     workspace_id: String,
 ) -> Result<Value, String> {
     let codex_home = resolve_codex_home_for_workspace_core(workspaces, &workspace_id).await?;
-    let active_profile = settings
-        .active_codex_key_profile_id
-        .as_deref()
-        .and_then(|active_id| {
-            settings
-                .codex_key_profiles
-                .iter()
-                .find(|profile| profile.id == active_id)
-        });
+    let active_profile = provider_profiles_core::effective_execution_profile(settings);
     let active_profile_base_url = active_profile
         .as_ref()
         .and_then(|profile| profile.base_url.as_deref());
@@ -2508,20 +2500,12 @@ fn resolve_third_party_usage_credentials(
     document: &toml_edit::Document,
     default_api_key: Option<String>,
 ) -> Option<(String, String, String, Option<String>)> {
-    let active_profile = settings
-        .active_codex_key_profile_id
-        .as_deref()
-        .and_then(|active_id| {
-            settings
-                .codex_key_profiles
-                .iter()
-                .find(|profile| profile.id == active_id)
-        });
+    let active_profile = provider_profiles_core::effective_usage_profile(settings);
     if let Some(profile) = active_profile {
         if profile.provider_kind.eq_ignore_ascii_case("openai") {
             return None;
         }
-        return provider_profiles_core::resolve_profile_base_url(profile).map(|base_url| {
+        return provider_profiles_core::resolve_profile_base_url(&profile).map(|base_url| {
             (
                 base_url,
                 profile.key.clone(),
@@ -2549,16 +2533,7 @@ pub(crate) async fn workspace_third_party_key_usage_core(
     day_start_unix: Option<i64>,
 ) -> Result<Value, String> {
     let codex_home = resolve_codex_home_for_workspace_core(workspaces, &workspace_id).await?;
-    let active_profile_selected =
-        settings
-            .active_codex_key_profile_id
-            .as_deref()
-            .is_some_and(|active_id| {
-                settings
-                    .codex_key_profiles
-                    .iter()
-                    .any(|profile| profile.id == active_id)
-            });
+    let active_profile_selected = provider_profiles_core::effective_usage_profile(settings).is_some();
     let (document, default_api_key) = if active_profile_selected {
         (toml_edit::Document::new(), None)
     } else {
@@ -2584,7 +2559,10 @@ pub(crate) async fn workspace_third_party_key_usage_core(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::CodexKeyProfile;
+    use crate::types::{
+        CodexCredential, CodexCredentialGroup, CodexKeyProfile, CodexProvider,
+        CredentialSelection,
+    };
     use serde_json::Value;
     use toml_edit::Document;
 
@@ -2693,6 +2671,7 @@ base_url = "{base_url}"
             context_window: None,
             max_output_tokens: None,
             use_gateway: false,
+            transport_mode: "auto".to_string(),
             supports_thinking: false,
             supports_reasoning_effort: false,
             last_model_refresh_at_ms: None,
@@ -2714,6 +2693,99 @@ base_url = "{base_url}"
                 "sk-profile".to_string(),
                 "auto".to_string(),
                 Some("access-profile".to_string()),
+            ))
+        );
+    }
+
+    #[test]
+    fn third_party_usage_credentials_use_usage_override_without_changing_execution() {
+        let mut settings = AppSettings::default();
+        settings.codex_providers = vec![
+            CodexProvider {
+                id: "provider-execution".to_string(),
+                name: "Execution".to_string(),
+                provider_kind: "custom".to_string(),
+                usage_protocol: "auto".to_string(),
+                base_url_env_var: "OPENAI_BASE_URL".to_string(),
+                base_url: Some("https://execution.example.com/v1".to_string()),
+                model: None,
+                context_window: None,
+                max_output_tokens: None,
+                use_gateway: false,
+                transport_mode: "auto".to_string(),
+                supports_thinking: false,
+                supports_reasoning_effort: false,
+                default_reasoning_effort: None,
+                last_model_refresh_at_ms: None,
+                cached_models: Vec::new(),
+                groups: vec![CodexCredentialGroup {
+                    id: "group-execution".to_string(),
+                    name: "Execution".to_string(),
+                    credentials: vec![CodexCredential {
+                        id: "key-execution".to_string(),
+                        name: "Execution".to_string(),
+                        key: "execution-key".to_string(),
+                        new_api_access_token: None,
+                        key_env_var: "OPENAI_API_KEY".to_string(),
+                        function_tool_capability: None,
+                    }],
+                }],
+            },
+            CodexProvider {
+                id: "provider-usage".to_string(),
+                name: "Usage".to_string(),
+                provider_kind: "custom".to_string(),
+                usage_protocol: "new-api".to_string(),
+                base_url_env_var: "OPENAI_BASE_URL".to_string(),
+                base_url: Some("https://usage.example.com/v1".to_string()),
+                model: None,
+                context_window: None,
+                max_output_tokens: None,
+                use_gateway: false,
+                transport_mode: "auto".to_string(),
+                supports_thinking: false,
+                supports_reasoning_effort: false,
+                default_reasoning_effort: None,
+                last_model_refresh_at_ms: None,
+                cached_models: Vec::new(),
+                groups: vec![CodexCredentialGroup {
+                    id: "group-usage".to_string(),
+                    name: "Usage".to_string(),
+                    credentials: vec![CodexCredential {
+                        id: "key-usage".to_string(),
+                        name: "Usage".to_string(),
+                        key: "usage-key".to_string(),
+                        new_api_access_token: Some("usage-access-token".to_string()),
+                        key_env_var: "OPENAI_API_KEY".to_string(),
+                        function_tool_capability: None,
+                    }],
+                }],
+            },
+        ];
+        settings.execution_credential_selection = Some(CredentialSelection {
+            provider_id: "provider-execution".to_string(),
+            group_id: "group-execution".to_string(),
+            credential_id: "key-execution".to_string(),
+        });
+        settings.usage_credential_selection = Some(CredentialSelection {
+            provider_id: "provider-usage".to_string(),
+            group_id: "group-usage".to_string(),
+            credential_id: "key-usage".to_string(),
+        });
+
+        let credentials = resolve_third_party_usage_credentials(
+            &settings,
+            &provider_document("https://ignored.example.com/v1"),
+            None,
+        );
+
+        assert_eq!(
+            credentials,
+            Some((
+                "https://usage.example.com/v1".to_string(),
+                "usage-key".to_string(),
+                "new-api".to_string(),
+                Some("usage-access-token".to_string()),
             ))
         );
     }

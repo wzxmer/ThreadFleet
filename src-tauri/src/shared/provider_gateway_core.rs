@@ -1,5 +1,6 @@
 use futures_util::StreamExt;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, CONTENT_TYPE};
+use serde::Serialize;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::str::FromStr;
@@ -32,6 +33,34 @@ pub(crate) struct ProviderGatewayRuntime {
 }
 
 pub(crate) type ProviderGatewayShutdown = oneshot::Sender<()>;
+
+const FUNCTION_TOOL_PROBE_NAME: &str = "threadfleet_capability_probe";
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ProviderFunctionToolProbe {
+    pub(crate) state: String,
+    pub(crate) transport: String,
+    pub(crate) failure_code: Option<String>,
+}
+
+impl ProviderFunctionToolProbe {
+    fn verified(transport: &str) -> Self {
+        Self {
+            state: "verified".to_string(),
+            transport: transport.to_string(),
+            failure_code: None,
+        }
+    }
+
+    fn failed(state: &str, transport: &str, failure_code: &str) -> Self {
+        Self {
+            state: state.to_string(),
+            transport: transport.to_string(),
+            failure_code: Some(failure_code.to_string()),
+        }
+    }
+}
 
 pub(crate) async fn start_provider_gateway(
     config: ProviderGatewayConfig,
@@ -349,6 +378,214 @@ pub(crate) fn build_upstream_url(
     Ok(url)
 }
 
+pub(crate) async fn probe_provider_function_calling(
+    upstream_base_url: &str,
+    upstream_api_key: &str,
+    model: &str,
+    use_gateway: bool,
+) -> Result<ProviderFunctionToolProbe, String> {
+    let model = model.trim();
+    if model.is_empty() {
+        return Ok(ProviderFunctionToolProbe::failed(
+            "error",
+            if use_gateway {
+                "chat-completions-gateway"
+            } else {
+                "responses"
+            },
+            "model_required",
+        ));
+    }
+    let transport = if use_gateway {
+        "chat-completions-gateway"
+    } else {
+        "responses"
+    };
+    let (path, body) = if use_gateway {
+        (
+            "/v1/chat/completions",
+            json!({
+                "model": model,
+                "stream": true,
+                "messages": [{
+                    "role": "user",
+                    "content": "Call threadfleet_capability_probe exactly once with {\\\"probe\\\":\\\"ok\\\"}. Do not answer with text."
+                }],
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": FUNCTION_TOOL_PROBE_NAME,
+                        "description": "Checks structured function calling support.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": { "probe": { "type": "string" } },
+                            "required": ["probe"]
+                        }
+                    }
+                }],
+                "tool_choice": {
+                    "type": "function",
+                    "function": { "name": FUNCTION_TOOL_PROBE_NAME }
+                }
+            }),
+        )
+    } else {
+        (
+            "/v1/responses",
+            json!({
+                "model": model,
+                "stream": true,
+                "input": "Call threadfleet_capability_probe exactly once with {\\\"probe\\\":\\\"ok\\\"}. Do not answer with text.",
+                "tools": [{
+                    "type": "function",
+                    "name": FUNCTION_TOOL_PROBE_NAME,
+                    "description": "Checks structured function calling support.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": { "probe": { "type": "string" } },
+                        "required": ["probe"]
+                    }
+                }],
+                "tool_choice": { "type": "function", "name": FUNCTION_TOOL_PROBE_NAME }
+            }),
+        )
+    };
+    let url = build_upstream_url(upstream_base_url, path)?;
+    let body_bytes = serde_json::to_vec(&body)
+        .map_err(|_| "Failed to serialize provider function tool probe request".to_string())?;
+    let response = reqwest::Client::new()
+        .post(url)
+        .bearer_auth(upstream_api_key.trim())
+        .header(CONTENT_TYPE, "application/json")
+        .body(body_bytes)
+        .send()
+        .await
+        .map_err(|err| format!("Provider function tool probe request failed: {err}"))?;
+    if !response.status().is_success() {
+        return Ok(ProviderFunctionToolProbe::failed(
+            "unsupported",
+            transport,
+            &format!("http_{}", response.status().as_u16()),
+        ));
+    }
+    let is_event_stream = response
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .map(str::trim)
+        .is_some_and(|value| value.eq_ignore_ascii_case("text/event-stream"));
+    if is_event_stream {
+        probe_function_tool_event_stream(response, transport, use_gateway).await
+    } else {
+        let response_text = response.text().await.map_err(|err| {
+            format!("Provider function tool probe response could not be read: {err}")
+        })?;
+        let value = serde_json::from_str::<Value>(&response_text)
+            .map_err(|err| format!("Provider function tool probe response was not JSON: {err}"))?;
+        if provider_value_has_probe_function_call(&value, use_gateway) {
+            Ok(ProviderFunctionToolProbe::verified(transport))
+        } else {
+            Ok(ProviderFunctionToolProbe::failed(
+                "unsupported",
+                transport,
+                "function_call_not_returned",
+            ))
+        }
+    }
+}
+
+async fn probe_function_tool_event_stream(
+    response: reqwest::Response,
+    transport: &str,
+    chat_completions: bool,
+) -> Result<ProviderFunctionToolProbe, String> {
+    let mut pending = String::new();
+    let mut pending_utf8 = Vec::new();
+    let mut parsed_event = false;
+    let mut body = response.bytes_stream();
+    while let Some(chunk) = body.next().await {
+        let chunk =
+            chunk.map_err(|err| format!("Provider function tool probe stream failed: {err}"))?;
+        append_utf8_stream_chunk(&mut pending, &mut pending_utf8, &chunk)?;
+        while let Some((raw_event, rest)) = split_next_sse_event(&pending) {
+            pending = rest;
+            for data in parse_sse_data_lines(&raw_event) {
+                if data.trim() == "[DONE]" {
+                    continue;
+                }
+                let Ok(value) = serde_json::from_str::<Value>(&data) else {
+                    continue;
+                };
+                parsed_event = true;
+                if provider_value_has_probe_function_call(&value, chat_completions) {
+                    return Ok(ProviderFunctionToolProbe::verified(transport));
+                }
+            }
+        }
+    }
+    finish_utf8_stream(&pending_utf8)?;
+    Ok(ProviderFunctionToolProbe::failed(
+        if parsed_event {
+            "unsupported"
+        } else {
+            "incompatible"
+        },
+        transport,
+        if parsed_event {
+            "function_call_not_returned"
+        } else {
+            "unparseable_stream"
+        },
+    ))
+}
+
+fn provider_value_has_probe_function_call(value: &Value, chat_completions: bool) -> bool {
+    let tool_calls = if chat_completions {
+        value
+            .get("choices")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .flat_map(|choice| {
+                [choice.get("delta"), choice.get("message")]
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|message| message.get("tool_calls").and_then(Value::as_array))
+            })
+            .flatten()
+            .collect::<Vec<_>>()
+    } else {
+        [
+            value.get("item"),
+            value
+                .get("output")
+                .and_then(Value::as_array)
+                .and_then(|items| items.first()),
+            value
+                .get("response")
+                .and_then(|response| response.get("output"))
+                .and_then(Value::as_array)
+                .and_then(|items| items.first()),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+    };
+    tool_calls.iter().any(|tool_call| {
+        if chat_completions {
+            tool_call
+                .get("function")
+                .and_then(|function| function.get("name"))
+                .and_then(Value::as_str)
+                == Some(FUNCTION_TOOL_PROBE_NAME)
+        } else {
+            tool_call.get("type").and_then(Value::as_str) == Some("function_call")
+                && tool_call.get("name").and_then(Value::as_str) == Some(FUNCTION_TOOL_PROBE_NAME)
+        }
+    })
+}
+
 fn is_responses_path(path: &str) -> bool {
     reqwest::Url::parse(&format!("http://gateway.local{path}"))
         .ok()
@@ -442,6 +679,7 @@ fn responses_request_to_chat_completions_with_reasoning(
     apply_max_output_tokens_cap(&mut out, max_output_tokens);
     copy_reasoning_fields(body, &mut out, supports_thinking, supports_reasoning_effort);
     copy_function_tools(body, &mut out);
+    copy_function_tool_choice(body, &mut out);
     Ok(out)
 }
 
@@ -534,6 +772,41 @@ fn copy_function_tools(source: &Value, target: &mut Value) {
     if !tools.is_empty() {
         if let Some(map) = target.as_object_mut() {
             map.insert("tools".to_string(), Value::Array(tools));
+        }
+    }
+}
+
+fn copy_function_tool_choice(source: &Value, target: &mut Value) {
+    let Some(tool_choice) = source.get("tool_choice") else {
+        return;
+    };
+    let chat_tool_choice = match tool_choice {
+        Value::String(choice) if matches!(choice.as_str(), "auto" | "none" | "required") => {
+            Some(Value::String(choice.clone()))
+        }
+        Value::Object(choice) if choice.get("type").and_then(Value::as_str) == Some("function") => {
+            let name = choice
+                .get("name")
+                .or_else(|| {
+                    choice
+                        .get("function")
+                        .and_then(|function| function.get("name"))
+                })
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|name| !name.is_empty());
+            name.map(|name| {
+                json!({
+                    "type": "function",
+                    "function": { "name": name }
+                })
+            })
+        }
+        _ => None,
+    };
+    if let Some(chat_tool_choice) = chat_tool_choice {
+        if let Some(map) = target.as_object_mut() {
+            map.insert("tool_choice".to_string(), chat_tool_choice);
         }
     }
 }
@@ -937,6 +1210,10 @@ async fn append_chat_stream_tool_calls(
         return Ok(());
     };
     for delta in deltas {
+        let function = delta.get("function");
+        if delta.get("id").and_then(Value::as_str).is_none() && function.is_none() {
+            continue;
+        }
         let index = delta.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
         let state = tool_calls
             .entry(index)
@@ -947,26 +1224,29 @@ async fn append_chat_stream_tool_calls(
         if let Some(call_id) = delta.get("id").and_then(Value::as_str) {
             state.call_id = call_id.to_string();
         }
-        if let Some(function) = delta.get("function") {
+        if let Some(function) = function {
             if let Some(name) = function.get("name").and_then(Value::as_str) {
                 state.name.push_str(name);
             }
-            if let Some(arguments) = function.get("arguments").and_then(Value::as_str) {
+            let arguments = function.get("arguments").and_then(Value::as_str);
+            let output_index = index + usize::from(has_message);
+            if !state.added
+                && (!state.call_id.is_empty() || !state.name.is_empty() || arguments.is_some())
+            {
+                write_sse_event(
+                    stream,
+                    "response.output_item.added",
+                    json!({
+                        "type": "response.output_item.added",
+                        "output_index": output_index,
+                        "item": streaming_tool_call_item(state, "in_progress"),
+                    }),
+                )
+                .await?;
+                state.added = true;
+            }
+            if let Some(arguments) = arguments {
                 state.arguments.push_str(arguments);
-                let output_index = index + usize::from(has_message);
-                if !state.added {
-                    write_sse_event(
-                        stream,
-                        "response.output_item.added",
-                        json!({
-                            "type": "response.output_item.added",
-                            "output_index": output_index,
-                            "item": streaming_tool_call_item(state, "in_progress"),
-                        }),
-                    )
-                    .await?;
-                    state.added = true;
-                }
                 write_sse_event(
                     stream,
                     "response.function_call_arguments.delta",
@@ -1330,7 +1610,8 @@ mod tests {
     use super::{
         append_utf8_stream_chunk, build_upstream_url, chat_completion_to_response,
         chat_stream_event_flags, finish_utf8_stream, gateway_request_is_authorized,
-        is_chat_completions_streaming, read_http_request, responses_request_to_chat_completions,
+        is_chat_completions_streaming, provider_value_has_probe_function_call, read_http_request,
+        responses_request_to_chat_completions,
         responses_request_to_chat_completions_with_reasoning,
         should_rewrite_chat_completions_stream, split_next_sse_event, start_provider_gateway,
         write_chat_completions_stream, write_responses_stream_from_chat_stream, GatewayRequest,
@@ -1339,6 +1620,7 @@ mod tests {
     use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE};
     use reqwest::StatusCode;
     use serde_json::json;
+    use std::io::ErrorKind;
     use std::time::Duration;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::{TcpListener, TcpStream};
@@ -1361,12 +1643,69 @@ mod tests {
         reqwest::get(format!("http://{addr}/stream")).await.unwrap()
     }
 
+    async fn completed_event_stream_response() -> reqwest::Response {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0u8; 1024];
+            let _ = stream.read(&mut request).await;
+            let body = concat!(
+                "data: {\"choices\":[{\"delta\":{\"content\":\"complete\"},\"finish_reason\":null}]}\n\n",
+                "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+                "data: [DONE]\n\n"
+            );
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n",
+                body.len(),
+            );
+            stream.write_all(head.as_bytes()).await.unwrap();
+            stream.write_all(body.as_bytes()).await.unwrap();
+        });
+        reqwest::get(format!("http://{addr}/stream")).await.unwrap()
+    }
+
+    async fn function_call_event_stream_response() -> reqwest::Response {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0u8; 1024];
+            let _ = stream.read(&mut request).await;
+            let body = concat!(
+                "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_123\",\"type\":\"function\",\"function\":{\"name\":\"shell_command\",\"arguments\":\"{\\\"command\\\":\"}}]}}]}\n\n",
+                "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"pwd\\\"}\"}}]}}]}\n\n",
+                "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n",
+                "data: [DONE]\n\n"
+            );
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n",
+                body.len(),
+            );
+            stream.write_all(head.as_bytes()).await.unwrap();
+            stream.write_all(body.as_bytes()).await.unwrap();
+        });
+        reqwest::get(format!("http://{addr}/stream")).await.unwrap()
+    }
+
     async fn downstream_pair() -> (TcpStream, TcpStream) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let client = TcpStream::connect(addr).await.unwrap();
         let (server, _) = listener.accept().await.unwrap();
         (server, client)
+    }
+
+    async fn read_truncated_downstream(stream: &mut TcpStream, output: &mut Vec<u8>) {
+        match stream.read_to_end(output).await {
+            Ok(_) => {}
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    ErrorKind::ConnectionReset | ErrorKind::UnexpectedEof
+                ) => {}
+            Err(error) => panic!("unexpected downstream read error: {error}"),
+        }
     }
 
     #[test]
@@ -1378,9 +1717,52 @@ mod tests {
                 write_responses_stream_from_chat_stream(&mut server, response).await
             });
             let mut output = Vec::new();
-            client.read_to_end(&mut output).await.unwrap();
+            read_truncated_downstream(&mut client, &mut output).await;
             assert!(writer.await.unwrap().is_err());
             assert!(!String::from_utf8_lossy(&output).contains("response.completed"));
+        });
+    }
+
+    #[test]
+    fn completed_chat_stream_emits_response_completed() {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let response = completed_event_stream_response().await;
+            let (mut server, mut client) = downstream_pair().await;
+            let writer = tokio::spawn(async move {
+                write_responses_stream_from_chat_stream(&mut server, response).await
+            });
+            let mut output = Vec::new();
+            client.read_to_end(&mut output).await.unwrap();
+            writer.await.unwrap().unwrap();
+
+            let output = String::from_utf8_lossy(&output);
+            assert!(output.contains("response.output_text.delta"));
+            assert!(output.contains("response.completed"));
+            assert!(output.contains("\"output_text\":\"complete\""));
+            assert!(output.contains("data: [DONE]"));
+        });
+    }
+
+    #[test]
+    fn streamed_chat_function_call_emits_responses_function_events() {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let response = function_call_event_stream_response().await;
+            let (mut server, mut client) = downstream_pair().await;
+            let writer = tokio::spawn(async move {
+                write_responses_stream_from_chat_stream(&mut server, response).await
+            });
+            let mut output = Vec::new();
+            client.read_to_end(&mut output).await.unwrap();
+            writer.await.unwrap().unwrap();
+
+            let output = String::from_utf8_lossy(&output);
+            assert!(output.contains("response.output_item.added"));
+            assert!(output.contains("response.function_call_arguments.delta"));
+            assert!(output.contains("response.function_call_arguments.done"));
+            assert!(output.contains("response.output_item.done"));
+            assert!(output.contains("\"call_id\":\"call_123\""));
+            assert!(output.contains("\"arguments\":\"{\\\"command\\\":\\\"pwd\\\"}\""));
+            assert!(output.contains("response.completed"));
         });
     }
 
@@ -1394,7 +1776,7 @@ mod tests {
                     async move { write_chat_completions_stream(&mut server, response).await },
                 );
             let mut output = Vec::new();
-            client.read_to_end(&mut output).await.unwrap();
+            read_truncated_downstream(&mut client, &mut output).await;
             assert!(writer.await.unwrap().is_err());
             assert!(!String::from_utf8_lossy(&output).contains("data: [DONE]"));
         });
@@ -1492,6 +1874,35 @@ mod tests {
     }
 
     #[test]
+    fn function_tool_probe_recognizes_chat_and_responses_events() {
+        assert!(provider_value_has_probe_function_call(
+            &json!({
+                "choices": [{
+                    "delta": {
+                        "tool_calls": [{
+                            "function": { "name": "threadfleet_capability_probe" }
+                        }]
+                    }
+                }]
+            }),
+            true,
+        ));
+        assert!(provider_value_has_probe_function_call(
+            &json!({
+                "item": {
+                    "type": "function_call",
+                    "name": "threadfleet_capability_probe"
+                }
+            }),
+            false,
+        ));
+        assert!(!provider_value_has_probe_function_call(
+            &json!({ "choices": [{ "delta": { "content": "text only" } }] }),
+            true,
+        ));
+    }
+
+    #[test]
     fn rewrites_only_successful_event_stream_responses() {
         let mut event_stream_headers = HeaderMap::new();
         event_stream_headers.insert(
@@ -1562,6 +1973,29 @@ mod tests {
                     }
                 }]
             })
+        );
+    }
+
+    #[test]
+    fn responses_request_maps_required_function_tool_choice_to_chat_completions() {
+        let chat = responses_request_to_chat_completions(
+            &json!({
+                "model": "deepseek-chat",
+                "input": "Call the tool.",
+                "tools": [{
+                    "type": "function",
+                    "name": "shell_command",
+                    "parameters": { "type": "object", "properties": {} }
+                }],
+                "tool_choice": { "type": "function", "name": "shell_command" }
+            }),
+            None,
+        )
+        .expect("chat body");
+
+        assert_eq!(
+            chat["tool_choice"],
+            json!({ "type": "function", "function": { "name": "shell_command" } })
         );
     }
 

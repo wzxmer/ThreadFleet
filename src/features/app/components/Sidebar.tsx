@@ -1,4 +1,5 @@
 import type {
+  AppSettings,
   RequestUserInputRequest,
   RateLimitSnapshot,
   ThreadTokenUsage,
@@ -41,7 +42,7 @@ import { useI18n } from "@/features/i18n/I18nProvider";
 import { getUsageLabels } from "../utils/usageLabels";
 import { formatRelativeTimeShort } from "../../../utils/time";
 import type { ThreadStatusById } from "../../../utils/threadStatus";
-import type { CodexKeyProfile } from "@/types";
+import type { CodexKeyProfile, CredentialSelection } from "@/types";
 import { SessionManagerList } from "@/features/sessions/components/SessionManagerList";
 import { SessionManagerToolbar } from "@/features/sessions/components/SessionManagerToolbar";
 import { SessionManagerBatchBar } from "@/features/sessions/components/SessionManagerBatchBar";
@@ -192,8 +193,10 @@ type SidebarProps = {
   useTokenUsageStats: boolean;
   thirdPartyProviderUsage: ThirdPartyKeyUsageSnapshot | null;
   codexKeyProfiles: CodexKeyProfile[];
-  activeCodexKeyProfileId: string | null;
-  onSelectCodexKeyProfile: (profileId: string) => void;
+  codexProviders?: AppSettings["codexProviders"];
+  usageCredentialSelection?: AppSettings["usageCredentialSelection"];
+  effectiveUsageCredentialSelection?: AppSettings["executionCredentialSelection"];
+  onSelectUsageCredential: (selection: CredentialSelection | null) => void;
   usageConfigurationWarning?: string | null;
   onAddWorkspace: () => void;
   onSelectHome: () => void;
@@ -256,8 +259,10 @@ export const Sidebar = memo(function Sidebar({
   useTokenUsageStats,
   thirdPartyProviderUsage,
   codexKeyProfiles,
-  activeCodexKeyProfileId,
-  onSelectCodexKeyProfile,
+  codexProviders,
+  usageCredentialSelection,
+  effectiveUsageCredentialSelection,
+  onSelectUsageCredential,
   usageConfigurationWarning = null,
   onAddWorkspace,
   onSelectHome,
@@ -1277,8 +1282,10 @@ export const Sidebar = memo(function Sidebar({
         thirdPartyUsageCostUsd={thirdPartyUsageCostUsd}
         thirdPartyProviderUsage={thirdPartyProviderUsage}
         codexKeyProfiles={codexKeyProfiles}
-        activeCodexKeyProfileId={activeCodexKeyProfileId}
-        onSelectCodexKeyProfile={onSelectCodexKeyProfile}
+        codexProviders={codexProviders}
+        usageCredentialSelection={usageCredentialSelection}
+        effectiveUsageCredentialSelection={effectiveUsageCredentialSelection}
+        onSelectUsageCredential={onSelectUsageCredential}
       />
     </aside>
   );

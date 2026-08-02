@@ -7,6 +7,7 @@ use tokio::sync::Mutex;
 
 use crate::codex::config as codex_config;
 use crate::codex::home as codex_home;
+use crate::shared::provider_profiles_core::migrate_provider_settings;
 use crate::shared::session_manager_core::sources::reconcile_session_sources;
 use crate::storage::write_settings;
 use crate::types::AppSettings;
@@ -58,6 +59,7 @@ pub(crate) async fn get_app_settings_core(
     settings_path: &PathBuf,
 ) -> AppSettings {
     let mut settings = app_settings.lock().await.clone();
+    let provider_settings_changed = migrate_provider_settings(&mut settings);
     let sources_changed = reconcile_settings_session_sources(&mut settings);
     if let Ok(Some(collaboration_modes_enabled)) =
         codex_config::read_collaboration_modes_enabled(&settings)
@@ -83,9 +85,9 @@ pub(crate) async fn get_app_settings_core(
     if let Ok(tool_output_token_limit) = codex_config::read_tool_output_token_limit(&settings) {
         settings.tool_output_token_limit = tool_output_token_limit;
     }
-    if sources_changed {
+    if sources_changed || provider_settings_changed {
         if let Err(error) = write_settings(settings_path, &settings) {
-            eprintln!("get_app_settings_core: failed to persist session sources: {error}");
+            eprintln!("get_app_settings_core: failed to persist normalized settings: {error}");
         } else {
             *app_settings.lock().await = settings.clone();
         }
@@ -102,6 +104,7 @@ pub(crate) async fn update_app_settings_core(
         .global_worktrees_folder
         .map(|path| normalize_windows_namespace_path(&path));
     settings.tool_output_token_limit = settings.tool_output_token_limit.filter(|value| *value > 0);
+    migrate_provider_settings(&mut settings);
     reconcile_settings_session_sources(&mut settings);
     let _ = codex_config::write_collaboration_modes_enabled(
         &settings,

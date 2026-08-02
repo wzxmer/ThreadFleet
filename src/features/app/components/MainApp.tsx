@@ -108,6 +108,7 @@ import {
   resolveCodexProviderBaseUrl,
   resolveCodexProviderModelOptions,
 } from "@/utils/providerProfiles";
+import { credentialSelectionId } from "@/utils/providerCredentials";
 import {
   getProviderModels,
   getManagedCodexPlatform,
@@ -461,12 +462,15 @@ export default function MainApp() {
   }, []);
 
   // Access mode is thread-scoped (best-effort persisted) and falls back to the app default.
+  const activeExecutionProfileId = appSettings.executionCredentialSelection
+    ? credentialSelectionId(appSettings.executionCredentialSelection)
+    : appSettings.activeCodexKeyProfileId;
   const activeCodexKeyProfile = useMemo(
     () =>
       appSettings.codexKeyProfiles.find(
-        (profile) => profile.id === appSettings.activeCodexKeyProfileId,
+        (profile) => profile.id === activeExecutionProfileId,
       ) ?? null,
-    [appSettings.activeCodexKeyProfileId, appSettings.codexKeyProfiles],
+    [activeExecutionProfileId, appSettings.codexKeyProfiles],
   );
   const effectivePreferredModelId = resolveCodexProviderModel(
     activeCodexKeyProfile?.model,
@@ -993,8 +997,10 @@ export default function MainApp() {
     defer: hasAnyProcessingThread,
     syncLocalConfig: appSettings.syncProviderProfileToLocalConfig,
     settingsSnapshot: {
-      activeCodexKeyProfileId: appSettings.activeCodexKeyProfileId,
-      activeProfile: activeCodexKeyProfile,
+      activeCodexKeyProfileId: activeExecutionProfileId,
+      executionCredentialSelection:
+        appSettings.executionCredentialSelection ?? null,
+      codexProviders: appSettings.codexProviders ?? [],
       syncProviderProfileToLocalConfig:
         appSettings.syncProviderProfileToLocalConfig,
     },

@@ -176,6 +176,13 @@ pub(super) async fn try_handle(
             };
             Some(provider_profiles_core::provider_model_list_core(base_url, api_key).await)
         }
+        "provider_function_tool_probe" => {
+            let selection = match parse_input::<crate::types::CredentialSelection>(params) {
+                Ok(value) => value,
+                Err(err) => return Some(Err(err)),
+            };
+            Some(state.provider_function_tool_probe(selection).await)
+        }
         "start_thread" => {
             let workspace_id = match parse_string(params, "workspaceId") {
                 Ok(value) => value,

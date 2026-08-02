@@ -246,6 +246,7 @@ pub fn run() {
             codex::get_config_model,
             codex::get_provider_status,
             codex::provider_model_list,
+            codex::provider_function_tool_probe,
             codex::third_party_key_usage,
             codex::workspace_third_party_key_usage,
             menu::menu_set_accelerators,

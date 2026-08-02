@@ -1,6 +1,11 @@
 import { useI18n } from "@/features/i18n/I18nProvider";
+import { RoundedSelect } from "@/features/design-system/components/select/RoundedSelect";
 import type { ThirdPartyKeyUsageSnapshot } from "../utils/thirdPartyKeyUsage";
-import type { CodexKeyProfile } from "@/types";
+import type { CodexKeyProfile, CodexProvider, CredentialSelection } from "@/types";
+import {
+  providersFromSettings,
+  providerSelection,
+} from "@/utils/providerCredentials";
 
 type SidebarBottomRailProps = {
   showUsage: boolean;
@@ -14,8 +19,10 @@ type SidebarBottomRailProps = {
   thirdPartyUsageCostUsd: number | null;
   thirdPartyProviderUsage: ThirdPartyKeyUsageSnapshot | null;
   codexKeyProfiles: CodexKeyProfile[];
-  activeCodexKeyProfileId: string | null;
-  onSelectCodexKeyProfile: (profileId: string) => void;
+  codexProviders?: CodexProvider[];
+  usageCredentialSelection?: CredentialSelection | null;
+  effectiveUsageCredentialSelection?: CredentialSelection | null;
+  onSelectUsageCredential: (selection: CredentialSelection | null) => void;
 };
 
 type UsageRowProps = {
@@ -71,41 +78,90 @@ type ThirdPartyUsageSummaryProps = {
   tokens: number;
   costUsd: number | null;
   providerUsage: ThirdPartyKeyUsageSnapshot | null;
-  keyProfiles: CodexKeyProfile[];
-  activeKeyProfileId: string | null;
-  onSelectKeyProfile: (profileId: string) => void;
+  providers?: CodexProvider[];
+  usageSelection?: CredentialSelection | null;
+  effectiveUsageSelection?: CredentialSelection | null;
+  onSelectUsageCredential: (selection: CredentialSelection | null) => void;
 };
 
 function ThirdPartyUsageSummary({
   tokens,
   costUsd,
   providerUsage,
-  keyProfiles,
-  activeKeyProfileId,
-  onSelectKeyProfile,
+  providers = [],
+  usageSelection,
+  effectiveUsageSelection,
+  onSelectUsageCredential,
 }: ThirdPartyUsageSummaryProps) {
   const { t } = useI18n();
+  const selectedProvider =
+    providers.find((provider) => provider.id === effectiveUsageSelection?.providerId) ?? null;
+  const selectedGroup =
+    selectedProvider?.groups.find((group) => group.id === effectiveUsageSelection?.groupId) ??
+    selectedProvider?.groups[0];
+
+  const selectUsage = (selection: CredentialSelection | null) => {
+    onSelectUsageCredential(selection);
+  };
 
   return (
     <div className="sidebar-usage-third-party">
-      {keyProfiles.length > 0 && (
-        <div className="sidebar-usage-stat">
-          <span>{t("sidebar.usageGroup")}</span>
-          <select
-            className="sidebar-usage-group-select"
-            value={activeKeyProfileId ?? ""}
-            aria-label={t("sidebar.usageGroup")}
-            onChange={(event) => onSelectKeyProfile(event.target.value)}
-          >
-            <option value="">{t("settings.codex.defaultEnvVars")}</option>
-            {keyProfiles.map((profile) => (
-              <option key={profile.id} value={profile.id}>
-                {profile.groupName?.trim() || profile.name}
-              </option>
-            ))}
-          </select>
+      {providers.length > 0 ? (
+        <div className="sidebar-usage-selection-stack">
+          <div className="sidebar-usage-stat">
+            <span>{t("sidebar.usageProvider")}</span>
+            <RoundedSelect
+              className="sidebar-usage-select"
+              popoverClassName="sidebar-usage-select-popover"
+              value={usageSelection ? selectedProvider?.id ?? "" : "__follow_execution__"}
+              ariaLabel={t("sidebar.usageProvider")}
+              options={[
+                {
+                  value: "__follow_execution__",
+                  label: t("sidebar.usageFollowExecution"),
+                },
+                ...providers.map((provider) => ({ value: provider.id, label: provider.name })),
+              ]}
+              onChange={(providerId) => {
+                if (providerId === "__follow_execution__") {
+                  selectUsage(null);
+                  return;
+                }
+                const provider = providers.find((item) => item.id === providerId);
+                selectUsage(provider ? providerSelection(provider) : null);
+              }}
+            />
+          </div>
+          {selectedProvider ? (
+            <div className="sidebar-usage-stat">
+              <span>{t("sidebar.usageGroup")}</span>
+              <RoundedSelect
+                className="sidebar-usage-select"
+                popoverClassName="sidebar-usage-select-popover"
+                value={selectedGroup?.id ?? ""}
+                ariaLabel={t("sidebar.usageGroup")}
+                options={(selectedProvider.groups ?? []).map((group) => ({
+                  value: group.id,
+                  label: group.name,
+                }))}
+                onChange={(groupId) => {
+                  const group = selectedProvider.groups.find((item) => item.id === groupId);
+                  const credential = group?.credentials[0];
+                  selectUsage(
+                    group && credential
+                      ? {
+                          providerId: selectedProvider.id,
+                          groupId: group.id,
+                          credentialId: credential.id,
+                        }
+                      : null,
+                  );
+                }}
+              />
+            </div>
+          ) : null}
         </div>
-      )}
+      ) : null}
       {providerUsage ? (
         <>
           <div className="sidebar-usage-stat">
@@ -173,10 +229,16 @@ export function SidebarBottomRail({
   thirdPartyUsageCostUsd,
   thirdPartyProviderUsage,
   codexKeyProfiles,
-  activeCodexKeyProfileId,
-  onSelectCodexKeyProfile,
+  codexProviders,
+  usageCredentialSelection,
+  effectiveUsageCredentialSelection,
+  onSelectUsageCredential,
 }: SidebarBottomRailProps) {
   const { t } = useI18n();
+  const providers = providersFromSettings({
+    codexProviders,
+    codexKeyProfiles,
+  });
 
   return (
     <div className="sidebar-bottom-rail">
@@ -190,9 +252,10 @@ export function SidebarBottomRail({
               tokens={thirdPartyUsageTokens}
               costUsd={thirdPartyUsageCostUsd}
               providerUsage={thirdPartyProviderUsage}
-              keyProfiles={codexKeyProfiles}
-              activeKeyProfileId={activeCodexKeyProfileId}
-              onSelectKeyProfile={onSelectCodexKeyProfile}
+              providers={providers}
+              usageSelection={usageCredentialSelection}
+              effectiveUsageSelection={effectiveUsageCredentialSelection}
+              onSelectUsageCredential={onSelectUsageCredential}
             />
           ) : (
             <div className="sidebar-usage-list">

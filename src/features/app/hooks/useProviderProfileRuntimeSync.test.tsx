@@ -2,7 +2,8 @@
 
 import { renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { AppSettings, CodexKeyProfile, WorkspaceInfo } from "@/types";
+import type { AppSettings, CodexKeyProfile, CodexProvider, WorkspaceInfo } from "@/types";
+import { providersToLegacyProfiles } from "@/utils/providerCredentials";
 import {
   restoreProviderRuntimeSettings,
   useProviderProfileRuntimeSync,
@@ -40,20 +41,58 @@ const runtimeSettings = (
   activeProfile: CodexKeyProfile | null,
   syncLocalConfig: boolean,
 ): ProviderRuntimeSettingsSnapshot => ({
-  activeCodexKeyProfileId: activeProfile?.id ?? null,
-  activeProfile,
+  activeCodexKeyProfileId: activeProfile
+    ? `provider-${activeProfile.id}:group-${activeProfile.id}:credential-${activeProfile.id}`
+    : null,
+  executionCredentialSelection: activeProfile
+    ? {
+        providerId: `provider-${activeProfile.id}`,
+        groupId: `group-${activeProfile.id}`,
+        credentialId: `credential-${activeProfile.id}`,
+      }
+    : null,
+  codexProviders: activeProfile ? [providerFromProfile(activeProfile)] : [],
   syncProviderProfileToLocalConfig: syncLocalConfig,
 });
+
+function providerFromProfile(activeProfile: CodexKeyProfile): CodexProvider {
+  return {
+    id: `provider-${activeProfile.id}`,
+    name: activeProfile.name,
+    providerKind: activeProfile.providerKind,
+    usageProtocol: activeProfile.usageProtocol ?? "auto",
+    baseUrlEnvVar: activeProfile.baseUrlEnvVar,
+    baseUrl: activeProfile.baseUrl ?? null,
+    model: activeProfile.model ?? null,
+    contextWindow: activeProfile.contextWindow ?? null,
+    maxOutputTokens: activeProfile.maxOutputTokens ?? null,
+    useGateway: activeProfile.useGateway,
+    transportMode: activeProfile.transportMode ?? "auto",
+    supportsThinking: activeProfile.supportsThinking,
+    supportsReasoningEffort: activeProfile.supportsReasoningEffort,
+    cachedModels: activeProfile.cachedModels ?? [],
+    groups: [{
+      id: `group-${activeProfile.id}`,
+      name: activeProfile.groupName ?? activeProfile.name,
+      credentials: [{
+        id: `credential-${activeProfile.id}`,
+        name: activeProfile.name,
+        key: activeProfile.key,
+        keyEnvVar: activeProfile.keyEnvVar,
+      }],
+    }],
+  };
+}
 
 const noopRollbackSettings = async () => undefined;
 
 describe("useProviderProfileRuntimeSync", () => {
-  it("restores only Provider transaction fields and preserves unrelated settings", () => {
+  it("restores the failed execution provider and preserves other provider edits", () => {
     const profileA = profile("profile-a");
-    const editedProfileA = { ...profileA, key: "edited-key" };
     const profileB = profile("profile-b");
     const current = {
-      codexKeyProfiles: [editedProfileA, profileB],
+      codexProviders: [providerFromProfile({ ...profileA, key: "edited-key" }), providerFromProfile(profileB)],
+      codexKeyProfiles: providersToLegacyProfiles([providerFromProfile(profileB)]),
       activeCodexKeyProfileId: profileB.id,
       syncProviderProfileToLocalConfig: true,
       theme: "dark",
@@ -64,9 +103,25 @@ describe("useProviderProfileRuntimeSync", () => {
       runtimeSettings(profileA, false),
     );
 
-    expect(restored.activeCodexKeyProfileId).toBe(profileA.id);
+    expect(restored.activeCodexKeyProfileId).toBe(
+      "provider-profile-a:group-profile-a:credential-profile-a",
+    );
+    expect(restored.executionCredentialSelection).toEqual({
+      providerId: "provider-profile-a",
+      groupId: "group-profile-a",
+      credentialId: "credential-profile-a",
+    });
     expect(restored.syncProviderProfileToLocalConfig).toBe(false);
-    expect(restored.codexKeyProfiles).toEqual([profileA, profileB]);
+    expect(restored.codexProviders).toEqual([
+      providerFromProfile(profileA),
+      providerFromProfile(profileB),
+    ]);
+    expect(restored.codexKeyProfiles).toEqual(
+      providersToLegacyProfiles([
+        providerFromProfile(profileA),
+        providerFromProfile(profileB),
+      ]),
+    );
     expect(restored.theme).toBe("dark");
   });
 

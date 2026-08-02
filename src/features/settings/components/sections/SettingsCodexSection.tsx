@@ -7,6 +7,8 @@ import type { Dispatch, SetStateAction } from "react";
 import type {
   AppSettings,
   CodexDoctorResult,
+  CodexProvider,
+  CredentialSelection,
   CodexKeyProfile,
   CodexSyncDiagnostics,
   CodexStatus,
@@ -163,6 +165,89 @@ const getReasoningOptions = (model: ModelOption | null): string[] => {
 
 const createCodexKeyProfileId = () =>
   `codex-key-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+const migratedProviderId = (profileId: string) => `provider-${profileId}`;
+const migratedGroupId = (profileId: string) => `group-${profileId}`;
+const migratedCredentialId = (profileId: string) => `credential-${profileId}`;
+
+function profileIdFromSelection(selection: CredentialSelection | null | undefined): string | null {
+  return selection
+    ? `${selection.providerId}:${selection.groupId}:${selection.credentialId}`
+    : null;
+}
+
+function selectionFromProfileId(profileId: string): CredentialSelection | null {
+  const [providerId, groupId, credentialId, extra] = profileId.split(":");
+  if (!providerId || !groupId || !credentialId || extra) {
+    return null;
+  }
+  return { providerId, groupId, credentialId };
+}
+
+function selectionForProfileId(profileId: string): CredentialSelection {
+  return (
+    selectionFromProfileId(profileId) ?? {
+      providerId: migratedProviderId(profileId),
+      groupId: migratedGroupId(profileId),
+      credentialId: migratedCredentialId(profileId),
+    }
+  );
+}
+
+function sameSelection(
+  left: CredentialSelection | null | undefined,
+  right: CredentialSelection | null | undefined,
+): boolean {
+  return Boolean(
+    left &&
+      right &&
+      left.providerId === right.providerId &&
+      left.groupId === right.groupId &&
+      left.credentialId === right.credentialId,
+  );
+}
+
+function profileToProvider(profile: CodexKeyProfile): CodexProvider {
+  const selection = selectionFromProfileId(profile.id);
+  const providerId = selection?.providerId ?? migratedProviderId(profile.id);
+  const groupId = selection?.groupId ?? migratedGroupId(profile.id);
+  const credentialId = selection?.credentialId ?? migratedCredentialId(profile.id);
+  return {
+    id: providerId,
+    name: profile.name,
+    providerKind: profile.providerKind ?? "custom",
+    usageProtocol: profile.usageProtocol ?? "auto",
+    baseUrlEnvVar: profile.baseUrlEnvVar || DEFAULT_CODEX_BASE_URL_ENV_VAR,
+    baseUrl: profile.baseUrl ?? null,
+    model: profile.model ?? null,
+    contextWindow: profile.contextWindow ?? null,
+    maxOutputTokens: profile.maxOutputTokens ?? null,
+    useGateway: Boolean(profile.useGateway),
+    supportsThinking: Boolean(profile.supportsThinking) || Boolean(profile.supportsReasoningEffort),
+    supportsReasoningEffort: Boolean(profile.supportsReasoningEffort),
+    lastModelRefreshAtMs: profile.lastModelRefreshAtMs ?? null,
+    cachedModels: profile.cachedModels ?? [],
+    groups: [
+      {
+        id: groupId,
+        name: profile.groupName?.trim() || profile.name,
+        credentials: [
+          {
+            id: credentialId,
+            name: profile.name,
+            key: profile.key,
+            newApiAccessToken: profile.newApiAccessToken ?? null,
+            keyEnvVar: profile.keyEnvVar || DEFAULT_CODEX_KEY_ENV_VAR,
+          },
+        ],
+      },
+    ],
+  };
+}
+
+function profilesToProviders(profiles: CodexKeyProfile[]): CodexProvider[] {
+  return profiles.map(profileToProvider);
+}
 
 export function SettingsCodexSection({
   mode = "codex",
@@ -322,9 +407,15 @@ export function SettingsCodexSection({
   const [providerSettingError, setProviderSettingError] = useState<string | null>(null);
   const [editingKeyProfileId, setEditingKeyProfileId] = useState<string | null>(null);
   const keyProfiles = appSettings.codexKeyProfiles ?? [];
-  const selectedKeyProfile = keyProfiles.find(
-    (profile) => profile.id === appSettings.activeCodexKeyProfileId,
-  );
+  const selectedExecutionProfileId =
+    profileIdFromSelection(appSettings.executionCredentialSelection) ??
+    appSettings.activeCodexKeyProfileId;
+  const selectedKeyProfile =
+    keyProfiles.find((profile) => profile.id === selectedExecutionProfileId) ??
+    keyProfiles.find((profile) => profile.id === appSettings.activeCodexKeyProfileId) ??
+    keyProfiles.find((profile) =>
+      sameSelection(selectionForProfileId(profile.id), appSettings.executionCredentialSelection),
+    );
   const editingKeyProfile = editingKeyProfileId
     ? keyProfiles.find((profile) => profile.id === editingKeyProfileId) ?? null
     : null;
@@ -475,12 +566,21 @@ export function SettingsCodexSection({
     : unknownLabel;
 
   const handleSelectKeyProfile = (profileId: string) => {
+    if (profileId === "__codex_default__") {
+      updateCodexKeySettings({
+        activeCodexKeyProfileId: null,
+        executionCredentialSelection: null,
+      });
+      return;
+    }
+    const selection = selectionForProfileId(profileId);
     updateCodexKeySettings({
-      activeCodexKeyProfileId: profileId === "__codex_default__" ? null : profileId,
+      activeCodexKeyProfileId: profileId,
+      executionCredentialSelection: selection,
     });
   };
 
-  const handleAddKeyProfile = () => {
+  const handleAddKeyProfile = (activate: boolean) => {
     if (!keyProfileDraftValid) {
       return;
     }
@@ -517,18 +617,34 @@ export function SettingsCodexSection({
       groupName: keyProfileGroupNameDraft.trim() || keyProfileNameDraft.trim(),
     };
     if (editingKeyProfileId) {
+      const nextProfiles = keyProfiles.map((existing) =>
+        existing.id === editingKeyProfileId ? { ...profile, id: existing.id } : existing,
+      );
+      const nextSelection = selectionForProfileId(editingKeyProfileId);
       updateCodexKeySettings({
-        codexKeyProfiles: keyProfiles.map((existing) =>
-          existing.id === editingKeyProfileId ? { ...profile, id: existing.id } : existing,
-        ),
-        activeCodexKeyProfileId: editingKeyProfileId,
+        codexKeyProfiles: nextProfiles,
+        codexProviders: profilesToProviders(nextProfiles),
+        ...(activate
+          ? {
+              activeCodexKeyProfileId: editingKeyProfileId,
+              executionCredentialSelection: nextSelection,
+            }
+          : {}),
       });
       resetKeyProfileDrafts();
       return;
     }
+    const nextProfiles = [...keyProfiles, profile];
+    const nextSelection = selectionForProfileId(profile.id);
     updateCodexKeySettings({
-      codexKeyProfiles: [...keyProfiles, profile],
-      activeCodexKeyProfileId: profile.id,
+      codexKeyProfiles: nextProfiles,
+      codexProviders: profilesToProviders(nextProfiles),
+      ...(activate
+        ? {
+            activeCodexKeyProfileId: profile.id,
+            executionCredentialSelection: nextSelection,
+          }
+        : {}),
     });
     resetKeyProfileDrafts();
   };
@@ -597,12 +713,22 @@ export function SettingsCodexSection({
 
   const handleDeleteKeyProfile = (profileId: string) => {
     const nextProfiles = keyProfiles.filter((profile) => profile.id !== profileId);
+    const profileSelection = selectionForProfileId(profileId);
+    const wasExecutionSelection =
+      selectedExecutionProfileId === profileId ||
+      sameSelection(appSettings.executionCredentialSelection, profileSelection);
+    const wasUsageSelection = sameSelection(appSettings.usageCredentialSelection, profileSelection);
     updateCodexKeySettings({
       codexKeyProfiles: nextProfiles,
+      codexProviders: profilesToProviders(nextProfiles),
       activeCodexKeyProfileId:
-        appSettings.activeCodexKeyProfileId === profileId
+        appSettings.activeCodexKeyProfileId === profileId || wasExecutionSelection
           ? null
           : appSettings.activeCodexKeyProfileId,
+      executionCredentialSelection: wasExecutionSelection
+        ? null
+        : appSettings.executionCredentialSelection,
+      usageCredentialSelection: wasUsageSelection ? null : appSettings.usageCredentialSelection,
     });
     if (editingKeyProfileId === profileId) {
       resetKeyProfileDrafts();
@@ -1008,69 +1134,6 @@ export function SettingsCodexSection({
             {providerSettingError}
           </div>
         ) : null}
-        <div className="settings-provider-diagnostics">
-          <div className="settings-provider-diagnostics-title">
-            {t("settings.codex.providerDiagnostics")}
-          </div>
-          <div className="settings-help">
-            {t("settings.codex.providerDiagnosticsHelp")}
-          </div>
-          <dl className="settings-provider-diagnostics-grid">
-            <div>
-              <dt>{t("settings.codex.diagnosticsWorkspace")}</dt>
-              <dd>
-                {providerSessionDiagnostics?.workspaceName ??
-                  t("settings.codex.diagnosticsUnavailable")}
-              </dd>
-            </div>
-            <div>
-              <dt>{t("settings.codex.diagnosticsProvider")}</dt>
-              <dd>
-                {providerSessionDiagnostics
-                  ? `${
-                      providerSessionDiagnostics.providerName ??
-                      t("settings.codex.diagnosticsDefaultProvider")
-                    } (${providerSessionDiagnostics.providerKind})`
-                  : t("settings.codex.diagnosticsUnavailable")}
-              </dd>
-            </div>
-            <div>
-              <dt>{t("settings.codex.diagnosticsSessionSource")}</dt>
-              <dd>
-                <code>
-                  {providerSessionDiagnostics?.sessionSourceId ??
-                    t("settings.codex.diagnosticsUnavailable")}
-                </code>
-              </dd>
-            </div>
-            <div>
-              <dt>{t("settings.codex.diagnosticsRuntimeGeneration")}</dt>
-              <dd>
-                {providerSessionDiagnostics?.runtimeGeneration ??
-                  t("settings.codex.diagnosticsUnavailable")}
-              </dd>
-            </div>
-            <div>
-              <dt>{t("settings.codex.diagnosticsListGeneration")}</dt>
-              <dd>
-                {providerSessionDiagnostics?.listGeneration ??
-                  t("settings.codex.diagnosticsUnavailable")}
-              </dd>
-            </div>
-            <div>
-              <dt>{t("settings.codex.diagnosticsStaleReason")}</dt>
-              <dd>{providerStaleReasonLabel}</dd>
-            </div>
-            <div>
-              <dt>{t("settings.codex.diagnosticsStaleThreads")}</dt>
-              <dd>{providerSessionDiagnostics?.staleThreadCount ?? 0}</dd>
-            </div>
-            <div>
-              <dt>{t("settings.codex.diagnosticsFallback")}</dt>
-              <dd>{providerFallbackLabel}</dd>
-            </div>
-          </dl>
-        </div>
         <div className="settings-divider" />
         <div className="settings-field-label">
           {t("settings.codex.keyProfile")}
@@ -1397,9 +1460,17 @@ export function SettingsCodexSection({
             type="button"
             className="ghost settings-button-compact"
             disabled={!keyProfileDraftValid}
-            onClick={handleAddKeyProfile}
+            onClick={() => handleAddKeyProfile(false)}
           >
-            {editingKeyProfileId ? t("common.save") : t("settings.codex.addAndEnable")}
+            {saveLabel}
+          </button>
+          <button
+            type="button"
+            className="ghost settings-button-compact"
+            disabled={!keyProfileDraftValid}
+            onClick={() => handleAddKeyProfile(true)}
+          >
+            {t("settings.codex.saveAndEnable")}
           </button>
           {editingKeyProfileId ? (
             <button
@@ -1413,6 +1484,70 @@ export function SettingsCodexSection({
             </button>
           ) : null}
         </div>
+        <div className="settings-divider" />
+        <details className="settings-provider-diagnostics">
+          <summary className="settings-provider-diagnostics-title">
+            {t("settings.codex.providerDiagnostics")}
+          </summary>
+          <div className="settings-help">
+            {t("settings.codex.providerDiagnosticsHelp")}
+          </div>
+          <dl className="settings-provider-diagnostics-grid">
+            <div>
+              <dt>{t("settings.codex.diagnosticsWorkspace")}</dt>
+              <dd>
+                {providerSessionDiagnostics?.workspaceName ??
+                  t("settings.codex.diagnosticsUnavailable")}
+              </dd>
+            </div>
+            <div>
+              <dt>{t("settings.codex.diagnosticsProvider")}</dt>
+              <dd>
+                {providerSessionDiagnostics
+                  ? `${
+                      providerSessionDiagnostics.providerName ??
+                      t("settings.codex.diagnosticsDefaultProvider")
+                    } (${providerSessionDiagnostics.providerKind})`
+                  : t("settings.codex.diagnosticsUnavailable")}
+              </dd>
+            </div>
+            <div>
+              <dt>{t("settings.codex.diagnosticsSessionSource")}</dt>
+              <dd>
+                <code>
+                  {providerSessionDiagnostics?.sessionSourceId ??
+                    t("settings.codex.diagnosticsUnavailable")}
+                </code>
+              </dd>
+            </div>
+            <div>
+              <dt>{t("settings.codex.diagnosticsRuntimeGeneration")}</dt>
+              <dd>
+                {providerSessionDiagnostics?.runtimeGeneration ??
+                  t("settings.codex.diagnosticsUnavailable")}
+              </dd>
+            </div>
+            <div>
+              <dt>{t("settings.codex.diagnosticsListGeneration")}</dt>
+              <dd>
+                {providerSessionDiagnostics?.listGeneration ??
+                  t("settings.codex.diagnosticsUnavailable")}
+              </dd>
+            </div>
+            <div>
+              <dt>{t("settings.codex.diagnosticsStaleReason")}</dt>
+              <dd>{providerStaleReasonLabel}</dd>
+            </div>
+            <div>
+              <dt>{t("settings.codex.diagnosticsStaleThreads")}</dt>
+              <dd>{providerSessionDiagnostics?.staleThreadCount ?? 0}</dd>
+            </div>
+            <div>
+              <dt>{t("settings.codex.diagnosticsFallback")}</dt>
+              <dd>{providerFallbackLabel}</dd>
+            </div>
+          </dl>
+        </details>
       </div>
       ) : null}
       {mode === "codex" ? (
