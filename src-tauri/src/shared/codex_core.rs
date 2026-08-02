@@ -587,27 +587,32 @@ fn collect_rollout_enrichment_line(
                                 .get("id")
                                 .and_then(Value::as_str)
                                 .map(str::to_string);
-                            if payload.get("phase").and_then(Value::as_str) == Some("final_answer")
-                            {
-                                let Some(id) = id else {
-                                    return;
-                                };
-                                turn.sequence.push(RolloutSequenceItem::AgentMessage(json!({
-                                    "type": "agentMessage",
-                                    "id": id,
-                                    "text": truncate_rollout_text(
-                                        &rollout_message_text(payload),
-                                        MAX_ROLLOUT_MESSAGE_CHARS,
-                                    ),
-                                    "phase": "final_answer",
-                                    "createdAt": value.get("timestamp").cloned().unwrap_or(Value::Null),
-                                })));
-                            } else {
+                            let Some(id) = id else {
+                                return;
+                            };
+                            let text = truncate_rollout_text(
+                                &rollout_message_text(payload),
+                                MAX_ROLLOUT_MESSAGE_CHARS,
+                            );
+                            if text.trim().is_empty() {
                                 turn.sequence.push(RolloutSequenceItem::Anchor {
-                                    id,
+                                    id: Some(id),
                                     item_type: "agentMessage",
                                 });
+                                return;
                             }
+                            let mut item = json!({
+                                "type": "agentMessage",
+                                "id": id,
+                                "text": text,
+                                "createdAt": value.get("timestamp").cloned().unwrap_or(Value::Null),
+                            });
+                            if let Some(phase) = payload.get("phase").and_then(Value::as_str) {
+                                if let Some(object) = item.as_object_mut() {
+                                    object.insert("phase".to_string(), json!(phase));
+                                }
+                            }
+                            turn.sequence.push(RolloutSequenceItem::AgentMessage(item));
                         }
                         _ => {}
                     }
@@ -706,6 +711,48 @@ fn collect_rollout_enrichment_line(
     }
 }
 
+fn rollout_agent_message_matches(existing: &Value, candidate: &Value) -> bool {
+    if existing.get("type").and_then(Value::as_str) != Some("agentMessage") {
+        return false;
+    }
+    if existing.get("text").and_then(Value::as_str) != candidate.get("text").and_then(Value::as_str)
+    {
+        return false;
+    }
+    let existing_phase = existing.get("phase").and_then(Value::as_str);
+    let candidate_phase = candidate.get("phase").and_then(Value::as_str);
+    existing_phase.is_none() || candidate_phase.is_none() || existing_phase == candidate_phase
+}
+
+fn merge_rollout_agent_message(existing: &mut Value, candidate: &Value) {
+    let Some(object) = existing.as_object_mut() else {
+        return;
+    };
+    if let Some(phase) = candidate.get("phase").and_then(Value::as_str) {
+        object.insert("phase".to_string(), json!(phase));
+    }
+    if object
+        .get("text")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .len()
+        < candidate
+            .get("text")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .len()
+    {
+        if let Some(text) = candidate.get("text") {
+            object.insert("text".to_string(), text.clone());
+        }
+    }
+    if object.get("createdAt").is_none() {
+        if let Some(created_at) = candidate.get("createdAt") {
+            object.insert("createdAt".to_string(), created_at.clone());
+        }
+    }
+}
+
 fn apply_rollout_enrichment(response: &mut Value, enrichment: &RolloutThreadEnrichment) {
     let Some(turns) = response
         .pointer_mut("/result/thread/turns")
@@ -762,7 +809,19 @@ fn apply_rollout_enrichment(response: &mut Value, enrichment: &RolloutThreadEnri
                     let Some(id) = item.get("id").and_then(Value::as_str) else {
                         continue;
                     };
-                    if existing_ids.insert(id.to_string()) {
+                    let id_match = items.iter().position(|existing| {
+                        existing.get("id").and_then(Value::as_str) == Some(id)
+                    });
+                    let semantic_match = items[cursor.min(items.len())..]
+                        .iter()
+                        .position(|existing| rollout_agent_message_matches(existing, item))
+                        .map(|relative_index| cursor.min(items.len()) + relative_index);
+                    if let Some(index) = id_match.or(semantic_match) {
+                        if let Some(existing) = items.get_mut(index) {
+                            merge_rollout_agent_message(existing, item);
+                        }
+                        cursor = cursor.max(index + 1);
+                    } else if existing_ids.insert(id.to_string()) {
                         let is_final_answer =
                             item.get("phase").and_then(Value::as_str) == Some("final_answer");
                         let insert_at = if is_final_answer {
@@ -772,11 +831,6 @@ fn apply_rollout_enrichment(response: &mut Value, enrichment: &RolloutThreadEnri
                         };
                         items.insert(insert_at, item.clone());
                         cursor = insert_at + 1;
-                    } else if let Some(index) = items
-                        .iter()
-                        .position(|existing| existing.get("id").and_then(Value::as_str) == Some(id))
-                    {
-                        cursor = cursor.max(index + 1);
                     }
                 }
             }
@@ -2533,7 +2587,8 @@ pub(crate) async fn workspace_third_party_key_usage_core(
     day_start_unix: Option<i64>,
 ) -> Result<Value, String> {
     let codex_home = resolve_codex_home_for_workspace_core(workspaces, &workspace_id).await?;
-    let active_profile_selected = provider_profiles_core::effective_usage_profile(settings).is_some();
+    let active_profile_selected =
+        provider_profiles_core::effective_usage_profile(settings).is_some();
     let (document, default_api_key) = if active_profile_selected {
         (toml_edit::Document::new(), None)
     } else {
@@ -2560,8 +2615,7 @@ pub(crate) async fn workspace_third_party_key_usage_core(
 mod tests {
     use super::*;
     use crate::types::{
-        CodexCredential, CodexCredentialGroup, CodexKeyProfile, CodexProvider,
-        CredentialSelection,
+        CodexCredential, CodexCredentialGroup, CodexKeyProfile, CodexProvider, CredentialSelection,
     };
     use serde_json::Value;
     use toml_edit::Document;
@@ -3363,6 +3417,53 @@ base_url = "{base_url}"
             items.last().and_then(|item| item.get("text")),
             Some(&json!("Recovered final answer"))
         );
+    }
+
+    #[test]
+    fn rollout_enrichment_restores_missing_assistant_messages_without_duplicates() {
+        let mut current_turn_id = None;
+        let mut enrichment = RolloutThreadEnrichment::default();
+        for line in [
+            r#"{"type":"turn_context","payload":{"turn_id":"turn-1"}}"#,
+            r#"{"timestamp":"2026-08-01T19:43:46.000Z","type":"response_item","payload":{"type":"message","id":"commentary-1","role":"assistant","phase":"commentary","content":[{"type":"output_text","text":"Checking"}]}}"#,
+            r#"{"timestamp":"2026-08-01T19:43:47.000Z","type":"response_item","payload":{"type":"message","id":"final-1","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"Recovered final answer"}]}}"#,
+        ] {
+            collect_rollout_enrichment_line(line, &mut current_turn_id, &mut enrichment);
+        }
+        let mut response = json!({
+            "result": {
+                "thread": {
+                    "turns": [{
+                        "id": "turn-1",
+                        "items": [
+                            { "type": "userMessage", "id": "user-1" },
+                            {
+                                "type": "agentMessage",
+                                "id": "server-final",
+                                "phase": "final_answer",
+                                "text": "Recovered final answer"
+                            }
+                        ]
+                    }]
+                }
+            }
+        });
+
+        apply_rollout_enrichment(&mut response, &enrichment);
+
+        let items = response["result"]["thread"]["turns"][0]["items"]
+            .as_array()
+            .expect("thread items");
+        assert_eq!(
+            items
+                .iter()
+                .filter(|item| item.get("type") == Some(&json!("agentMessage")))
+                .count(),
+            2
+        );
+        assert_eq!(items[1]["id"], json!("commentary-1"));
+        assert_eq!(items[2]["id"], json!("server-final"));
+        assert_eq!(items[2]["phase"], json!("final_answer"));
     }
 
     #[test]

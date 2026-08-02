@@ -204,6 +204,24 @@ describe("threadReducer", () => {
     });
   });
 
+  it("keeps a streamed agent message in its active turn before completion", () => {
+    const next = threadReducer(initialState, {
+      type: "appendAgentDelta",
+      workspaceId: "ws-1",
+      threadId: "thread-1",
+      itemId: "assistant-streaming",
+      delta: "Streaming next result",
+      turnId: "turn-1",
+      hasCustomName: false,
+    });
+
+    expect(next.itemsByThread["thread-1"]?.[0]).toMatchObject({
+      id: "assistant-streaming",
+      turnId: "turn-1",
+      text: "Streaming next result",
+    });
+  });
+
   it("updates thread timestamp when newer activity arrives", () => {
     const threads: ThreadSummary[] = [
       { id: "thread-1", name: "Agent 1", updatedAt: 1000 },

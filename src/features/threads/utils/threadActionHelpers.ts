@@ -84,6 +84,41 @@ function getResumeToolReconciliationKey(item: ConversationItem) {
   ]);
 }
 
+function areEquivalentResumeItems(
+  remote: ConversationItem,
+  local: ConversationItem,
+) {
+  if (remote.kind !== local.kind) {
+    return false;
+  }
+  if (remote.kind === "message" && local.kind === "message") {
+    return (
+      remote.role === local.role &&
+      remote.text.trim() === local.text.trim() &&
+      (!remote.phase || !local.phase || remote.phase === local.phase) &&
+      JSON.stringify(remote.images ?? []) === JSON.stringify(local.images ?? []) &&
+      JSON.stringify(remote.attachments ?? []) ===
+        JSON.stringify(local.attachments ?? [])
+    );
+  }
+  if (remote.kind === "tool" && local.kind === "tool") {
+    return getResumeToolReconciliationKey(remote) === getResumeToolReconciliationKey(local);
+  }
+  if (remote.kind === "reasoning" && local.kind === "reasoning") {
+    return (
+      remote.summary.trim() === local.summary.trim() &&
+      remote.content.trim() === local.content.trim()
+    );
+  }
+  if (remote.kind === "diff" && local.kind === "diff") {
+    return remote.title.trim() === local.title.trim() && remote.diff === local.diff;
+  }
+  if (remote.kind === "review" && local.kind === "review") {
+    return remote.state === local.state && remote.text.trim() === local.text.trim();
+  }
+  return false;
+}
+
 function selectResumeMergeCandidates({
   localActiveTurnId,
   localItems,
@@ -200,11 +235,63 @@ function mergeResumeItemsByTurn(
     const localIsEnrichedSuperset =
       localTurnItems.length > remoteTurnItems.length &&
       remoteTurnItems.every((item) => localTurnItemIds.has(item.id));
-    merged.push(
-      ...(localIsEnrichedSuperset
-        ? mergeThreadItems(localTurnItems, remoteTurnItems)
-        : mergeThreadItems(remoteTurnItems, localTurnItems)),
-    );
+    const consumedTurnLocalIndexes = new Set<number>();
+    const remoteLocalIndexes = remoteTurnItems.map((remoteItem) => {
+      const exactIndex = localTurnItems.findIndex(
+        (localItem, localIndex) =>
+          !consumedTurnLocalIndexes.has(localIndex) && localItem.id === remoteItem.id,
+      );
+      const equivalentIndex =
+        exactIndex >= 0
+          ? exactIndex
+          : localTurnItems.findIndex(
+              (localItem, localIndex) =>
+                !consumedTurnLocalIndexes.has(localIndex) &&
+                areEquivalentResumeItems(remoteItem, localItem),
+            );
+      if (equivalentIndex >= 0) {
+        consumedTurnLocalIndexes.add(equivalentIndex);
+      }
+      return equivalentIndex;
+    });
+    const mergeRemoteItem = (remoteItem: ConversationItem, localIndex: number) => {
+      if (localIndex < 0) {
+        return remoteItem;
+      }
+      const localItem = localTurnItems[localIndex];
+      return mergeThreadItems(
+        [remoteItem],
+        [{ ...localItem, id: remoteItem.id }],
+      )[0];
+    };
+    if (localIsEnrichedSuperset) {
+      const remoteIndexByLocalIndex = new Map(
+        remoteLocalIndexes.map((localIndex, remoteIndex) => [localIndex, remoteIndex]),
+      );
+      const mergedTurnItems = localTurnItems.flatMap((localItem, localIndex) => {
+        const remoteIndex = remoteIndexByLocalIndex.get(localIndex);
+        return remoteIndex === undefined
+          ? [localItem]
+          : [mergeRemoteItem(remoteTurnItems[remoteIndex], localIndex)];
+      });
+      remoteTurnItems.forEach((remoteItem, remoteIndex) => {
+        if (remoteLocalIndexes[remoteIndex] < 0) {
+          mergedTurnItems.push(remoteItem);
+        }
+      });
+      merged.push(...mergedTurnItems);
+    } else {
+      merged.push(
+        ...remoteTurnItems.map((remoteItem, remoteIndex) =>
+          mergeRemoteItem(remoteItem, remoteLocalIndexes[remoteIndex]),
+        ),
+      );
+      localTurnItems.forEach((localItem, localIndex) => {
+        if (!consumedTurnLocalIndexes.has(localIndex)) {
+          merged.push(localItem);
+        }
+      });
+    }
   }
 
   localItems.forEach((item) => {

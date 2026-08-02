@@ -373,6 +373,7 @@ function buildPrimarySurface({
   onPlanAccept,
   onPlanSubmitChanges,
   onReferenceMessage,
+  activeTurnId,
   activeTokenUsage,
   activeContextCompactionCount,
   latestAgentRuns,
@@ -701,6 +702,7 @@ function buildPrimarySurface({
       interruptedStatus: activeThreadId
         ? interruptedThreadById[activeThreadId] ?? null
         : null,
+      activeTurnId,
       activeTurnDiff: activeThreadId ? turnDiffByThread[activeThreadId] ?? null : null,
       turnExecutionSummary: activeThreadId
         ? turnExecutionSummaryByThread[activeThreadId] ?? null

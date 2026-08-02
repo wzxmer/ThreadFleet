@@ -32,6 +32,7 @@ function baseEntryContainsItem(entry: MessageListBaseEntry, itemId: string) {
 type UseMessagesViewStateArgs = {
   items: ConversationItem[];
   threadId: string | null;
+  activeTurnId?: string | null;
   isThinking: boolean;
   activeUserInputRequestId: string | number | null;
   hasVisibleUserInputRequest: boolean;
@@ -45,6 +46,7 @@ type UseMessagesViewStateArgs = {
 export function useMessagesViewState({
   items,
   threadId,
+  activeTurnId = null,
   isThinking,
   activeUserInputRequestId,
   hasVisibleUserInputRequest,
@@ -448,7 +450,11 @@ export function useMessagesViewState({
         }
       }
       finalAssistantIndex =
-        finalAssistantIndex >= 0 ? finalAssistantIndex : fallbackAssistantIndex;
+        activeTurnId && turnId === activeTurnId
+          ? fallbackAssistantIndex
+          : finalAssistantIndex >= 0
+            ? finalAssistantIndex
+            : fallbackAssistantIndex;
       if (finalAssistantIndex < 0 || turnEntries.length <= 1) {
         result.push(...turnEntries);
         turnEntries = [];
@@ -560,7 +566,7 @@ export function useMessagesViewState({
     });
     flushTurn();
     return result;
-  }, [baseGroupedItems]);
+  }, [activeTurnId, baseGroupedItems]);
 
   const revealGroupedItem = useCallback(
     (itemId: string) => {

@@ -81,7 +81,12 @@ describe("useAppServerEvents", () => {
         workspace_id: "ws-1",
         message: {
           method: "item/agentMessage/delta",
-          params: { threadId: "thread-1", itemId: "item-1", delta: "Hello" },
+          params: {
+            threadId: "thread-1",
+            turnId: "turn-1",
+            itemId: "item-1",
+            delta: "Hello",
+          },
         },
       });
     });
@@ -89,6 +94,7 @@ describe("useAppServerEvents", () => {
       workspaceId: "ws-1",
       threadId: "thread-1",
       itemId: "item-1",
+      turnId: "turn-1",
       delta: "Hello",
     });
 

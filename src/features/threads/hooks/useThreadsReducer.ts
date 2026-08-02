@@ -113,6 +113,7 @@ export type ThreadAction =
       threadId: string;
       itemId: string;
       delta: string;
+      turnId?: string;
       hasCustomName: boolean;
     }
   | {

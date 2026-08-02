@@ -3893,6 +3893,91 @@ describe("Messages", () => {
     expect(screen.getByText("Final result.")).toBeTruthy();
   });
 
+  it("promotes a same-turn streamed message before its completion arrives", () => {
+    render(
+      <Messages
+        items={[
+          {
+            id: "assistant-first-result",
+            kind: "message",
+            role: "assistant",
+            phase: "commentary",
+            turnId: "turn-streaming-replacement",
+            text: "First result.",
+          },
+          {
+            id: "tool-before-next-result",
+            kind: "tool",
+            toolType: "commandExecution",
+            title: "Command: rg result",
+            detail: "/repo",
+            status: "completed",
+            output: "",
+            turnId: "turn-streaming-replacement",
+          },
+          {
+            id: "assistant-streaming-result",
+            kind: "message",
+            role: "assistant",
+            turnId: "turn-streaming-replacement",
+            text: "Streaming next result.",
+          },
+        ]}
+        threadId="thread-1"
+        workspaceId="ws-1"
+        isThinking
+        activeTurnId="turn-streaming-replacement"
+        openTargets={[]}
+        selectedOpenAppId=""
+      />,
+    );
+
+    expect(screen.getByText("Streaming next result.")).toBeTruthy();
+    expect(
+      document.querySelectorAll(".message.assistant"),
+    ).toHaveLength(1);
+    expect(document.querySelector(".process-message-inline")?.textContent).toContain(
+      "First result.",
+    );
+  });
+
+  it("keeps completed-turn final answers authoritative over later historical commentary", () => {
+    render(
+      <Messages
+        items={[
+          {
+            id: "assistant-completed-final",
+            kind: "message",
+            role: "assistant",
+            phase: "final_answer",
+            turnId: "turn-completed-history",
+            text: "Completed final result.",
+          },
+          {
+            id: "assistant-late-history-commentary",
+            kind: "message",
+            role: "assistant",
+            phase: "commentary",
+            turnId: "turn-completed-history",
+            text: "Late historical commentary.",
+          },
+        ]}
+        threadId="thread-1"
+        workspaceId="ws-1"
+        isThinking={false}
+        activeTurnId={null}
+        openTargets={[]}
+        selectedOpenAppId=""
+      />,
+    );
+
+    expect(screen.getByText("Completed final result.")).toBeTruthy();
+    expect(screen.getByText("Late historical commentary.")).toBeTruthy();
+    expect(
+      document.querySelector(".message.assistant:last-of-type")?.textContent,
+    ).toContain("Completed final result.");
+  });
+
   it("collapses process messages in every completed turn", async () => {
     const items: ConversationItem[] = [
       {

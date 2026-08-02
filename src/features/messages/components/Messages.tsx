@@ -294,6 +294,7 @@ type MessagesProps = {
   assistantModelOptions?: AssistantModelOption[];
   chatHistoryScrollbackItems?: number | null;
   interruptedStatus?: { timestamp: number } | null;
+  activeTurnId?: string | null;
   activeTurnDiff?: string | null;
   turnExecutionSummary?: TurnExecutionSummary | null;
   turnExecutionSummaries?: TurnExecutionSummary[];
@@ -400,6 +401,7 @@ export const Messages = memo(function Messages({
   assistantModelOptions = [],
   chatHistoryScrollbackItems = null,
   interruptedStatus = null,
+  activeTurnId = null,
   activeTurnDiff = null,
   turnExecutionSummary = null,
   turnExecutionSummaries = [],
@@ -535,6 +537,7 @@ export const Messages = memo(function Messages({
   } = useMessagesViewState({
     items: resendViewItems,
     threadId,
+    activeTurnId,
     isThinking,
     activeUserInputRequestId,
     hasVisibleUserInputRequest,

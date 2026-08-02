@@ -17,6 +17,7 @@ type ItemPayload = Record<string, unknown>;
 type SetupOverrides = {
   activeThreadId?: string | null;
   getCustomName?: (workspaceId: string, threadId: string) => string | undefined;
+  getActiveTurnId?: (threadId: string) => string | null;
   onUserMessageCreated?: (workspaceId: string, threadId: string, text: string) => void;
   onReviewExited?: (workspaceId: string, threadId: string) => void;
   onExecutionBindingObserved?: ReturnType<typeof vi.fn>;
@@ -38,6 +39,7 @@ const makeOptions = (overrides: SetupOverrides = {}) => {
       activeThreadId: overrides.activeThreadId ?? null,
       dispatch,
       getCustomName,
+      getActiveTurnId: overrides.getActiveTurnId,
       markProcessing,
       markReviewing,
       safeMessageActivity,
@@ -299,6 +301,57 @@ describe("useThreadItemEvents", () => {
       threadId: "thread-1",
       itemId: "assistant-1",
       delta: "Hello",
+      hasCustomName: false,
+    });
+  });
+
+  it("assigns an agent delta to the active turn before completion arrives", () => {
+    const getActiveTurnId = vi.fn(() => "turn-1");
+    const { result, dispatch } = makeOptions({ getActiveTurnId });
+
+    act(() => {
+      result.current.onAgentMessageDelta({
+        workspaceId: "ws-1",
+        threadId: "thread-1",
+        itemId: "assistant-2",
+        delta: "Streaming next result",
+      });
+    });
+
+    expect(getActiveTurnId).toHaveBeenCalledWith("thread-1");
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "appendAgentDelta",
+      workspaceId: "ws-1",
+      threadId: "thread-1",
+      itemId: "assistant-2",
+      delta: "Streaming next result",
+      turnId: "turn-1",
+      hasCustomName: false,
+    });
+  });
+
+  it("prefers the turn id carried by a delta event", () => {
+    const getActiveTurnId = vi.fn(() => "stale-turn");
+    const { result, dispatch } = makeOptions({ getActiveTurnId });
+
+    act(() => {
+      result.current.onAgentMessageDelta({
+        workspaceId: "ws-1",
+        threadId: "thread-1",
+        itemId: "assistant-3",
+        turnId: "event-turn",
+        delta: "Streaming result",
+      });
+    });
+
+    expect(getActiveTurnId).not.toHaveBeenCalled();
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "appendAgentDelta",
+      workspaceId: "ws-1",
+      threadId: "thread-1",
+      itemId: "assistant-3",
+      delta: "Streaming result",
+      turnId: "event-turn",
       hasCustomName: false,
     });
   });

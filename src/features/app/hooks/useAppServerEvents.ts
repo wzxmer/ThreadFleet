@@ -18,6 +18,7 @@ type AgentDelta = {
   workspaceId: string;
   threadId: string;
   itemId: string;
+  turnId?: string;
   delta: string;
 };
 
@@ -263,6 +264,9 @@ export function useAppServerEvents(handlers: AppServerEventHandlers) {
             workspaceId: workspace_id,
             threadId,
             itemId,
+            ...(String(params.turnId ?? params.turn_id ?? "").trim()
+              ? { turnId: String(params.turnId ?? params.turn_id).trim() }
+              : {}),
             delta,
           });
         }

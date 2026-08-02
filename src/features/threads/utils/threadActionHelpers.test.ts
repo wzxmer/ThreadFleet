@@ -146,6 +146,66 @@ describe("buildResumeHydrationPlan", () => {
     ]);
   });
 
+  it("does not duplicate equivalent assistant messages when resume assigns new ids", () => {
+    const plan = buildResumeHydrationPlan({
+      getCustomName: () => undefined,
+      localActiveTurnId: null,
+      localItems: [
+        {
+          id: "user-1",
+          kind: "message",
+          role: "user",
+          text: "检查问题",
+          turnId: "turn-1",
+        },
+        {
+          id: "local-assistant-1",
+          kind: "message",
+          role: "assistant",
+          phase: "final_answer",
+          text: "问题已修复",
+          turnId: "turn-1",
+        },
+      ],
+      localStatus: { isProcessing: false },
+      replaceLocal: false,
+      thread: {
+        id: "thread-1",
+        turns: [
+          {
+            id: "turn-1",
+            status: "completed",
+            items: [
+              {
+                id: "user-1",
+                type: "userMessage",
+                content: [{ type: "text", text: "检查问题" }],
+              },
+              {
+                id: "remote-assistant-1",
+                type: "agentMessage",
+                phase: "final_answer",
+                text: "问题已修复",
+              },
+            ],
+          },
+        ],
+      },
+      threadId: "thread-1",
+      workspaceId: "ws-1",
+    });
+
+    expect(
+      plan.mergedItems.filter(
+        (item) => item.kind === "message" && item.role === "assistant",
+      ),
+    ).toHaveLength(1);
+    expect(plan.mergedItems.map((item) => item.id)).toEqual([
+      "user-1",
+      "remote-assistant-1",
+    ]);
+  });
+
   it("keeps rollout-enriched tools inside their original turns when resume is lossy", () => {
     const localItems: ConversationItem[] = [
       {

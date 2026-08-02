@@ -88,6 +88,9 @@ export function reduceThreadItems(state: ThreadState, action: ThreadAction): Thr
         list[index] = {
           ...existing,
           text: mergeStreamingText(existing.text, action.delta),
+          ...(action.turnId && !existing.turnId
+            ? { turnId: action.turnId }
+            : {}),
           createdAt: existing.createdAt ?? Date.now(),
         };
       } else {
@@ -96,6 +99,7 @@ export function reduceThreadItems(state: ThreadState, action: ThreadAction): Thr
           kind: "message",
           role: "assistant",
           text: action.delta,
+          ...(action.turnId ? { turnId: action.turnId } : {}),
           createdAt: Date.now(),
         });
       }

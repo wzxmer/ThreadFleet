@@ -176,27 +176,31 @@ export function useThreadItemEvents({
       workspaceId,
       threadId,
       itemId,
+      turnId: eventTurnId,
       delta,
     }: {
       workspaceId: string;
       threadId: string;
       itemId: string;
+      turnId?: string;
       delta: string;
     }) => {
       dispatch({ type: "ensureThread", workspaceId, threadId });
       onThreadActivity?.(workspaceId, threadId, "active");
       markProcessing(threadId, true);
       const hasCustomName = Boolean(getCustomName(workspaceId, threadId));
+      const turnId = eventTurnId?.trim() || getActiveTurnId(threadId);
       dispatch({
         type: "appendAgentDelta",
         workspaceId,
         threadId,
         itemId,
         delta,
+        ...(turnId ? { turnId } : {}),
         hasCustomName,
       });
     },
-    [dispatch, getCustomName, markProcessing, onThreadActivity],
+    [dispatch, getActiveTurnId, getCustomName, markProcessing, onThreadActivity],
   );
 
   const onAgentMessageCompleted = useCallback(
