@@ -151,6 +151,7 @@ mod tests {
             provider_kind: "custom".to_string(),
             usage_protocol: "auto".to_string(),
             new_api_access_token: None,
+            new_api_session_cookie: None,
             key_env_var: "OPENAI_API_KEY".to_string(),
             key: "sk-old".to_string(),
             base_url_env_var: "OPENAI_BASE_URL".to_string(),

@@ -3,12 +3,12 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::OnceLock;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 
 use crate::shared::provider_gateway_core::{
-    probe_provider_function_calling, start_provider_gateway, ProviderFunctionToolProbe,
-    ProviderGatewayConfig, ProviderGatewayShutdown,
+    probe_provider_function_calling, probe_provider_transport, start_provider_gateway,
+    ProviderFunctionToolProbe, ProviderGatewayConfig, ProviderGatewayShutdown, ProviderTransport,
 };
 use crate::types::{
     AppSettings, CodexCredential, CodexCredentialGroup, CodexKeyProfile, CodexProvider,
@@ -27,6 +27,74 @@ pub(crate) const CODEX_MONITOR_PROVIDER_ID: &str = "codex_monitor";
 const CODEX_MONITOR_PROVIDER_KEY_ENV: &str = "CODEX_MONITOR_PROVIDER_KEY";
 const MAX_PROVIDER_USAGE_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 const NEW_API_LOG_LIMIT: usize = 1_000;
+const PROVIDER_SESSION_USAGE_CACHE_TTL: Duration = Duration::from_secs(5 * 60);
+
+#[derive(Clone)]
+struct ProviderSessionUsageCacheEntry {
+    cookie_fingerprint: String,
+    snapshot: Value,
+    expires_at: Instant,
+}
+
+static PROVIDER_SESSION_USAGE_CACHE: OnceLock<
+    Mutex<HashMap<String, ProviderSessionUsageCacheEntry>>,
+> = OnceLock::new();
+
+fn provider_session_usage_cache() -> &'static Mutex<HashMap<String, ProviderSessionUsageCacheEntry>>
+{
+    PROVIDER_SESSION_USAGE_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn provider_cookie_fingerprint(cookie: &str) -> String {
+    let digest = Sha256::digest(cookie.trim().as_bytes());
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+pub(crate) async fn cache_provider_session_usage(
+    base_url: &str,
+    session_cookie: &str,
+    snapshot: Value,
+) {
+    let cookie = session_cookie.trim();
+    if cookie.is_empty() || snapshot.is_null() {
+        return;
+    }
+    let Ok(cache_key) = provider_usage_cache_key(base_url) else {
+        return;
+    };
+    provider_session_usage_cache().lock().await.insert(
+        cache_key,
+        ProviderSessionUsageCacheEntry {
+            cookie_fingerprint: provider_cookie_fingerprint(cookie),
+            snapshot,
+            expires_at: Instant::now() + PROVIDER_SESSION_USAGE_CACHE_TTL,
+        },
+    );
+}
+
+async fn cached_provider_session_usage(
+    base_url: &str,
+    session_cookie: Option<&str>,
+) -> Option<Value> {
+    let cookie = session_cookie?.trim();
+    if cookie.is_empty() {
+        return None;
+    }
+    let cache_key = provider_usage_cache_key(base_url).ok()?;
+    let fingerprint = provider_cookie_fingerprint(cookie);
+    let now = Instant::now();
+    let mut cache = provider_session_usage_cache().lock().await;
+    if cache
+        .get(&cache_key)
+        .is_some_and(|entry| entry.expires_at <= now)
+    {
+        cache.remove(&cache_key);
+        return None;
+    }
+    cache
+        .get(&cache_key)
+        .and_then(|entry| (entry.cookie_fingerprint == fingerprint).then(|| entry.snapshot.clone()))
+}
 
 fn migrated_id(prefix: &str, id: &str) -> String {
     format!("{prefix}-{}", id.trim())
@@ -97,6 +165,7 @@ fn profile_to_provider(profile: &CodexKeyProfile) -> CodexProvider {
                 name: profile.name.clone(),
                 key: profile.key.clone(),
                 new_api_access_token: profile.new_api_access_token.clone(),
+                new_api_session_cookie: profile.new_api_session_cookie.clone(),
                 key_env_var: profile.key_env_var.clone(),
                 function_tool_capability: None,
             }],
@@ -115,6 +184,7 @@ pub(crate) fn provider_to_profiles(provider: &CodexProvider) -> Vec<CodexKeyProf
                 provider_kind: provider.provider_kind.clone(),
                 usage_protocol: provider.usage_protocol.clone(),
                 new_api_access_token: credential.new_api_access_token.clone(),
+                new_api_session_cookie: credential.new_api_session_cookie.clone(),
                 key_env_var: credential.key_env_var.clone(),
                 key: credential.key.clone(),
                 base_url_env_var: provider.base_url_env_var.clone(),
@@ -225,6 +295,7 @@ pub(crate) fn profile_for_selection(
         provider_kind: provider.provider_kind.clone(),
         usage_protocol: provider.usage_protocol.clone(),
         new_api_access_token: credential.new_api_access_token.clone(),
+        new_api_session_cookie: credential.new_api_session_cookie.clone(),
         key_env_var: credential.key_env_var.clone(),
         key: credential.key.clone(),
         base_url_env_var: provider.base_url_env_var.clone(),
@@ -310,6 +381,23 @@ fn normalize_http_url(
         return Err(scheme_message.to_string());
     }
     Ok(url)
+}
+
+pub(crate) fn normalize_provider_api_base_url(base_url: &str) -> Result<String, String> {
+    let mut url = normalize_http_url(
+        base_url,
+        "Invalid provider base URL",
+        "Provider base URL must use HTTP or HTTPS",
+    )?;
+    let base_path = url.path().trim_end_matches('/').to_string();
+    if base_path.is_empty() {
+        url.set_path("/v1");
+    } else {
+        url.set_path(&base_path);
+    }
+    url.set_query(None);
+    url.set_fragment(None);
+    Ok(url.to_string())
 }
 
 fn append_url_path_segment(mut url: reqwest::Url, segment: &str) -> reqwest::Url {
@@ -490,21 +578,23 @@ pub(crate) async fn provider_function_tool_probe_core(
         .ok_or_else(|| "Selected provider credential was not found".to_string())?;
     let base_url = resolve_profile_base_url(&profile)
         .ok_or_else(|| "Selected provider has no base URL".to_string())?;
+    let base_url = normalize_provider_api_base_url(&base_url)?;
     if profile.key.trim().is_empty() {
         return Err("Selected provider credential has no API key".to_string());
     }
+    let use_gateway = resolve_profile_uses_gateway(&profile, &base_url, &profile.key).await;
     let probe = match probe_provider_function_calling(
         &base_url,
         &profile.key,
         profile.model.as_deref().unwrap_or_default(),
-        profile_uses_gateway(&profile),
+        use_gateway,
     )
     .await
     {
         Ok(probe) => probe,
         Err(_) => ProviderFunctionToolProbe {
             state: "error".to_string(),
-            transport: if profile_uses_gateway(&profile) {
+            transport: if use_gateway {
                 "chat-completions-gateway".to_string()
             } else {
                 "responses".to_string()
@@ -546,10 +636,17 @@ async fn get_provider_usage_json(
     client: &reqwest::Client,
     url: reqwest::Url,
     api_key: Option<&str>,
+    session_cookie: Option<&str>,
 ) -> Result<Value, String> {
     let mut request = client.get(url);
-    if let Some(api_key) = api_key {
+    if let Some(api_key) = api_key.map(str::trim).filter(|value| !value.is_empty()) {
         request = request.bearer_auth(api_key);
+    }
+    if let Some(session_cookie) = session_cookie
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        request = request.header(reqwest::header::COOKIE, session_cookie);
     }
     let response = request
         .send()
@@ -602,27 +699,49 @@ fn normalized_usage_snapshot(
 }
 
 fn normalize_sub2_usage_payload(payload: &Value) -> Value {
-    let balance_usd = parse_usage_number(payload.get("balance"))
-        .or_else(|| parse_usage_number(payload.get("remaining")));
-    let today_cost_usd = parse_usage_number(
-        payload
-            .get("usage")
-            .and_then(|usage| usage.get("today"))
-            .and_then(|today| today.get("actual_cost")),
-    )
-    .or_else(|| {
+    let data = payload.get("data").unwrap_or(payload);
+    let field = |name: &str| payload.get(name).or_else(|| data.get(name));
+    let balance_usd =
+        parse_usage_number(field("balance")).or_else(|| parse_usage_number(field("remaining")));
+    let today_cost_usd = parse_usage_number(field("today_actual_cost"))
+        .or_else(|| parse_usage_number(field("today_cost")))
+        .or_else(|| {
+            parse_usage_number(
+                payload
+                    .get("usage")
+                    .and_then(|usage| usage.get("today"))
+                    .and_then(|today| today.get("actual_cost")),
+            )
+        })
+        .or_else(|| {
+            parse_usage_number(
+                payload
+                    .get("subscription")
+                    .and_then(|subscription| subscription.get("daily_usage_usd")),
+            )
+        });
+    let total_cost_usd = parse_usage_number(field("total_actual_cost"))
+        .or_else(|| parse_usage_number(field("total_cost")))
+        .or_else(|| {
+            parse_usage_number(
+                payload
+                    .get("usage")
+                    .and_then(|usage| usage.get("total"))
+                    .and_then(|total| total.get("actual_cost")),
+            )
+        });
+    let average_latency_ms = parse_usage_number(field("average_duration_ms")).or_else(|| {
         parse_usage_number(
             payload
-                .get("subscription")
-                .and_then(|subscription| subscription.get("daily_usage_usd")),
+                .get("usage")
+                .and_then(|usage| usage.get("average_duration_ms")),
         )
     });
-    let average_latency_ms = parse_usage_number(
-        payload
-            .get("usage")
-            .and_then(|usage| usage.get("average_duration_ms")),
-    );
-    if balance_usd.is_none() && today_cost_usd.is_none() && average_latency_ms.is_none() {
+    if balance_usd.is_none()
+        && today_cost_usd.is_none()
+        && total_cost_usd.is_none()
+        && average_latency_ms.is_none()
+    {
         return Value::Null;
     }
     normalized_usage_snapshot(
@@ -630,7 +749,7 @@ fn normalize_sub2_usage_payload(payload: &Value) -> Value {
         balance_usd,
         "account",
         today_cost_usd,
-        None,
+        total_cost_usd,
         average_latency_ms,
         false,
         false,
@@ -760,6 +879,7 @@ async fn fetch_sub2_usage(
     client: &reqwest::Client,
     base_url: &str,
     api_key: &str,
+    session_cookie: Option<&str>,
     timezone: Option<&str>,
 ) -> Result<Value, String> {
     let mut usage_url = build_provider_usage_url(base_url)?;
@@ -768,45 +888,66 @@ async fn fetch_sub2_usage(
         .append_pair("period", "today")
         .append_pair("days", "30")
         .append_pair("timezone", timezone.unwrap_or("UTC"));
-    let payload = get_provider_usage_json(client, usage_url, Some(api_key)).await?;
-    let normalized = normalize_sub2_usage_payload(&payload);
-    if normalized.is_null() {
-        return Err("Failed to parse third-party key usage response".to_string());
+    let mut last_error = None;
+    let mut attempts = Vec::new();
+    if !api_key.trim().is_empty() {
+        attempts.push((Some(api_key), None));
     }
-    Ok(normalized)
+    if let Some(session_cookie) = session_cookie
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        attempts.push((None, Some(session_cookie)));
+    }
+    for (attempt_key, attempt_cookie) in attempts {
+        match get_provider_usage_json(client, usage_url.clone(), attempt_key, attempt_cookie).await
+        {
+            Ok(payload) => {
+                let normalized = normalize_sub2_usage_payload(&payload);
+                if !normalized.is_null() {
+                    return Ok(normalized);
+                }
+                last_error = Some("Failed to parse third-party key usage response".to_string());
+            }
+            Err(error) => last_error = Some(error),
+        }
+    }
+    Err(last_error.unwrap_or_else(|| {
+        "Third-party provider API key or session cookie is required".to_string()
+    }))
 }
 
-async fn fetch_new_api_usage(
+async fn fetch_new_api_usage_once(
     client: &reqwest::Client,
     base_url: &str,
-    api_key: &str,
+    api_key: Option<&str>,
+    session_cookie: Option<&str>,
     new_api_access_token: Option<&str>,
     day_start_unix: Option<i64>,
-    known_quota_per_unit: Option<f64>,
+    quota_per_unit: f64,
 ) -> Result<Value, String> {
-    let quota_per_unit = if let Some(quota_per_unit) = known_quota_per_unit {
-        quota_per_unit
-    } else {
-        let status =
-            get_provider_usage_json(client, build_new_api_url(base_url, "status")?, None).await?;
-        new_api_quota_per_unit(&status)
-            .ok_or_else(|| "Failed to read New API quota unit".to_string())?
-    };
     let usage_url = build_new_api_url(base_url, "usage/token/")?;
     let logs_url = build_new_api_url(base_url, "log/token")?;
-    let account_future = async {
-        let access_token = new_api_access_token
+    let account_url = build_new_api_url(base_url, "user/self")?;
+    let account_payload = async {
+        if let Some(access_token) = new_api_access_token
             .map(str::trim)
-            .filter(|value| !value.is_empty())?;
-        let account_url = build_new_api_url(base_url, "user/self").ok()?;
-        get_provider_usage_json(client, account_url, Some(access_token))
+            .filter(|value| !value.is_empty())
+        {
+            if let Ok(payload) =
+                get_provider_usage_json(client, account_url.clone(), Some(access_token), None).await
+            {
+                return Some(payload);
+            }
+        }
+        get_provider_usage_json(client, account_url, api_key, session_cookie)
             .await
             .ok()
     };
     let (usage_result, logs_result, account_payload) = future::join3(
-        get_provider_usage_json(client, usage_url, Some(api_key)),
-        get_provider_usage_json(client, logs_url, Some(api_key)),
-        account_future,
+        get_provider_usage_json(client, usage_url, api_key, session_cookie),
+        get_provider_usage_json(client, logs_url, api_key, session_cookie),
+        account_payload,
     )
     .await;
     let usage_payload = usage_result?;
@@ -819,10 +960,61 @@ async fn fetch_new_api_usage(
     )
 }
 
+async fn fetch_new_api_usage(
+    client: &reqwest::Client,
+    base_url: &str,
+    api_key: &str,
+    new_api_access_token: Option<&str>,
+    session_cookie: Option<&str>,
+    day_start_unix: Option<i64>,
+    known_quota_per_unit: Option<f64>,
+) -> Result<Value, String> {
+    let quota_per_unit = if let Some(quota_per_unit) = known_quota_per_unit {
+        quota_per_unit
+    } else {
+        let status =
+            get_provider_usage_json(client, build_new_api_url(base_url, "status")?, None, None)
+                .await?;
+        new_api_quota_per_unit(&status)
+            .ok_or_else(|| "Failed to read New API quota unit".to_string())?
+    };
+    let mut last_error = None;
+    let mut attempts = Vec::new();
+    if !api_key.trim().is_empty() {
+        attempts.push((Some(api_key), None));
+    }
+    if let Some(session_cookie) = session_cookie
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        attempts.push((None, Some(session_cookie)));
+    }
+    for (attempt_key, attempt_cookie) in attempts {
+        match fetch_new_api_usage_once(
+            client,
+            base_url,
+            attempt_key,
+            attempt_cookie,
+            new_api_access_token,
+            day_start_unix,
+            quota_per_unit,
+        )
+        .await
+        {
+            Ok(result) => return Ok(result),
+            Err(error) => last_error = Some(error),
+        }
+    }
+    Err(last_error.unwrap_or_else(|| {
+        "Third-party provider API key or session cookie is required".to_string()
+    }))
+}
+
 pub(crate) async fn third_party_key_usage_core(
     base_url: String,
     api_key: String,
     new_api_access_token: Option<String>,
+    new_api_session_cookie: Option<String>,
     timezone: Option<String>,
     day_start_unix: Option<i64>,
     usage_protocol: Option<String>,
@@ -837,8 +1029,18 @@ pub(crate) async fn third_party_key_usage_core(
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty());
-    if base_url.is_empty() || api_key.is_empty() {
-        return Err("Third-party provider base URL and key are required".to_string());
+    let new_api_session_cookie = new_api_session_cookie
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if base_url.is_empty() || (api_key.is_empty() && new_api_session_cookie.is_none()) {
+        return Err(
+            "Third-party provider base URL and API key or session cookie are required".to_string(),
+        );
+    }
+
+    if let Some(snapshot) = cached_provider_session_usage(base_url, new_api_session_cookie).await {
+        return Ok(snapshot);
     }
 
     let client = reqwest::Client::builder()
@@ -848,7 +1050,14 @@ pub(crate) async fn third_party_key_usage_core(
         .map_err(|_| "Failed to initialize third-party key usage client".to_string())?;
     match protocol {
         ProviderUsageProtocol::Sub2 => {
-            fetch_sub2_usage(&client, base_url, api_key, timezone.as_deref()).await
+            fetch_sub2_usage(
+                &client,
+                base_url,
+                api_key,
+                new_api_session_cookie,
+                timezone.as_deref(),
+            )
+            .await
         }
         ProviderUsageProtocol::NewApi => {
             fetch_new_api_usage(
@@ -856,6 +1065,7 @@ pub(crate) async fn third_party_key_usage_core(
                 base_url,
                 api_key,
                 new_api_access_token,
+                new_api_session_cookie,
                 day_start_unix,
                 None,
             )
@@ -877,28 +1087,41 @@ pub(crate) async fn third_party_key_usage_core(
                             base_url,
                             api_key,
                             new_api_access_token,
+                            new_api_session_cookie,
                             day_start_unix,
                             None,
                         )
                         .await
                     }
                     ProviderUsageProtocol::Sub2 => {
-                        fetch_sub2_usage(&client, base_url, api_key, timezone.as_deref()).await
+                        fetch_sub2_usage(
+                            &client,
+                            base_url,
+                            api_key,
+                            new_api_session_cookie,
+                            timezone.as_deref(),
+                        )
+                        .await
                     }
                     _ => unreachable!(),
                 };
             }
 
-            let status_payload =
-                get_provider_usage_json(&client, build_new_api_url(base_url, "status")?, None)
-                    .await
-                    .ok();
+            let status_payload = get_provider_usage_json(
+                &client,
+                build_new_api_url(base_url, "status")?,
+                None,
+                None,
+            )
+            .await
+            .ok();
             if let Some(quota_per_unit) = status_payload.as_ref().and_then(new_api_quota_per_unit) {
                 let result = fetch_new_api_usage(
                     &client,
                     base_url,
                     api_key,
                     new_api_access_token,
+                    new_api_session_cookie,
                     day_start_unix,
                     Some(quota_per_unit),
                 )
@@ -914,7 +1137,14 @@ pub(crate) async fn third_party_key_usage_core(
                 return result;
             }
 
-            let result = fetch_sub2_usage(&client, base_url, api_key, timezone.as_deref()).await;
+            let result = fetch_sub2_usage(
+                &client,
+                base_url,
+                api_key,
+                new_api_session_cookie,
+                timezone.as_deref(),
+            )
+            .await;
             if result.is_ok() {
                 provider_usage_detections().lock().await.insert(
                     cache_key,
@@ -952,10 +1182,13 @@ pub(crate) async fn active_codex_key_runtime(
         });
     }
     let provider_runtime_fingerprint = Some(profile_runtime_fingerprint(&profile));
-    let base_url = resolve_profile_base_url(&profile);
+    let base_url = resolve_profile_base_url(&profile)
+        .map(|base_url| normalize_provider_api_base_url(&base_url))
+        .transpose()?;
     let comparison_codex_args =
         merge_profile_codex_args(codex_args.clone(), &profile, base_url.as_deref())?;
-    let use_gateway = profile_uses_gateway(&profile);
+    let use_gateway =
+        resolve_profile_uses_gateway(&profile, base_url.as_deref().unwrap_or_default(), key).await;
     if use_gateway && base_url.is_none() {
         return Err("Gateway profiles require a provider base URL".to_string());
     }
@@ -1088,10 +1321,15 @@ fn profile_runtime_fingerprint(profile: &crate::types::CodexKeyProfile) -> Strin
     update_field(&mut hasher, profile.key_env_var.trim());
     update_field(&mut hasher, profile.key.trim());
     update_field(&mut hasher, profile.base_url_env_var.trim());
+    let profile_base_url = resolve_profile_base_url(profile);
+    let normalized_base_url = profile_base_url
+        .as_deref()
+        .and_then(|base_url| normalize_provider_api_base_url(base_url).ok());
     update_field(
         &mut hasher,
-        resolve_profile_base_url(profile)
+        normalized_base_url
             .as_deref()
+            .or(profile_base_url.as_deref())
             .unwrap_or_default(),
     );
     update_field(
@@ -1149,6 +1387,7 @@ fn merge_profile_codex_args(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| "Provider profiles require a provider base URL".to_string())?;
+    let runtime_base_url = normalize_provider_api_base_url(runtime_base_url)?;
     for value in [
         format!("model_provider={CODEX_MONITOR_PROVIDER_ID}"),
         format!("model_providers.{CODEX_MONITOR_PROVIDER_ID}.name=ThreadFleet"),
@@ -1178,13 +1417,33 @@ fn merge_profile_codex_args(
     }
 }
 
+async fn resolve_profile_uses_gateway(
+    profile: &crate::types::CodexKeyProfile,
+    base_url: &str,
+    api_key: &str,
+) -> bool {
+    match profile.transport_mode.trim().to_ascii_lowercase().as_str() {
+        "chat-completions-gateway" => true,
+        "responses" => false,
+        _ if profile_uses_gateway(profile) => true,
+        _ => {
+            matches!(
+                probe_provider_transport(base_url, api_key).await,
+                ProviderTransport::ChatCompletionsGateway
+            )
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         active_codex_key_runtime, build_new_api_url, build_provider_models_url,
-        build_provider_usage_url, merge_profile_codex_args, merge_provider_model_payloads,
-        migrate_provider_settings, normalize_new_api_usage_payload, normalize_sub2_usage_payload,
-        profile_for_selection, profile_uses_gateway, summarize_new_api_logs,
+        build_provider_usage_url, cache_provider_session_usage, cached_provider_session_usage,
+        merge_profile_codex_args, merge_provider_model_payloads, migrate_provider_settings,
+        normalize_new_api_usage_payload, normalize_provider_api_base_url,
+        normalize_sub2_usage_payload, profile_for_selection, profile_uses_gateway,
+        summarize_new_api_logs,
     };
     use crate::codex::args::parse_codex_args;
     use crate::types::{AppSettings, CodexKeyProfile, CredentialSelection};
@@ -1198,6 +1457,7 @@ mod tests {
             provider_kind: "custom".to_string(),
             usage_protocol: "auto".to_string(),
             new_api_access_token: None,
+            new_api_session_cookie: None,
             key_env_var: "OPENAI_API_KEY".to_string(),
             key: "secret".to_string(),
             base_url_env_var: "OPENAI_BASE_URL".to_string(),
@@ -1247,6 +1507,7 @@ mod tests {
             provider_kind: "custom".to_string(),
             usage_protocol: "auto".to_string(),
             new_api_access_token: None,
+            new_api_session_cookie: None,
             key_env_var: "OPENAI_API_KEY".to_string(),
             key: "secret".to_string(),
             base_url_env_var: "OPENAI_BASE_URL".to_string(),
@@ -1279,6 +1540,7 @@ mod tests {
             provider_kind: "custom".to_string(),
             usage_protocol: "auto".to_string(),
             new_api_access_token: None,
+            new_api_session_cookie: None,
             key_env_var: "OPENAI_API_KEY".to_string(),
             key: "secret".to_string(),
             base_url_env_var: "OPENAI_BASE_URL".to_string(),
@@ -1323,6 +1585,142 @@ mod tests {
             .to_string();
 
         assert_eq!(url, "https://api.deepseek.com/v1/models");
+    }
+
+    #[test]
+    fn provider_base_url_adds_v1_only_for_a_bare_host() {
+        assert_eq!(
+            normalize_provider_api_base_url("https://provider.example/").expect("base url"),
+            "https://provider.example/v1"
+        );
+        assert_eq!(
+            normalize_provider_api_base_url("https://provider.example/v1/").expect("base url"),
+            "https://provider.example/v1"
+        );
+        assert_eq!(
+            normalize_provider_api_base_url("https://provider.example/api/v1/").expect("base url"),
+            "https://provider.example/api/v1"
+        );
+        assert_eq!(
+            normalize_provider_api_base_url("https://provider.example/openai/").expect("base url"),
+            "https://provider.example/openai"
+        );
+    }
+
+    #[test]
+    fn provider_session_usage_cache_matches_cookie_and_usage_path() {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let snapshot = serde_json::json!({
+                "source": "page",
+                "balanceUsd": 1.29,
+                "totalCostUsd": 9.8,
+                "isUnlimited": false,
+            });
+            cache_provider_session_usage(
+                "https://cache-test.example/v1",
+                "sid=cache-cookie",
+                snapshot.clone(),
+            )
+            .await;
+
+            assert_eq!(
+                cached_provider_session_usage(
+                    "https://cache-test.example/v1/usage",
+                    Some("sid=cache-cookie"),
+                )
+                .await,
+                Some(snapshot)
+            );
+            assert!(cached_provider_session_usage(
+                "https://cache-test.example/v1/usage",
+                Some("sid=other-cookie"),
+            )
+            .await
+            .is_none());
+        });
+    }
+
+    #[test]
+    fn auto_transport_starts_gateway_for_chat_only_provider() {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            use tokio::net::TcpListener;
+
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move {
+                for _ in 0..2 {
+                    let (mut stream, _) = listener.accept().await.unwrap();
+                    let mut request = Vec::new();
+                    let mut chunk = [0u8; 4096];
+                    loop {
+                        let read = stream.read(&mut chunk).await.unwrap();
+                        if read == 0 {
+                            break;
+                        }
+                        request.extend_from_slice(&chunk[..read]);
+                        if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                            break;
+                        }
+                    }
+                    let request_line = String::from_utf8_lossy(&request);
+                    let path = request_line
+                        .lines()
+                        .next()
+                        .and_then(|line| line.split_whitespace().nth(1))
+                        .unwrap_or_default();
+                    let status = if path.ends_with("/responses") {
+                        "404 Not Found"
+                    } else {
+                        "400 Bad Request"
+                    };
+                    let response = format!(
+                        "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}"
+                    );
+                    stream.write_all(response.as_bytes()).await.unwrap();
+                }
+            });
+
+            let mut settings = AppSettings::default();
+            settings.codex_key_profiles = vec![CodexKeyProfile {
+                id: "auto-chat".to_string(),
+                name: "Auto Chat".to_string(),
+                provider_kind: "custom".to_string(),
+                usage_protocol: "auto".to_string(),
+                new_api_access_token: None,
+                new_api_session_cookie: None,
+                key_env_var: "OPENAI_API_KEY".to_string(),
+                key: "probe-key".to_string(),
+                base_url_env_var: "OPENAI_BASE_URL".to_string(),
+                base_url: Some(format!("http://{addr}")),
+                model: Some("probe-model".to_string()),
+                context_window: None,
+                max_output_tokens: None,
+                use_gateway: false,
+                transport_mode: "auto".to_string(),
+                supports_thinking: false,
+                supports_reasoning_effort: false,
+                last_model_refresh_at_ms: None,
+                cached_models: Vec::new(),
+                group_name: None,
+            }];
+            settings.active_codex_key_profile_id = Some("auto-chat".to_string());
+
+            let runtime_env = active_codex_key_runtime(&settings, None)
+                .await
+                .expect("auto runtime");
+            assert!(runtime_env.gateway_shutdown.is_some());
+            let args = parse_codex_args(runtime_env.codex_args.as_deref()).expect("merged args");
+            assert!(args.windows(2).any(|pair| {
+                pair[0] == "-c"
+                    && pair[1]
+                        .starts_with("model_providers.codex_monitor.base_url=http://127.0.0.1:")
+                    && pair[1].ends_with("/v1")
+            }));
+
+            drop(runtime_env);
+            server.await.unwrap();
+        });
     }
 
     #[test]
@@ -1417,6 +1815,32 @@ mod tests {
                 "totalCostUsd": null,
                 "spendPeriod": "today",
                 "averageLatencyMs": 842.0,
+                "isUnlimited": false,
+                "isPartial": false,
+            })
+        );
+    }
+
+    #[test]
+    fn sub2_dashboard_payload_includes_total_actual_cost() {
+        let payload = serde_json::json!({
+            "balance": "15.00",
+            "today_actual_cost": "0.40",
+            "total_actual_cost": "2.95",
+            "today_requests": 12,
+            "total_requests": 83,
+        });
+
+        assert_eq!(
+            normalize_sub2_usage_payload(&payload),
+            serde_json::json!({
+                "source": "sub2",
+                "balanceUsd": 15.0,
+                "balanceScope": "account",
+                "todayCostUsd": 0.4,
+                "totalCostUsd": 2.95,
+                "spendPeriod": "today",
+                "averageLatencyMs": null,
                 "isUnlimited": false,
                 "isPartial": false,
             })
@@ -1520,6 +1944,7 @@ mod tests {
             provider_kind: "deepseek".to_string(),
             usage_protocol: "auto".to_string(),
             new_api_access_token: None,
+            new_api_session_cookie: None,
             key_env_var: "IGNORED_KEY_ENV".to_string(),
             key: "sk-provider".to_string(),
             base_url_env_var: "IGNORED_BASE_URL_ENV".to_string(),
@@ -1586,6 +2011,7 @@ mod tests {
             provider_kind: "custom".to_string(),
             usage_protocol: "auto".to_string(),
             new_api_access_token: None,
+            new_api_session_cookie: None,
             key_env_var: "OPENAI_API_KEY".to_string(),
             key: "secret".to_string(),
             base_url_env_var: "OPENAI_BASE_URL".to_string(),
@@ -1623,6 +2049,7 @@ mod tests {
             provider_kind: "deepseek".to_string(),
             usage_protocol: "auto".to_string(),
             new_api_access_token: None,
+            new_api_session_cookie: None,
             key_env_var: "OPENAI_API_KEY".to_string(),
             key: "sk-provider".to_string(),
             base_url_env_var: "OPENAI_BASE_URL".to_string(),
@@ -1631,7 +2058,7 @@ mod tests {
             context_window: None,
             max_output_tokens: None,
             use_gateway: false,
-            transport_mode: "auto".to_string(),
+            transport_mode: "responses".to_string(),
             supports_thinking: false,
             supports_reasoning_effort: false,
             last_model_refresh_at_ms: None,
@@ -1663,6 +2090,7 @@ mod tests {
             provider_kind: "custom".to_string(),
             usage_protocol: "auto".to_string(),
             new_api_access_token: None,
+            new_api_session_cookie: None,
             key_env_var: "OPENAI_API_KEY".to_string(),
             key: "sk-provider".to_string(),
             base_url_env_var: "OPENAI_BASE_URL".to_string(),
@@ -1697,6 +2125,7 @@ mod tests {
             provider_kind: "custom".to_string(),
             usage_protocol: "auto".to_string(),
             new_api_access_token: None,
+            new_api_session_cookie: None,
             key_env_var: "OPENAI_API_KEY".to_string(),
             key: "sk-provider".to_string(),
             base_url_env_var: "OPENAI_BASE_URL".to_string(),
@@ -1746,6 +2175,7 @@ mod tests {
             provider_kind: "custom".to_string(),
             usage_protocol: "auto".to_string(),
             new_api_access_token: None,
+            new_api_session_cookie: None,
             key_env_var: "LEGACY_API_KEY".to_string(),
             key: "sk-provider".to_string(),
             base_url_env_var: "LEGACY_BASE_URL".to_string(),
@@ -1754,7 +2184,7 @@ mod tests {
             context_window: None,
             max_output_tokens: None,
             use_gateway: false,
-            transport_mode: "auto".to_string(),
+            transport_mode: "responses".to_string(),
             supports_thinking: false,
             supports_reasoning_effort: false,
             last_model_refresh_at_ms: None,
@@ -1798,6 +2228,7 @@ mod tests {
             provider_kind: "opencode".to_string(),
             usage_protocol: "auto".to_string(),
             new_api_access_token: None,
+            new_api_session_cookie: None,
             key_env_var: "OPENAI_API_KEY".to_string(),
             key: "sk-provider".to_string(),
             base_url_env_var: "OPENAI_BASE_URL".to_string(),
@@ -1856,6 +2287,7 @@ mod tests {
             provider_kind: "opencode".to_string(),
             usage_protocol: "auto".to_string(),
             new_api_access_token: None,
+            new_api_session_cookie: None,
             key_env_var: "OPENAI_API_KEY".to_string(),
             key: "sk-provider".to_string(),
             base_url_env_var: "OPENAI_BASE_URL".to_string(),

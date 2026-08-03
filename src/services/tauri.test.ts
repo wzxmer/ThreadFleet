@@ -29,6 +29,7 @@ import {
   getOpenAppIcon,
   getThreadTokenUsage,
   getThirdPartyKeyUsage,
+  providerSessionLogin,
   getWorkspaceThirdPartyKeyUsage,
   getProviderModels,
   listThreads,
@@ -1076,8 +1077,23 @@ describe("tauri invoke wrappers", () => {
       baseUrl: "https://new-api.example/v1/usage",
       apiKey: "sk-provider",
       newApiAccessToken: "access-secret",
+      newApiSessionCookie: null,
       timezone: expect.any(String),
       dayStartUnix: expect.any(Number),
+      usageProtocol: "new-api",
+    });
+  });
+
+  it("passes the usage protocol when opening provider session login", async () => {
+    const invokeMock = vi.mocked(invoke);
+    invokeMock.mockResolvedValueOnce("session=ok");
+
+    await expect(providerSessionLogin("https://provider.example/v1", "new-api")).resolves.toBe(
+      "session=ok",
+    );
+
+    expect(invokeMock).toHaveBeenCalledWith("provider_session_login", {
+      baseUrl: "https://provider.example/v1",
       usageProtocol: "new-api",
     });
   });

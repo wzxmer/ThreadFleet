@@ -245,7 +245,8 @@ pub(crate) fn apply_active_provider_profile(
         );
     }
     let base_url = provider_profiles_core::resolve_profile_base_url(&profile)
-        .ok_or_else(|| "Provider profiles require a provider base URL".to_string())?;
+        .ok_or_else(|| "Provider profiles require a provider base URL".to_string())
+        .and_then(|base_url| provider_profiles_core::normalize_provider_api_base_url(&base_url))?;
     let key_env_var = profile.key_env_var.trim();
     if key_env_var.is_empty() {
         return Err("Provider profiles require a non-empty key environment variable".to_string());
@@ -500,6 +501,7 @@ mod tests {
             provider_kind: "custom".to_string(),
             usage_protocol: "auto".to_string(),
             new_api_access_token: None,
+            new_api_session_cookie: None,
             key_env_var: "COMPANY_API_KEY".to_string(),
             key: "super-secret-provider-key".to_string(),
             base_url_env_var: "COMPANY_BASE_URL".to_string(),
@@ -615,6 +617,7 @@ base_url = "https://old.example/v1"
                     name: "New key".to_string(),
                     key: "new-secret".to_string(),
                     new_api_access_token: None,
+                    new_api_session_cookie: None,
                     key_env_var: "NEW_API_KEY".to_string(),
                     function_tool_capability: None,
                 }],

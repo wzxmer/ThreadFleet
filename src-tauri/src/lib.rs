@@ -248,6 +248,7 @@ pub fn run() {
             codex::provider_model_list,
             codex::provider_function_tool_probe,
             codex::third_party_key_usage,
+            codex::provider_session_login,
             codex::workspace_third_party_key_usage,
             menu::menu_set_accelerators,
             menu::menu_set_labels,

@@ -673,6 +673,7 @@ export type CodexKeyProfile = {
   providerKind?: CodexProviderKind;
   usageProtocol?: "auto" | "sub2" | "new-api" | "disabled";
   newApiAccessToken?: string | null;
+  newApiSessionCookie?: string | null;
   keyEnvVar: string;
   key: string;
   baseUrlEnvVar: string;
@@ -700,6 +701,7 @@ export type CodexCredential = {
   name: string;
   key: string;
   newApiAccessToken?: string | null;
+  newApiSessionCookie?: string | null;
   keyEnvVar: string;
   lastModelRefreshAtMs?: number | null;
   cachedModels?: CodexProviderModel[];

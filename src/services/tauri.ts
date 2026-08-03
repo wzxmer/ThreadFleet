@@ -504,9 +504,10 @@ export async function getThirdPartyKeyUsage(
   apiKey: string,
   usageProtocol: "auto" | "sub2" | "new-api" | "disabled" = "auto",
   newApiAccessToken?: string | null,
+  newApiSessionCookie?: string | null,
 ): Promise<ThirdPartyKeyUsageSnapshot | null> {
   const usageUrl = buildThirdPartyUsageUrl(baseUrl);
-  if (!usageUrl || !apiKey.trim()) {
+  if (!usageUrl || (!apiKey.trim() && !newApiSessionCookie?.trim())) {
     return null;
   }
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
@@ -518,6 +519,7 @@ export async function getThirdPartyKeyUsage(
     baseUrl: usageUrl,
     apiKey,
     newApiAccessToken: newApiAccessToken?.trim() || null,
+    newApiSessionCookie: newApiSessionCookie?.trim() || null,
     timezone,
     dayStartUnix,
     usageProtocol,
@@ -588,6 +590,16 @@ export async function getProviderModels(
     apiKey,
   });
   return normalizeProviderModelPayload(response);
+}
+
+export async function providerSessionLogin(
+  baseUrl: string,
+  usageProtocol: "auto" | "sub2" | "new-api" | "disabled" = "auto",
+): Promise<string> {
+  return invoke<string>("provider_session_login", {
+    baseUrl,
+    usageProtocol,
+  });
 }
 
 export async function probeProviderFunctionCalling(

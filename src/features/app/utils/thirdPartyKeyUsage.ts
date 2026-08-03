@@ -7,7 +7,7 @@ export type ThirdPartyKeyUsageSnapshot = {
   averageLatencyMs: number | null;
   isUnlimited: boolean;
   isPartial: boolean;
-  source: "sub2" | "new-api" | null;
+  source: "sub2" | "new-api" | "page" | null;
 };
 
 type ThirdPartyUsageTodayPayload = {
@@ -26,6 +26,10 @@ type ThirdPartyUsagePayload = {
   source?: unknown;
   balance?: unknown;
   remaining?: unknown;
+  today_actual_cost?: unknown;
+  total_actual_cost?: unknown;
+  today_cost?: unknown;
+  total_cost?: unknown;
   usage?: {
     today?: ThirdPartyUsageTodayPayload;
     average_duration_ms?: unknown;
@@ -85,7 +89,9 @@ export function normalizeThirdPartyUsagePayload(
   const canonicalSpendPeriod =
     data.spendPeriod === "today" || data.spendPeriod === "total" ? data.spendPeriod : null;
   const canonicalSource =
-    data.source === "sub2" || data.source === "new-api" ? data.source : null;
+    data.source === "sub2" || data.source === "new-api" || data.source === "page"
+      ? data.source
+      : null;
   const hasCanonicalShape =
     "balanceUsd" in data ||
     "todayCostUsd" in data ||
@@ -123,18 +129,28 @@ export function normalizeThirdPartyUsagePayload(
   const balanceUsd =
     parseNumericValue(data.balance) ?? parseNumericValue(data.remaining);
   const todayCostUsd =
+    parseNumericValue(data.today_actual_cost) ??
+    parseNumericValue(data.today_cost) ??
     parseNumericValue(data.usage?.today?.actual_cost) ??
     parseNumericValue(data.subscription?.daily_usage_usd);
+  const totalCostUsd =
+    parseNumericValue(data.total_actual_cost) ??
+    parseNumericValue(data.total_cost);
   const averageLatencyMs = parseNumericValue(data.usage?.average_duration_ms);
 
-  if (balanceUsd === null && todayCostUsd === null && averageLatencyMs === null) {
+  if (
+    balanceUsd === null &&
+    todayCostUsd === null &&
+    totalCostUsd === null &&
+    averageLatencyMs === null
+  ) {
     return null;
   }
   return {
     balanceUsd,
     todayCostUsd,
-    totalCostUsd: null,
-    spendPeriod: todayCostUsd === null ? null : "today",
+    totalCostUsd,
+    spendPeriod: todayCostUsd !== null ? "today" : totalCostUsd !== null ? "total" : null,
     averageLatencyMs,
     isUnlimited: false,
     isPartial: false,

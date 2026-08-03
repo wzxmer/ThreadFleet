@@ -21,7 +21,12 @@ import {
   SettingsToggleSwitch,
 } from "@/features/design-system/components/settings/SettingsPrimitives";
 import { useI18n } from "@/features/i18n/I18nProvider";
-import { getProviderModels, probeProviderFunctionCalling } from "@/services/tauri";
+import {
+  getProviderModels,
+  getThirdPartyKeyUsage,
+  probeProviderFunctionCalling,
+  providerSessionLogin,
+} from "@/services/tauri";
 import {
   mergeCodexProviderModels,
   PROVIDER_REASONING_EFFORT_VALUES,
@@ -46,6 +51,7 @@ type SettingsProvidersSectionProps = {
 
 const DEFAULT_KEY_ENV_VAR = "OPENAI_API_KEY";
 const DEFAULT_BASE_URL_ENV_VAR = "OPENAI_BASE_URL";
+type UsageProbeState = "idle" | "loading" | "available" | "unavailable";
 
 function cloneProvider(provider: CodexProvider): CodexProvider {
   return {
@@ -124,8 +130,13 @@ function isCurrentFunctionToolCapability(
   model: string | null | undefined,
   provider: CodexProvider,
 ): boolean {
+  const capabilityTransport = credential.functionToolCapability?.transport;
+  const transportMode = providerTransportMode(provider);
+  const transportMatches = transportMode === "auto"
+    ? capabilityTransport === "responses" || capabilityTransport === "chat-completions-gateway"
+    : capabilityTransport === providerFunctionToolTransport(provider);
   return credential.functionToolCapability?.model === (model?.trim() || null) &&
-    credential.functionToolCapability.transport === providerFunctionToolTransport(provider);
+    transportMatches;
 }
 
 function selectionBelongsToProvider(
@@ -147,6 +158,7 @@ export function SettingsProvidersSection({
     name: t("settings.codex.defaultCredentialName"),
     key: "",
     newApiAccessToken: null,
+    newApiSessionCookie: null,
     keyEnvVar: DEFAULT_KEY_ENV_VAR,
   });
   const createGroup = (): CodexCredentialGroup => ({
@@ -191,6 +203,9 @@ export function SettingsProvidersSection({
   const [behaviorSaving, setBehaviorSaving] = useState(false);
   const [behaviorError, setBehaviorError] = useState(false);
   const [probingCredentialId, setProbingCredentialId] = useState<string | null>(null);
+  const [usageProbeStates, setUsageProbeStates] = useState<Record<string, UsageProbeState>>({});
+  const [sessionLoginCredentialId, setSessionLoginCredentialId] = useState<string | null>(null);
+  const [sessionLoginError, setSessionLoginError] = useState<string | null>(null);
 
   useEffect(() => {
     const next = providersFromSettings(appSettings);
@@ -225,6 +240,25 @@ export function SettingsProvidersSection({
       : [],
   );
   const resolvedBaseUrl = resolveCodexProviderBaseUrl(draft.providerKind, draft.baseUrl ?? "") ?? "";
+  const usageCredentials = useMemo(
+    () =>
+      providerWithSingleCredentialGroups(draft).groups
+        .map((group) => group.credentials[0])
+        .filter((credential): credential is CodexCredential => Boolean(credential)),
+    [draft],
+  );
+  const usageCredentialSignature = useMemo(
+    () =>
+      JSON.stringify(
+        usageCredentials.map((credential) => ({
+          id: credential.id,
+          key: credential.key,
+          newApiAccessToken: credential.newApiAccessToken ?? null,
+          newApiSessionCookie: credential.newApiSessionCookie ?? null,
+        })),
+      ),
+    [usageCredentials],
+  );
   const providerValid =
     draft.name.trim().length > 0 &&
     singleCredentialDraft.groups.length > 0 &&
@@ -246,6 +280,8 @@ export function SettingsProvidersSection({
     setIsNewDraft(false);
     setVisibleSecrets(new Set());
     setModelFetchState({ status: "idle", error: null });
+    setUsageProbeStates({});
+    setSessionLoginError(null);
   };
 
   const startNewProvider = () => {
@@ -255,6 +291,8 @@ export function SettingsProvidersSection({
     setIsNewDraft(true);
     setVisibleSecrets(new Set());
     setModelFetchState({ status: "idle", error: null });
+    setUsageProbeStates({});
+    setSessionLoginError(null);
   };
 
   const duplicateProvider = () => {
@@ -271,6 +309,7 @@ export function SettingsProvidersSection({
           id: createProviderEntityId("credential"),
           key: "",
           newApiAccessToken: null,
+          newApiSessionCookie: null,
           cachedModels: [],
           lastModelRefreshAtMs: null,
         })),
@@ -301,6 +340,7 @@ export function SettingsProvidersSection({
           name: group.name.trim() || credential.name.trim() || t("settings.codex.defaultCredentialName"),
           key: credential.key.trim(),
           newApiAccessToken: credential.newApiAccessToken?.trim() || null,
+          newApiSessionCookie: credential.newApiSessionCookie?.trim() || null,
           keyEnvVar: credential.keyEnvVar.trim() || DEFAULT_KEY_ENV_VAR,
         })),
       })),
@@ -397,6 +437,115 @@ export function SettingsProvidersSection({
         credential.id === credentialId ? { ...credential, ...patch } : credential,
       ),
     }));
+  };
+
+  useEffect(() => {
+    let canceled = false;
+    const credentials = usageCredentials;
+    if (
+      !draftMatchesPersistedProvider ||
+      !resolvedBaseUrl ||
+      draft.providerKind === "openai" ||
+      draft.usageProtocol === "disabled" ||
+      credentials.length === 0
+    ) {
+      setUsageProbeStates({});
+      return () => {
+        canceled = true;
+      };
+    }
+    setUsageProbeStates(
+      Object.fromEntries(credentials.map((credential) => [credential.id, "loading" as const])),
+    );
+    void Promise.all(
+      credentials.map(async (credential) => {
+        try {
+          const snapshot = await getThirdPartyKeyUsage(
+            resolvedBaseUrl,
+            credential.key,
+            draft.usageProtocol ?? "auto",
+            credential.newApiAccessToken,
+            credential.newApiSessionCookie,
+          );
+          const canDisplayQuota = Boolean(
+            snapshot &&
+              (snapshot.balanceUsd !== null || snapshot.isUnlimited),
+          );
+          return [credential.id, canDisplayQuota ? "available" : "unavailable"] as const;
+        } catch {
+          return [credential.id, "unavailable"] as const;
+        }
+      }),
+    ).then((entries) => {
+      if (!canceled) {
+        setUsageProbeStates(Object.fromEntries(entries));
+      }
+    });
+    return () => {
+      canceled = true;
+    };
+  }, [
+    draft.providerKind,
+    draft.usageProtocol,
+    draftMatchesPersistedProvider,
+    resolvedBaseUrl,
+    usageCredentials,
+    usageCredentialSignature,
+  ]);
+
+  const loginForUsage = async (groupId: string, credentialId: string) => {
+    if (
+      !persistedProvider ||
+      !draftMatchesPersistedProvider ||
+      !resolvedBaseUrl ||
+      sessionLoginCredentialId
+    ) {
+      return;
+    }
+    const credential = draft.groups
+      .find((group) => group.id === groupId)
+      ?.credentials.find((item) => item.id === credentialId);
+    if (!credential) return;
+    setSessionLoginCredentialId(credentialId);
+    setSessionLoginError(null);
+    try {
+      const sessionCookie = await providerSessionLogin(
+        resolvedBaseUrl,
+        draft.usageProtocol ?? "auto",
+      );
+      const nextProviders = providers.map((provider) =>
+        provider.id !== persistedProvider.id
+          ? provider
+          : {
+              ...provider,
+              groups: provider.groups.map((group) =>
+                group.id !== groupId
+                  ? group
+                  : {
+                      ...group,
+                      credentials: group.credentials.map((item) =>
+                        item.id === credentialId
+                          ? { ...item, newApiSessionCookie: sessionCookie }
+                          : item,
+                      ),
+                    },
+              ),
+            },
+      );
+      await onUpdateAppSettings({
+        ...appSettings,
+        codexProviders: nextProviders,
+        codexKeyProfiles: providersToLegacyProfiles(nextProviders),
+      });
+      setProviders(nextProviders);
+      const nextProvider = nextProviders.find((provider) => provider.id === persistedProvider.id);
+      if (nextProvider) setDraft(cloneProvider(nextProvider));
+      setUsageProbeStates((current) => ({ ...current, [credentialId]: "loading" }));
+    } catch (error) {
+      setSessionLoginError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSessionLoginCredentialId(null);
+    }
   };
 
   const probeFunctionToolCalling = async (groupId: string, credentialId: string) => {
@@ -776,6 +925,9 @@ export function SettingsProvidersSection({
                     ? isCurrentFunctionToolCapability(credential, draft.model, draft)
                     : false;
                   const capabilityState = capabilityCurrent ? capability?.state ?? "unknown" : "unknown";
+                  const usageProbeState = credential
+                    ? usageProbeStates[credential.id] ?? "idle"
+                    : "idle";
                   const capabilityLabel =
                     capabilityState === "verified"
                       ? t("settings.codex.functionToolStateVerified")
@@ -872,25 +1024,35 @@ export function SettingsProvidersSection({
                               </button>
                             </div>
                           </label>
-                          {(draft.usageProtocol === "auto" || draft.usageProtocol === "new-api") ? (
-                            <label className="settings-provider-access-token-field">
-                              <span>{t("settings.codex.newApiAccessTokenAria")}</span>
-                              <input
-                                className="settings-input"
-                                type="password"
-                                value={credential.newApiAccessToken ?? ""}
-                                placeholder={t("settings.codex.newApiAccessTokenPlaceholder")}
-                                aria-label={t("settings.codex.newApiAccessTokenAria")}
-                                onChange={(event) =>
-                                  updateCredential(group.id, credential.id, {
-                                    newApiAccessToken: event.target.value || null,
-                                  })
-                                }
-                              />
+                          {draft.providerKind !== "openai" && draft.usageProtocol !== "disabled" ? (
+                            <div className="settings-provider-access-token-field">
+                              <div className="settings-field-row">
+                                <button
+                                  type="button"
+                                  className="ghost settings-button-compact"
+                                  disabled={sessionLoginCredentialId !== null}
+                                  onClick={() => void loginForUsage(group.id, credential.id)}
+                                >
+                                  {sessionLoginCredentialId === credential.id
+                                    ? t("common.loading")
+                                    : t("settings.codex.loginForUsage")}
+                                </button>
+                                {credential.newApiSessionCookie ? (
+                                  <span className="settings-help settings-help-inline">
+                                    {t("settings.codex.sessionCookieSaved")}
+                                  </span>
+                                ) : null}
+                              </div>
                               <span className="settings-help">
-                                {t("settings.codex.newApiAccessTokenHelp")}
+                                {t("settings.codex.loginForUsageHelp")}
                               </span>
-                            </label>
+                              {usageProbeState === "loading" ? (
+                                <span className="settings-help">{t("settings.codex.checkingProviderUsage")}</span>
+                              ) : null}
+                              {sessionLoginError && sessionLoginCredentialId === null ? (
+                                <span className="settings-help settings-help-error">{sessionLoginError}</span>
+                              ) : null}
+                            </div>
                           ) : null}
                           <div className="settings-provider-tool-capability" aria-live="polite">
                             <div className="settings-provider-tool-capability-copy">

@@ -40,10 +40,13 @@ function profileUsageSignature(profile: CodexKeyProfile | null) {
   return JSON.stringify({
     id: profile.id,
     providerKind: profile.providerKind ?? null,
+    usageProtocol: profile.usageProtocol ?? null,
     baseUrl: profile.baseUrl ?? null,
     baseUrlEnvVar: profile.baseUrlEnvVar ?? null,
     key: profile.key ?? null,
     keyEnvVar: profile.keyEnvVar ?? null,
+    newApiAccessToken: profile.newApiAccessToken ?? null,
+    newApiSessionCookie: profile.newApiSessionCookie ?? null,
   });
 }
 
@@ -101,6 +104,7 @@ export function useSidebarProviderUsage({
             credentialId: usageCredential.credential.id,
             key: usageCredential.credential.key,
             newApiAccessToken: usageCredential.credential.newApiAccessToken ?? null,
+            newApiSessionCookie: usageCredential.credential.newApiSessionCookie ?? null,
           })
         : profileUsageSignature(usageProfile),
     [usageCredential, usageProfile],

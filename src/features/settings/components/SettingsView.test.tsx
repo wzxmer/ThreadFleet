@@ -2077,29 +2077,26 @@ describe("SettingsView Codex defaults", () => {
     fireEvent.change(screen.getByLabelText("用量接口类型"), {
       target: { value: "new-api" },
     });
-    fireEvent.change(screen.getByLabelText("New API Access Token"), {
-      target: { value: "access-secret" },
-    });
-    const accessTokenField = screen.getByLabelText("New API Access Token");
-    const accessTokenHelp = screen.getByText(
-      "用于读取 New API 账户余额；API 密钥仍用于读取令牌消费。未填写或验证失败时回退显示令牌额度。",
-    );
-    expect(
-      accessTokenHelp.closest(".settings-provider-access-token-field")?.contains(accessTokenField),
-    ).toBe(true);
+    expect(screen.queryByLabelText("New API Access Token")).toBeNull();
+    const loginButton = screen.getByRole("button", { name: "登录获取 Cookie" });
+    expect(loginButton).toBeTruthy();
+    expect((loginButton as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "保存并启用" }));
 
     const calls = onUpdateAppSettings.mock.calls;
     const nextSettings = calls[calls.length - 1]?.[0] as AppSettings;
     expect(nextSettings.codexProviders?.[nextSettings.codexProviders.length - 1]).toMatchObject({
       name: "New API",
-      usageProtocol: "new-api",
-      groups: [
-        expect.objectContaining({
-          credentials: [
-            expect.objectContaining({ newApiAccessToken: "access-secret" }),
-          ],
-        }),
+        usageProtocol: "new-api",
+        groups: [
+          expect.objectContaining({
+            credentials: [
+              expect.objectContaining({
+                newApiAccessToken: null,
+                newApiSessionCookie: null,
+              }),
+            ],
+          }),
       ],
     });
   });
@@ -2466,7 +2463,7 @@ describe("SettingsView Codex defaults", () => {
       "Provider A 副本",
     );
     expect((screen.getByLabelText("API 密钥") as HTMLInputElement).value).toBe("");
-    expect((screen.getByLabelText("New API Access Token") as HTMLInputElement).value).toBe("");
+    expect(screen.queryByLabelText("New API Access Token")).toBeNull();
     expect((screen.getByLabelText("用量分组名称") as HTMLInputElement).value).toBe("Group A");
   });
 

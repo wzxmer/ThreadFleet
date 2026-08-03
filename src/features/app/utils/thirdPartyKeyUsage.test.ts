@@ -63,6 +63,25 @@ describe("thirdPartyKeyUsage", () => {
     });
   });
 
+  it("normalizes Sub2 dashboard total actual cost", () => {
+    expect(
+      normalizeThirdPartyUsagePayload({
+        balance: "15.00",
+        today_actual_cost: "0.40",
+        total_actual_cost: "2.95",
+      }),
+    ).toEqual({
+      balanceUsd: 15,
+      todayCostUsd: 0.4,
+      totalCostUsd: 2.95,
+      spendPeriod: "today",
+      averageLatencyMs: null,
+      isUnlimited: false,
+      isPartial: false,
+      source: null,
+    });
+  });
+
   it("normalizes a New API total-cost fallback snapshot", () => {
     expect(
       normalizeThirdPartyUsagePayload({
@@ -108,6 +127,28 @@ describe("thirdPartyKeyUsage", () => {
       totalCostUsd: 3.5,
       spendPeriod: "today",
       averageLatencyMs: 1200,
+      isUnlimited: false,
+      isPartial: false,
+    });
+  });
+
+  it("accepts page-scanned balance and total usage snapshots", () => {
+    expect(
+      normalizeThirdPartyUsagePayload({
+        source: "page",
+        balanceUsd: 1.29,
+        todayCostUsd: null,
+        totalCostUsd: 9.8,
+        isUnlimited: false,
+        isPartial: false,
+      }),
+    ).toEqual({
+      source: "page",
+      balanceUsd: 1.29,
+      todayCostUsd: null,
+      totalCostUsd: 9.8,
+      spendPeriod: "total",
+      averageLatencyMs: null,
       isUnlimited: false,
       isPartial: false,
     });

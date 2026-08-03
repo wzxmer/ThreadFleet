@@ -2553,7 +2553,7 @@ fn resolve_third_party_usage_credentials(
     settings: &AppSettings,
     document: &toml_edit::Document,
     default_api_key: Option<String>,
-) -> Option<(String, String, String, Option<String>)> {
+) -> Option<(String, String, String, Option<String>, Option<String>)> {
     let active_profile = provider_profiles_core::effective_usage_profile(settings);
     if let Some(profile) = active_profile {
         if profile.provider_kind.eq_ignore_ascii_case("openai") {
@@ -2565,6 +2565,7 @@ fn resolve_third_party_usage_credentials(
                 profile.key.clone(),
                 profile.usage_protocol.clone(),
                 profile.new_api_access_token.clone(),
+                profile.new_api_session_cookie.clone(),
             )
         });
     }
@@ -2576,7 +2577,7 @@ fn resolve_third_party_usage_credentials(
     if codex_config::is_official_openai_url(&base_url) {
         return None;
     }
-    default_api_key.map(|api_key| (base_url, api_key, "auto".to_string(), None))
+    default_api_key.map(|api_key| (base_url, api_key, "auto".to_string(), None, None))
 }
 
 pub(crate) async fn workspace_third_party_key_usage_core(
@@ -2597,13 +2598,16 @@ pub(crate) async fn workspace_third_party_key_usage_core(
     };
     let credentials = resolve_third_party_usage_credentials(settings, &document, default_api_key);
 
-    let Some((base_url, api_key, usage_protocol, new_api_access_token)) = credentials else {
+    let Some((base_url, api_key, usage_protocol, new_api_access_token, new_api_session_cookie)) =
+        credentials
+    else {
         return Ok(Value::Null);
     };
     provider_profiles_core::third_party_key_usage_core(
         base_url,
         api_key,
         new_api_access_token,
+        new_api_session_cookie,
         timezone,
         day_start_unix,
         Some(usage_protocol),
@@ -2704,6 +2708,7 @@ base_url = "{base_url}"
                 "sk-default".to_string(),
                 "auto".to_string(),
                 None,
+                None,
             ))
         );
     }
@@ -2717,6 +2722,7 @@ base_url = "{base_url}"
             provider_kind: "deepseek".to_string(),
             usage_protocol: "auto".to_string(),
             new_api_access_token: Some("access-profile".to_string()),
+            new_api_session_cookie: None,
             key_env_var: "OPENAI_API_KEY".to_string(),
             key: "sk-profile".to_string(),
             base_url_env_var: "OPENAI_BASE_URL".to_string(),
@@ -2747,6 +2753,7 @@ base_url = "{base_url}"
                 "sk-profile".to_string(),
                 "auto".to_string(),
                 Some("access-profile".to_string()),
+                None,
             ))
         );
     }
@@ -2780,6 +2787,7 @@ base_url = "{base_url}"
                         name: "Execution".to_string(),
                         key: "execution-key".to_string(),
                         new_api_access_token: None,
+                        new_api_session_cookie: None,
                         key_env_var: "OPENAI_API_KEY".to_string(),
                         function_tool_capability: None,
                     }],
@@ -2810,6 +2818,7 @@ base_url = "{base_url}"
                         name: "Usage".to_string(),
                         key: "usage-key".to_string(),
                         new_api_access_token: Some("usage-access-token".to_string()),
+                        new_api_session_cookie: None,
                         key_env_var: "OPENAI_API_KEY".to_string(),
                         function_tool_capability: None,
                     }],
@@ -2840,6 +2849,7 @@ base_url = "{base_url}"
                 "usage-key".to_string(),
                 "new-api".to_string(),
                 Some("usage-access-token".to_string()),
+                None,
             ))
         );
     }

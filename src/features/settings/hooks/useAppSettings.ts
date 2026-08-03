@@ -283,6 +283,7 @@ function normalizeCodexKeyProfiles(
         providerKind,
         usageProtocol,
         newApiAccessToken: profile.newApiAccessToken?.trim() || null,
+        newApiSessionCookie: profile.newApiSessionCookie?.trim() || null,
         keyEnvVar: profile.keyEnvVar?.trim() || DEFAULT_CODEX_KEY_ENV_VAR,
         key: profile.key?.trim() || "",
         baseUrlEnvVar: profile.baseUrlEnvVar?.trim() || DEFAULT_CODEX_BASE_URL_ENV_VAR,
@@ -338,6 +339,7 @@ function normalizeCodexProviders(
                   key: credential.key?.trim() || "",
                   keyEnvVar: credential.keyEnvVar?.trim() || DEFAULT_CODEX_KEY_ENV_VAR,
                   newApiAccessToken: credential.newApiAccessToken?.trim() || null,
+                  newApiSessionCookie: credential.newApiSessionCookie?.trim() || null,
                   ...(Array.isArray(credential.cachedModels)
                     ? {
                         cachedModels: normalizeCachedModels(credential.cachedModels),

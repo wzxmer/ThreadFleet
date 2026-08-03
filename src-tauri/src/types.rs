@@ -819,6 +819,8 @@ pub(crate) struct CodexKeyProfile {
     pub(crate) usage_protocol: String,
     #[serde(default)]
     pub(crate) new_api_access_token: Option<String>,
+    #[serde(default)]
+    pub(crate) new_api_session_cookie: Option<String>,
     #[serde(default = "default_codex_key_env_var")]
     pub(crate) key_env_var: String,
     #[serde(default)]
@@ -866,6 +868,8 @@ pub(crate) struct CodexCredential {
     pub(crate) key: String,
     #[serde(default)]
     pub(crate) new_api_access_token: Option<String>,
+    #[serde(default)]
+    pub(crate) new_api_session_cookie: Option<String>,
     #[serde(default = "default_codex_key_env_var")]
     pub(crate) key_env_var: String,
     #[serde(default)]

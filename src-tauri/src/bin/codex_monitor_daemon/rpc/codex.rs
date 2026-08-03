@@ -137,6 +137,7 @@ pub(super) async fn try_handle(
                 Err(err) => return Some(Err(err)),
             };
             let new_api_access_token = parse_optional_string(params, "newApiAccessToken");
+            let new_api_session_cookie = parse_optional_string(params, "newApiSessionCookie");
             let timezone = parse_optional_string(params, "timezone");
             let day_start_unix = params.get("dayStartUnix").and_then(Value::as_i64);
             let usage_protocol = parse_optional_string(params, "usageProtocol");
@@ -145,6 +146,7 @@ pub(super) async fn try_handle(
                     base_url,
                     api_key,
                     new_api_access_token,
+                    new_api_session_cookie,
                     timezone,
                     day_start_unix,
                     usage_protocol,

@@ -1,4 +1,4 @@
-use futures_util::StreamExt;
+use futures_util::{future, StreamExt};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, CONTENT_TYPE};
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -8,7 +8,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
@@ -42,6 +42,12 @@ pub(crate) struct ProviderFunctionToolProbe {
     pub(crate) state: String,
     pub(crate) transport: String,
     pub(crate) failure_code: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProviderTransport {
+    Responses,
+    ChatCompletionsGateway,
 }
 
 impl ProviderFunctionToolProbe {
@@ -378,6 +384,81 @@ pub(crate) fn build_upstream_url(
     url.set_path(&next_path);
     url.set_query(request_url.query());
     Ok(url)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProviderEndpointProbe {
+    Available,
+    Missing,
+    Unknown,
+}
+
+pub(crate) async fn probe_provider_transport(
+    upstream_base_url: &str,
+    upstream_api_key: &str,
+) -> ProviderTransport {
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(4))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+    {
+        Ok(client) => client,
+        Err(_) => return ProviderTransport::Responses,
+    };
+
+    let (responses, chat_completions) = future::join(
+        probe_provider_endpoint(
+            &client,
+            upstream_base_url,
+            upstream_api_key,
+            "/v1/responses",
+        ),
+        probe_provider_endpoint(
+            &client,
+            upstream_base_url,
+            upstream_api_key,
+            "/v1/chat/completions",
+        ),
+    )
+    .await;
+
+    match (responses, chat_completions) {
+        (ProviderEndpointProbe::Missing, ProviderEndpointProbe::Available) => {
+            ProviderTransport::ChatCompletionsGateway
+        }
+        (ProviderEndpointProbe::Available, ProviderEndpointProbe::Missing) => {
+            ProviderTransport::Responses
+        }
+        _ => ProviderTransport::Responses,
+    }
+}
+
+async fn probe_provider_endpoint(
+    client: &reqwest::Client,
+    upstream_base_url: &str,
+    upstream_api_key: &str,
+    path: &str,
+) -> ProviderEndpointProbe {
+    let url = match build_upstream_url(upstream_base_url, path) {
+        Ok(url) => url,
+        Err(_) => return ProviderEndpointProbe::Unknown,
+    };
+    let response = client
+        .post(url)
+        .bearer_auth(upstream_api_key.trim())
+        .header(CONTENT_TYPE, "application/json")
+        .header(reqwest::header::ACCEPT, "application/json")
+        .body("{")
+        .send()
+        .await;
+    let Ok(response) = response else {
+        return ProviderEndpointProbe::Unknown;
+    };
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return ProviderEndpointProbe::Missing;
+    }
+    // A non-404 response proves the route handled the request without model generation.
+    ProviderEndpointProbe::Available
 }
 
 pub(crate) async fn probe_provider_function_calling(
@@ -1179,6 +1260,8 @@ async fn write_responses_stream_from_chat_stream(
     let mut tool_calls = BTreeMap::<usize, StreamingToolCall>::new();
     let mut pending = String::new();
     let mut pending_utf8 = Vec::new();
+    let mut saw_finish_reason = false;
+    let mut saw_done = false;
     let mut body = response.bytes_stream();
     while let Some(chunk_result) = body.next().await {
         let chunk = chunk_result
@@ -1186,6 +1269,9 @@ async fn write_responses_stream_from_chat_stream(
         append_utf8_stream_chunk(&mut pending, &mut pending_utf8, &chunk)?;
         while let Some((raw_event, rest)) = split_next_sse_event(&pending) {
             pending = rest;
+            let (event_has_finish_reason, event_is_done) = chat_stream_event_flags(&raw_event);
+            saw_finish_reason |= event_has_finish_reason;
+            saw_done |= event_is_done;
             process_chat_stream_event(
                 stream,
                 &raw_event,
@@ -1199,6 +1285,9 @@ async fn write_responses_stream_from_chat_stream(
     }
     finish_utf8_stream(&pending_utf8)?;
     if !pending.trim().is_empty() {
+        let (event_has_finish_reason, event_is_done) = chat_stream_event_flags(&pending);
+        saw_finish_reason |= event_has_finish_reason;
+        saw_done |= event_is_done;
         process_chat_stream_event(
             stream,
             &pending,
@@ -1208,6 +1297,17 @@ async fn write_responses_stream_from_chat_stream(
             custom_tool_names,
         )
         .await?;
+    }
+    if !saw_finish_reason || !saw_done {
+        let missing_terminal = match (saw_finish_reason, saw_done) {
+            (false, false) => "finish_reason and [DONE]",
+            (false, true) => "finish_reason",
+            (true, false) => "[DONE]",
+            (true, true) => unreachable!(),
+        };
+        return Err(format!(
+            "Upstream chat completions stream ended before completion: missing {missing_terminal}"
+        ));
     }
 
     if let Some(message_id) = message_id.as_deref() {
@@ -2042,13 +2142,13 @@ mod tests {
     use super::{
         append_utf8_stream_chunk, build_upstream_url, chat_completion_to_response,
         chat_completion_to_response_with_custom_tools, chat_stream_event_flags, finish_utf8_stream,
-        gateway_request_is_authorized, is_chat_completions_streaming,
+        gateway_request_is_authorized, is_chat_completions_streaming, probe_provider_transport,
         provider_value_has_probe_function_call, read_http_request,
         responses_request_to_chat_completions,
         responses_request_to_chat_completions_with_reasoning,
         should_rewrite_chat_completions_stream, split_next_sse_event, start_provider_gateway,
         write_chat_completions_stream, write_responses_stream_from_chat_stream, GatewayRequest,
-        ProviderGatewayConfig,
+        ProviderGatewayConfig, ProviderTransport,
     };
     use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE};
     use reqwest::StatusCode;
@@ -2073,6 +2173,23 @@ mod tests {
             );
             stream.write_all(head.as_bytes()).await.unwrap();
             stream.write_all(body).await.unwrap();
+        });
+        reqwest::get(format!("http://{addr}/stream")).await.unwrap()
+    }
+
+    async fn clean_eof_event_stream_response(body: &'static str) -> reqwest::Response {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0u8; 1024];
+            let _ = stream.read(&mut request).await;
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n",
+                body.len(),
+            );
+            stream.write_all(head.as_bytes()).await.unwrap();
+            stream.write_all(body.as_bytes()).await.unwrap();
         });
         reqwest::get(format!("http://{addr}/stream")).await.unwrap()
     }
@@ -2180,6 +2297,20 @@ mod tests {
         }
     }
 
+    async fn assert_incomplete_terminal_stream(body: &'static str, missing_terminal: &str) {
+        let response = clean_eof_event_stream_response(body).await;
+        let (mut server, mut client) = downstream_pair().await;
+        let writer = tokio::spawn(async move {
+            write_responses_stream_from_chat_stream(&mut server, response, &BTreeSet::new()).await
+        });
+        let mut output = Vec::new();
+        read_truncated_downstream(&mut client, &mut output).await;
+        let error = writer.await.unwrap().unwrap_err();
+
+        assert!(error.contains(&format!("missing {missing_terminal}")));
+        assert!(!String::from_utf8_lossy(&output).contains("response.completed"));
+    }
+
     #[test]
     fn truncated_responses_stream_does_not_report_completion() {
         tokio::runtime::Runtime::new().unwrap().block_on(async {
@@ -2193,6 +2324,35 @@ mod tests {
             read_truncated_downstream(&mut client, &mut output).await;
             assert!(writer.await.unwrap().is_err());
             assert!(!String::from_utf8_lossy(&output).contains("response.completed"));
+        });
+    }
+
+    #[test]
+    fn clean_eof_responses_stream_does_not_report_completion() {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            assert_incomplete_terminal_stream(
+                "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n",
+                "finish_reason and [DONE]",
+            )
+            .await;
+        });
+    }
+
+    #[test]
+    fn finish_reason_without_done_does_not_report_completion() {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            assert_incomplete_terminal_stream(
+                "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+                "[DONE]",
+            )
+            .await;
+        });
+    }
+
+    #[test]
+    fn done_without_finish_reason_does_not_report_completion() {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            assert_incomplete_terminal_stream("data: [DONE]\n\n", "finish_reason").await;
         });
     }
 
@@ -2265,7 +2425,7 @@ mod tests {
     }
 
     #[test]
-    fn streamed_chat_function_call_keeps_unterminated_final_event() {
+    fn unterminated_chat_function_call_does_not_report_completion() {
         tokio::runtime::Runtime::new().unwrap().block_on(async {
             let response = unterminated_function_call_event_stream_response().await;
             let (mut server, mut client) = downstream_pair().await;
@@ -2274,12 +2434,14 @@ mod tests {
                     .await
             });
             let mut output = Vec::new();
-            client.read_to_end(&mut output).await.unwrap();
-            writer.await.unwrap().unwrap();
+            read_truncated_downstream(&mut client, &mut output).await;
+            let error = writer.await.unwrap().unwrap_err();
 
             let output = String::from_utf8_lossy(&output);
             assert!(output.contains("call_tail"));
-            assert!(output.contains("response.function_call_arguments.done"));
+            assert!(!output.contains("response.function_call_arguments.done"));
+            assert!(!output.contains("response.completed"));
+            assert!(error.contains("missing finish_reason and [DONE]"));
         });
     }
 
@@ -2363,6 +2525,52 @@ mod tests {
             .to_string();
 
         assert_eq!(url, "https://api.example.com/v1/models?limit=20");
+    }
+
+    #[test]
+    fn auto_transport_selects_chat_when_responses_route_is_missing() {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move {
+                for _ in 0..2 {
+                    let (mut stream, _) = listener.accept().await.unwrap();
+                    let mut request = Vec::new();
+                    let mut chunk = [0u8; 4096];
+                    loop {
+                        let read = stream.read(&mut chunk).await.unwrap();
+                        if read == 0 {
+                            break;
+                        }
+                        request.extend_from_slice(&chunk[..read]);
+                        if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                            break;
+                        }
+                    }
+                    let request_line = String::from_utf8_lossy(&request);
+                    let path = request_line
+                        .lines()
+                        .next()
+                        .and_then(|line| line.split_whitespace().nth(1))
+                        .unwrap_or_default();
+                    let status = if path.ends_with("/responses") {
+                        "404 Not Found"
+                    } else {
+                        "400 Bad Request"
+                    };
+                    let response = format!(
+                        "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}"
+                    );
+                    stream.write_all(response.as_bytes()).await.unwrap();
+                }
+            });
+
+            let transport =
+                probe_provider_transport(&format!("http://{addr}/v1"), "probe-key").await;
+
+            assert_eq!(transport, ProviderTransport::ChatCompletionsGateway);
+            server.await.unwrap();
+        });
     }
 
     #[test]
