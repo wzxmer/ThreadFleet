@@ -38,6 +38,12 @@ describe("model activity core styles", () => {
     );
   });
 
+  it("rotates orbiting details around the SVG center rather than their off-center spark bounds", () => {
+    expect(modelActivityCoreCss).toMatch(
+      /\.model-activity-core__orbit\s*\{[^}]*transform-box:\s*view-box;[^}]*transform-origin:\s*50% 50%;/s,
+    );
+  });
+
   it("still honors reduced motion", () => {
     expect(modelActivityCoreCss).toMatch(
       /@media \(prefers-reduced-motion: reduce\) \{[\s\S]*animation:\s*none !important;/,

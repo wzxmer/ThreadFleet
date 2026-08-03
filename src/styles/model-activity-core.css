@@ -106,6 +106,9 @@
 }
 
 .model-activity-core__orbit {
+  /* Use the stable SVG viewport center: each orbit also owns an off-center spark. */
+  transform-box: view-box;
+  transform-origin: 50% 50%;
   opacity: 0.74;
 }
 
