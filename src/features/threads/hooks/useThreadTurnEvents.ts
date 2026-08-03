@@ -858,6 +858,7 @@ export function useThreadTurnEvents({
   );
 
   return {
+    getLatestKnownActiveTurnId,
     onThreadStarted,
     onThreadNameUpdated,
     onThreadArchived,

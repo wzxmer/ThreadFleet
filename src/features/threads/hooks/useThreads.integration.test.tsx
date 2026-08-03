@@ -2296,6 +2296,34 @@ describe("useThreads UX integration", () => {
     expect(interruptMock).not.toHaveBeenCalledWith("ws-1", "thread-1", "pending");
   });
 
+  it("interrupts the newest live turn before reducer state catches up", async () => {
+    const interruptMock = vi.mocked(interruptTurn);
+    interruptMock.mockResolvedValue({ result: {} });
+
+    const { result } = renderHook(() =>
+      useThreads({
+        activeWorkspace: workspace,
+        onWorkspaceConnected: vi.fn(),
+      }),
+    );
+
+    act(() => {
+      result.current.setActiveThreadId("thread-1");
+      handlers?.onTurnStarted?.("ws-1", "thread-1", "turn-stale");
+    });
+
+    await act(async () => {
+      handlers?.onTurnStarted?.("ws-1", "thread-1", "turn-current");
+      await result.current.interruptTurn();
+    });
+
+    expect(interruptMock).toHaveBeenCalledWith(
+      "ws-1",
+      "thread-1",
+      "turn-current",
+    );
+  });
+
   it("keeps the turn active until interrupt completion is confirmed", async () => {
     let resolveInterrupt!: (value: Awaited<ReturnType<typeof interruptTurn>>) => void;
     vi.mocked(interruptTurn).mockReturnValue(

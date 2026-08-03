@@ -427,6 +427,27 @@ export function useMessagesViewState({
       return entry.group.items.find((item) => item.turnId)?.turnId ?? null;
     };
 
+    const hasLegacySteerContinuation = (
+      startIndex: number,
+      turnIdToMatch: string,
+    ) => {
+      for (let index = startIndex + 1; index < baseGroupedItems.length; index += 1) {
+        const candidate = baseGroupedItems[index];
+        if (
+          candidate.kind === "item" &&
+          ((candidate.item.kind === "message" && candidate.item.role === "user") ||
+            candidate.item.kind === "subagentCheckpoint")
+        ) {
+          return false;
+        }
+        const nextTurnId = entryTurnId(candidate);
+        if (nextTurnId) {
+          return nextTurnId === turnIdToMatch;
+        }
+      }
+      return false;
+    };
+
     const flushTurn = () => {
       if (turnEntries.length === 0) {
         return;
@@ -528,8 +549,26 @@ export function useMessagesViewState({
       turnId = null;
     };
 
-    baseGroupedItems.forEach((entry) => {
+    baseGroupedItems.forEach((entry, entryIndex) => {
       const entryId = entryTurnId(entry);
+      const isUserMessage =
+        entry.kind === "item" &&
+        entry.item.kind === "message" &&
+        entry.item.role === "user";
+      const hasCompletedAssistantMessage = turnEntries.some(
+        (candidate) =>
+          candidate.kind === "item" &&
+          candidate.item.kind === "message" &&
+          candidate.item.role === "assistant" &&
+          candidate.item.phase === "final_answer",
+      );
+      const isSameTurnUserMessage =
+        isUserMessage &&
+        turnId !== null &&
+        (entryId === turnId ||
+          (entryId === null &&
+            !hasCompletedAssistantMessage &&
+            hasLegacySteerContinuation(entryIndex, turnId)));
       const startsUnscopedAssistantAfterCompletedTurn =
         entryId === null &&
         turnId !== null &&
@@ -552,7 +591,7 @@ export function useMessagesViewState({
       }
       if (
         entry.kind === "item" &&
-        ((entry.item.kind === "message" && entry.item.role === "user") ||
+        ((isUserMessage && !isSameTurnUserMessage) ||
           entry.item.kind === "subagentCheckpoint")
       ) {
         flushTurn();

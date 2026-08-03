@@ -1422,6 +1422,7 @@ export function useThreads({
     ensureWorkspaceRuntimeCodexArgs,
     threadStatusById: state.threadStatusById,
     activeTurnIdByThread: state.activeTurnIdByThread,
+    getLatestKnownActiveTurnId: threadHandlers.getLatestKnownActiveTurnId,
     rateLimitsByWorkspace: state.rateLimitsByWorkspace,
     pendingInterruptsRef,
     dispatch,

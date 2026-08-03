@@ -349,6 +349,7 @@ type UseThreadMessagingOptions = {
   ) => Promise<void>;
   threadStatusById: ThreadState["threadStatusById"];
   activeTurnIdByThread: ThreadState["activeTurnIdByThread"];
+  getLatestKnownActiveTurnId?: (threadId: string) => string | null;
   rateLimitsByWorkspace: Record<string, RateLimitSnapshot | null>;
   pendingInterruptsRef: MutableRefObject<Set<string>>;
   dispatch: Dispatch<ThreadAction>;
@@ -417,6 +418,7 @@ export function useThreadMessaging({
   ensureWorkspaceRuntimeCodexArgs,
   threadStatusById,
   activeTurnIdByThread,
+  getLatestKnownActiveTurnId,
   rateLimitsByWorkspace,
   pendingInterruptsRef,
   dispatch,
@@ -517,9 +519,14 @@ export function useThreadMessaging({
       attachments: string[],
       replaceMessageId?: string,
       existingMessage?: OptimisticUserMessage,
+      turnId?: string,
     ): OptimisticUserMessage => {
-      const message =
+      const initialMessage =
         existingMessage ?? createOptimisticUserMessage(attachments, replaceMessageId);
+      const message =
+        turnId && initialMessage.turnId !== turnId
+          ? { ...initialMessage, turnId }
+          : initialMessage;
       upsertOptimisticUserMessage(
         workspace,
         threadId,
@@ -570,7 +577,9 @@ export function useThreadMessaging({
         finalText = promptExpansion?.expanded ?? messageText;
       }
       const isProcessing = threadStatusById[threadId]?.isProcessing ?? false;
-      const activeTurnId = activeTurnIdByThread[threadId] ?? null;
+      const activeTurnId = getLatestKnownActiveTurnId
+        ? getLatestKnownActiveTurnId(threadId)
+        : activeTurnIdByThread[threadId] ?? null;
       const {
         resolvedModel,
         resolvedEffort,
@@ -648,23 +657,15 @@ export function useThreadMessaging({
           return { status: "blocked" };
         }
       }
-      const optimisticMessage = existingOptimisticMessage ??
-        insertOptimisticUserMessage(
-          workspace,
-          threadId,
-          finalText,
-          images,
-          options?.replaceMessageId,
-        );
-      if (existingOptimisticMessage) {
-        upsertOptimisticUserMessage(
-          workspace,
-          threadId,
-          finalText,
-          optimisticMessage,
-          Boolean(options?.replaceMessageId),
-        );
-      }
+      const optimisticMessage = insertOptimisticUserMessage(
+        workspace,
+        threadId,
+        finalText,
+        images,
+        options?.replaceMessageId,
+        existingOptimisticMessage,
+        shouldSteer ? activeTurnId ?? undefined : undefined,
+      );
       const removeStartOptimisticMessage = () => {
         if (options?.replaceMessageId) {
           return;
@@ -1131,10 +1132,17 @@ export function useThreadMessaging({
         if (requestMode === "steer") {
           const result = (response?.result ?? response) as Record<string, unknown>;
           const steeredTurnId = asString(result?.turnId ?? result?.turn_id ?? "");
-          if (steeredTurnId) {
-            setActiveTurnId(threadId, steeredTurnId);
+          const confirmedTurnId = steeredTurnId || activeTurnId;
+          if (confirmedTurnId) {
+            dispatch({
+              type: "setItemTurnId",
+              threadId,
+              itemId: optimisticMessage.id,
+              turnId: confirmedTurnId,
+            });
+            setActiveTurnId(threadId, confirmedTurnId);
             computerControlDecisionByThreadRef.current.set(threadId, {
-              turnId: steeredTurnId,
+              turnId: confirmedTurnId,
               decisionId: computerControlDecisionId,
             });
           }
@@ -1212,6 +1220,7 @@ export function useThreadMessaging({
       ensureWorkspaceRuntimeCodexArgs,
       ensureThreadRuntimeForWorkspace,
       activeTurnIdByThread,
+      getLatestKnownActiveTurnId,
       getCustomName,
       insertOptimisticUserMessage,
       markProcessing,
@@ -1428,7 +1437,9 @@ export function useThreadMessaging({
     if (interruptInFlightRef.current.has(activeThreadId)) {
       return;
     }
-    const activeTurnId = activeTurnIdByThread[activeThreadId] ?? null;
+    const activeTurnId = getLatestKnownActiveTurnId
+      ? getLatestKnownActiveTurnId(activeThreadId)
+      : activeTurnIdByThread[activeThreadId] ?? null;
     const turnId = activeTurnId ?? "pending";
     const timestamp = Date.now();
     if (!activeTurnId) {
@@ -1501,6 +1512,7 @@ export function useThreadMessaging({
     activeThreadId,
     activeTurnIdByThread,
     activeWorkspace,
+    getLatestKnownActiveTurnId,
     dispatch,
     markProcessing,
     onDebug,

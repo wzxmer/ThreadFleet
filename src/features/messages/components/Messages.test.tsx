@@ -3629,6 +3629,75 @@ describe("Messages", () => {
     expect(container.querySelectorAll(".process-group-nested:not(.process-group-nested-collapsible)")).toHaveLength(0);
   });
 
+  it("recovers an unscoped legacy steer message into one process disclosure", async () => {
+    const items: ConversationItem[] = [
+      ...Array.from({ length: 3 }, (_, index) => ({
+        id: `steer-tool-before-${index + 1}`,
+        kind: "tool" as const,
+        toolType: "dynamicToolCall" as const,
+        title: "Tool: functions / exec",
+        detail: `before steer ${index + 1}`,
+        status: "completed",
+        output: "",
+        turnId: "turn-steer-tools",
+      })),
+      {
+        id: "steer-user-message",
+        kind: "message",
+        role: "user",
+        text: "请继续检查余额页面。",
+      },
+      {
+        id: "steer-commentary",
+        kind: "message",
+        role: "assistant",
+        phase: "commentary",
+        text: "继续检查。",
+        turnId: "turn-steer-tools",
+      },
+      ...Array.from({ length: 3 }, (_, index) => ({
+        id: `steer-tool-after-${index + 1}`,
+        kind: "tool" as const,
+        toolType: "dynamicToolCall" as const,
+        title: "Tool: functions / exec",
+        detail: `after steer ${index + 1}`,
+        status: "completed",
+        output: "",
+        turnId: "turn-steer-tools",
+      })),
+      {
+        id: "steer-final",
+        kind: "message",
+        role: "assistant",
+        phase: "final_answer",
+        text: "检查完成。",
+        turnId: "turn-steer-tools",
+      },
+    ];
+
+    const { container } = render(
+      <Messages
+        items={items}
+        threadId="thread-1"
+        workspaceId="ws-1"
+        isThinking={false}
+        openTargets={[]}
+        selectedOpenAppId=""
+      />,
+    );
+
+    expect(screen.getByText("请继续检查余额页面。")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "展开过程消息" }));
+    const nestedGroups = container.querySelectorAll(
+      ".process-group-nested-collapsible",
+    );
+    expect(nestedGroups).toHaveLength(1);
+    expect(nestedGroups[0]?.querySelector(".tool-group-summary")?.textContent).toBe(
+      "6 次工具调用",
+    );
+    expect(container.querySelectorAll(".tool-group-summary")).toHaveLength(1);
+  });
+
   it("renders turn line changes inline after process group summary text", async () => {
     const items: ConversationItem[] = [
       {

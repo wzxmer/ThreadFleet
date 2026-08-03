@@ -175,6 +175,34 @@ describe("useThreadItemEvents", () => {
     );
   });
 
+  it("uses the item event turn before the active turn fallback", () => {
+    const getActiveTurnId = vi.fn(() => "stale-turn");
+    const { result, dispatch } = makeOptions({ getActiveTurnId });
+    const item: ItemPayload = {
+      type: "commandExecution",
+      id: "command-1",
+      status: "completed",
+    };
+
+    act(() => {
+      result.current.onItemCompleted(
+        "ws-1",
+        "thread-1",
+        item,
+        "event-turn",
+      );
+    });
+
+    expect(getActiveTurnId).not.toHaveBeenCalled();
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "upsertItem",
+      workspaceId: "ws-1",
+      threadId: "thread-1",
+      item: { ...convertedItem, turnId: "event-turn" },
+      hasCustomName: false,
+    });
+  });
+
   it("adds lifecycle status for web search items", () => {
     const { result } = makeOptions();
     const item: ItemPayload = { type: "webSearch", id: "search-1", query: "codex monitor" };

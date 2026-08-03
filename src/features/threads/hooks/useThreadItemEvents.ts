@@ -69,6 +69,7 @@ export function useThreadItemEvents({
       threadId: string,
       item: Record<string, unknown>,
       shouldMarkProcessing: boolean,
+      eventTurnId?: string,
     ) => {
       dispatch({ type: "ensureThread", workspaceId, threadId });
       onThreadActivity?.(
@@ -115,13 +116,18 @@ export function useThreadItemEvents({
         onUserMessageCreated,
       });
       if (converted) {
+        const turnId =
+          eventTurnId?.trim() ||
+          String(item.turnId ?? item.turn_id ?? "").trim() ||
+          getActiveTurnId(threadId) ||
+          undefined;
         dispatch({
           type: "upsertItem",
           workspaceId,
           threadId,
           item: {
             ...converted,
-            turnId: getActiveTurnId(threadId) ?? undefined,
+            ...(turnId ? { turnId } : {}),
           },
           hasCustomName: Boolean(getCustomName(workspaceId, threadId)),
         });
@@ -262,15 +268,25 @@ export function useThreadItemEvents({
   );
 
   const onItemStarted = useCallback(
-    (workspaceId: string, threadId: string, item: Record<string, unknown>) => {
-      handleItemUpdate(workspaceId, threadId, item, true);
+    (
+      workspaceId: string,
+      threadId: string,
+      item: Record<string, unknown>,
+      eventTurnId?: string,
+    ) => {
+      handleItemUpdate(workspaceId, threadId, item, true, eventTurnId);
     },
     [handleItemUpdate],
   );
 
   const onItemCompleted = useCallback(
-    (workspaceId: string, threadId: string, item: Record<string, unknown>) => {
-      handleItemUpdate(workspaceId, threadId, item, false);
+    (
+      workspaceId: string,
+      threadId: string,
+      item: Record<string, unknown>,
+      eventTurnId?: string,
+    ) => {
+      handleItemUpdate(workspaceId, threadId, item, false, eventTurnId);
     },
     [handleItemUpdate],
   );

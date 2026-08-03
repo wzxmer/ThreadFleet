@@ -84,8 +84,18 @@ type AppServerEventHandlers = {
   ) => void;
   onHookStarted?: (event: HookEvent) => void;
   onHookCompleted?: (event: HookEvent) => void;
-  onItemStarted?: (workspaceId: string, threadId: string, item: Record<string, unknown>) => void;
-  onItemCompleted?: (workspaceId: string, threadId: string, item: Record<string, unknown>) => void;
+  onItemStarted?: (
+    workspaceId: string,
+    threadId: string,
+    item: Record<string, unknown>,
+    turnId?: string,
+  ) => void;
+  onItemCompleted?: (
+    workspaceId: string,
+    threadId: string,
+    item: Record<string, unknown>,
+    turnId?: string,
+  ) => void;
   onReasoningSummaryDelta?: (workspaceId: string, threadId: string, itemId: string, delta: string) => void;
   onReasoningSummaryBoundary?: (workspaceId: string, threadId: string, itemId: string) => void;
   onReasoningTextDelta?: (workspaceId: string, threadId: string, itemId: string, delta: string) => void;
@@ -498,14 +508,19 @@ export function useAppServerEvents(handlers: AppServerEventHandlers) {
       if (method === "item/completed") {
         const threadId = String(params.threadId ?? params.thread_id ?? "");
         const item = params.item as Record<string, unknown> | undefined;
+        const itemTurnId = String(
+          params.turnId ?? params.turn_id ?? item?.turnId ?? item?.turn_id ?? "",
+        ).trim();
         if (threadId && item) {
-          currentHandlers.onItemCompleted?.(workspace_id, threadId, item);
+          currentHandlers.onItemCompleted?.(
+            workspace_id,
+            threadId,
+            item,
+            itemTurnId || undefined,
+          );
         }
         if (threadId && item?.type === "agentMessage") {
           const itemId = String(item.id ?? "");
-          const turnId = String(
-            params.turnId ?? params.turn_id ?? item.turnId ?? item.turn_id ?? "",
-          );
           const phaseRaw = item.phase ?? params.phase;
           const phase = typeof phaseRaw === "string" ? phaseRaw : null;
           const text = String(item.text ?? "");
@@ -514,7 +529,7 @@ export function useAppServerEvents(handlers: AppServerEventHandlers) {
               workspaceId: workspace_id,
               threadId,
               itemId,
-              turnId,
+              turnId: itemTurnId,
               phase,
               text,
             });
@@ -526,8 +541,16 @@ export function useAppServerEvents(handlers: AppServerEventHandlers) {
       if (method === "item/started") {
         const threadId = String(params.threadId ?? params.thread_id ?? "");
         const item = params.item as Record<string, unknown> | undefined;
+        const itemTurnId = String(
+          params.turnId ?? params.turn_id ?? item?.turnId ?? item?.turn_id ?? "",
+        ).trim();
         if (threadId && item) {
-          currentHandlers.onItemStarted?.(workspace_id, threadId, item);
+          currentHandlers.onItemStarted?.(
+            workspace_id,
+            threadId,
+            item,
+            itemTurnId || undefined,
+          );
         }
         return;
       }

@@ -876,6 +876,7 @@ describe("useThreadMessaging telemetry", () => {
   });
 
   it("reuses the computer-control decision id when steering the same active turn", async () => {
+    const dispatch = vi.fn();
     const useMessaging = (active: boolean) =>
       useThreadMessaging({
         activeWorkspace: workspace,
@@ -902,7 +903,7 @@ describe("useThreadMessaging telemetry", () => {
         activeTurnIdByThread: active ? { "thread-1": "turn-1" } : {},
         rateLimitsByWorkspace: {},
         pendingInterruptsRef: { current: new Set<string>() },
-        dispatch: vi.fn(),
+        dispatch,
         getCustomName: vi.fn(() => undefined),
         markProcessing: vi.fn(),
         markReviewing: vi.fn(),
@@ -935,6 +936,22 @@ describe("useThreadMessaging telemetry", () => {
     expect(decisionIds).toHaveLength(2);
     expect(decisionIds[1]).toBe(decisionIds[0]);
     expect(steerTurnService).toHaveBeenCalledTimes(1);
+    expect(dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "upsertItem",
+        item: expect.objectContaining({
+          role: "user",
+          text: "follow up",
+          turnId: "turn-1",
+        }),
+      }),
+    );
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "setItemTurnId",
+      threadId: "thread-1",
+      itemId: expect.any(String),
+      turnId: "turn-1",
+    });
   });
 
   it("exposes a pending turn start immediately while runtime preparation is unresolved", async () => {

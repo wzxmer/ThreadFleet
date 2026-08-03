@@ -213,6 +213,7 @@ export function useThreadEventHandlers({
     onThreadTokenUsageUpdated,
     onAccountRateLimitsUpdated,
     onTurnError,
+    getLatestKnownActiveTurnId,
   } = useThreadTurnEvents({
     dispatch,
     planByThreadRef,
@@ -305,6 +306,7 @@ export function useThreadEventHandlers({
       onThreadTokenUsageUpdated,
       onAccountRateLimitsUpdated,
       onTurnError,
+      getLatestKnownActiveTurnId,
     }),
     [
       onWorkspaceConnected,
@@ -338,6 +340,7 @@ export function useThreadEventHandlers({
       onThreadTokenUsageUpdated,
       onAccountRateLimitsUpdated,
       onTurnError,
+      getLatestKnownActiveTurnId,
     ],
   );
 

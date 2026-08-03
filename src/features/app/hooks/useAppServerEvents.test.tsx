@@ -366,7 +366,7 @@ describe("useAppServerEvents", () => {
       id: "item-2",
       phase: "final_answer",
       text: "Done",
-    });
+    }, "turn-1");
     expect(handlers.onAgentMessageCompleted).toHaveBeenCalledWith({
       workspaceId: "ws-1",
       threadId: "thread-1",
