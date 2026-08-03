@@ -509,6 +509,20 @@ export function SettingsProvidersSection({
     setSessionLoginCredentialId(credentialId);
     setSessionLoginError(null);
     try {
+      const cachedSessionCookie = credential.newApiSessionCookie?.trim();
+      if (cachedSessionCookie) {
+        const cachedUsage = await getThirdPartyKeyUsage(
+          resolvedBaseUrl,
+          credential.key,
+          draft.usageProtocol ?? "auto",
+          credential.newApiAccessToken,
+          cachedSessionCookie,
+        );
+        if (cachedUsage?.balanceScope === "account" && cachedUsage.balanceUsd !== null) {
+          setUsageProbeStates((current) => ({ ...current, [credentialId]: "available" }));
+          return;
+        }
+      }
       const sessionCookie = await providerSessionLogin(
         resolvedBaseUrl,
         draft.usageProtocol ?? "auto",

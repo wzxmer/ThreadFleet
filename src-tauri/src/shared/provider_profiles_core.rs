@@ -1,5 +1,5 @@
 use futures_util::{future, StreamExt};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -698,6 +698,115 @@ fn normalized_usage_snapshot(
     })
 }
 
+fn merge_provider_usage_snapshots(primary: &Value, fallback: &Value) -> Value {
+    let Some(primary_object) = primary.as_object() else {
+        return fallback.clone();
+    };
+    let Some(fallback_object) = fallback.as_object() else {
+        return primary.clone();
+    };
+
+    let first_value = |key: &str| {
+        primary_object
+            .get(key)
+            .filter(|value| !value.is_null())
+            .cloned()
+            .or_else(|| {
+                fallback_object
+                    .get(key)
+                    .filter(|value| !value.is_null())
+                    .cloned()
+            })
+    };
+    let primary_balance = primary_object
+        .get("balanceUsd")
+        .filter(|value| !value.is_null());
+    let fallback_balance = fallback_object
+        .get("balanceUsd")
+        .filter(|value| !value.is_null());
+    let primary_scope = primary_object
+        .get("balanceScope")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            (primary_object.get("source").and_then(Value::as_str) == Some("page"))
+                .then_some("account")
+        });
+    let fallback_scope = fallback_object
+        .get("balanceScope")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            (fallback_object.get("source").and_then(Value::as_str) == Some("page"))
+                .then_some("account")
+        });
+    let primary_has_account_balance = primary_balance.is_some() && primary_scope != Some("token");
+    let fallback_has_account_balance =
+        fallback_balance.is_some() && fallback_scope != Some("token");
+    let scope_value = |scope: Option<&str>| scope.map(|scope| Value::String(scope.to_string()));
+    let (balance, balance_scope) = if primary_has_account_balance {
+        (primary_balance.cloned(), scope_value(primary_scope))
+    } else if fallback_has_account_balance {
+        (fallback_balance.cloned(), scope_value(fallback_scope))
+    } else if primary_balance.is_some() {
+        (primary_balance.cloned(), scope_value(primary_scope))
+    } else if fallback_balance.is_some() {
+        (fallback_balance.cloned(), scope_value(fallback_scope))
+    } else {
+        (None, scope_value(primary_scope.or(fallback_scope)))
+    };
+    let is_unlimited = if balance.is_some() {
+        false
+    } else {
+        primary_object
+            .get("isUnlimited")
+            .and_then(Value::as_bool)
+            .or_else(|| fallback_object.get("isUnlimited").and_then(Value::as_bool))
+            .unwrap_or(false)
+    };
+    let is_partial = match (
+        primary_object.get("isPartial").and_then(Value::as_bool),
+        fallback_object.get("isPartial").and_then(Value::as_bool),
+    ) {
+        (Some(primary), Some(fallback)) => primary && fallback,
+        (Some(value), None) | (None, Some(value)) => value,
+        (None, None) => false,
+    };
+    let today_cost = first_value("todayCostUsd");
+    let total_cost = first_value("totalCostUsd");
+    let spend_period = if today_cost.is_some() {
+        Value::String("today".to_string())
+    } else if total_cost.is_some() {
+        Value::String("total".to_string())
+    } else {
+        first_value("spendPeriod").unwrap_or(Value::Null)
+    };
+
+    let mut merged = Map::new();
+    merged.insert(
+        "source".to_string(),
+        first_value("source").unwrap_or(Value::Null),
+    );
+    merged.insert("balanceUsd".to_string(), balance.unwrap_or(Value::Null));
+    if let Some(balance_scope) = balance_scope {
+        merged.insert("balanceScope".to_string(), balance_scope);
+    }
+    merged.insert(
+        "todayCostUsd".to_string(),
+        today_cost.unwrap_or(Value::Null),
+    );
+    merged.insert(
+        "totalCostUsd".to_string(),
+        total_cost.unwrap_or(Value::Null),
+    );
+    merged.insert("spendPeriod".to_string(), spend_period);
+    merged.insert(
+        "averageLatencyMs".to_string(),
+        first_value("averageLatencyMs").unwrap_or(Value::Null),
+    );
+    merged.insert("isUnlimited".to_string(), Value::Bool(is_unlimited));
+    merged.insert("isPartial".to_string(), Value::Bool(is_partial));
+    Value::Object(merged)
+}
+
 fn normalize_sub2_usage_payload(payload: &Value) -> Value {
     let data = payload.get("data").unwrap_or(payload);
     let field = |name: &str| payload.get(name).or_else(|| data.get(name));
@@ -930,19 +1039,58 @@ async fn fetch_new_api_usage_once(
     let logs_url = build_new_api_url(base_url, "log/token")?;
     let account_url = build_new_api_url(base_url, "user/self")?;
     let account_payload = async {
-        if let Some(access_token) = new_api_access_token
+        let key_account_payload =
+            if let Some(api_key) = api_key.map(str::trim).filter(|value| !value.is_empty()) {
+                get_provider_usage_json(client, account_url.clone(), Some(api_key), None)
+                    .await
+                    .ok()
+            } else {
+                None
+            };
+        let has_account_balance = |payload: &Value| {
+            payload
+                .get("data")
+                .and_then(|data| parse_usage_number(data.get("quota")))
+                .is_some()
+        };
+        if key_account_payload
+            .as_ref()
+            .is_some_and(has_account_balance)
+        {
+            return key_account_payload;
+        }
+
+        let access_token_payload = if let Some(access_token) = new_api_access_token
             .map(str::trim)
             .filter(|value| !value.is_empty())
         {
-            if let Ok(payload) =
-                get_provider_usage_json(client, account_url.clone(), Some(access_token), None).await
-            {
-                return Some(payload);
-            }
+            get_provider_usage_json(client, account_url.clone(), Some(access_token), None)
+                .await
+                .ok()
+        } else {
+            None
+        };
+        if access_token_payload
+            .as_ref()
+            .is_some_and(has_account_balance)
+        {
+            return access_token_payload;
         }
-        get_provider_usage_json(client, account_url, api_key, session_cookie)
-            .await
-            .ok()
+
+        let cookie_payload = if let Some(session_cookie) = session_cookie
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            get_provider_usage_json(client, account_url, None, Some(session_cookie))
+                .await
+                .ok()
+        } else {
+            None
+        };
+        cookie_payload
+            .filter(|payload| has_account_balance(payload))
+            .or(access_token_payload)
+            .or(key_account_payload)
     };
     let (usage_result, logs_result, account_payload) = future::join3(
         get_provider_usage_json(client, usage_url, api_key, session_cookie),
@@ -979,6 +1127,13 @@ async fn fetch_new_api_usage(
             .ok_or_else(|| "Failed to read New API quota unit".to_string())?
     };
     let mut last_error = None;
+    let mut merged_result = None;
+    let has_account_balance = |payload: &Value| {
+        payload.get("balanceScope").and_then(Value::as_str) == Some("account")
+            && payload
+                .get("balanceUsd")
+                .is_some_and(|value| !value.is_null())
+    };
     let mut attempts = Vec::new();
     if !api_key.trim().is_empty() {
         attempts.push((Some(api_key), None));
@@ -1001,13 +1156,23 @@ async fn fetch_new_api_usage(
         )
         .await
         {
-            Ok(result) => return Ok(result),
+            Ok(result) => {
+                merged_result = Some(match merged_result {
+                    Some(current) => merge_provider_usage_snapshots(&current, &result),
+                    None => result,
+                });
+                if merged_result.as_ref().is_some_and(has_account_balance) {
+                    break;
+                }
+            }
             Err(error) => last_error = Some(error),
         }
     }
-    Err(last_error.unwrap_or_else(|| {
-        "Third-party provider API key or session cookie is required".to_string()
-    }))
+    merged_result.ok_or_else(|| {
+        last_error.unwrap_or_else(|| {
+            "Third-party provider API key or session cookie is required".to_string()
+        })
+    })
 }
 
 pub(crate) async fn third_party_key_usage_core(
@@ -1039,16 +1204,14 @@ pub(crate) async fn third_party_key_usage_core(
         );
     }
 
-    if let Some(snapshot) = cached_provider_session_usage(base_url, new_api_session_cookie).await {
-        return Ok(snapshot);
-    }
+    let cached_snapshot = cached_provider_session_usage(base_url, new_api_session_cookie).await;
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|_| "Failed to initialize third-party key usage client".to_string())?;
-    match protocol {
+    let result = match protocol {
         ProviderUsageProtocol::Sub2 => {
             fetch_sub2_usage(
                 &client,
@@ -1074,13 +1237,13 @@ pub(crate) async fn third_party_key_usage_core(
         ProviderUsageProtocol::Disabled => Ok(Value::Null),
         ProviderUsageProtocol::Auto => {
             let cache_key = provider_usage_cache_key(base_url)?;
-            if let Some(detection) = provider_usage_detections()
+            let detection = provider_usage_detections()
                 .lock()
                 .await
                 .get(&cache_key)
-                .copied()
-            {
-                return match detection.protocol {
+                .copied();
+            if let Some(detection) = detection {
+                match detection.protocol {
                     ProviderUsageProtocol::NewApi => {
                         fetch_new_api_usage(
                             &client,
@@ -1104,57 +1267,73 @@ pub(crate) async fn third_party_key_usage_core(
                         .await
                     }
                     _ => unreachable!(),
-                };
-            }
-
-            let status_payload = get_provider_usage_json(
-                &client,
-                build_new_api_url(base_url, "status")?,
-                None,
-                None,
-            )
-            .await
-            .ok();
-            if let Some(quota_per_unit) = status_payload.as_ref().and_then(new_api_quota_per_unit) {
-                let result = fetch_new_api_usage(
-                    &client,
-                    base_url,
-                    api_key,
-                    new_api_access_token,
-                    new_api_session_cookie,
-                    day_start_unix,
-                    Some(quota_per_unit),
-                )
-                .await;
-                if result.is_ok() {
-                    provider_usage_detections().lock().await.insert(
-                        cache_key,
-                        ProviderUsageDetection {
-                            protocol: ProviderUsageProtocol::NewApi,
-                        },
-                    );
                 }
-                return result;
+            } else {
+                let status_payload = get_provider_usage_json(
+                    &client,
+                    build_new_api_url(base_url, "status")?,
+                    None,
+                    None,
+                )
+                .await
+                .ok();
+                if let Some(quota_per_unit) =
+                    status_payload.as_ref().and_then(new_api_quota_per_unit)
+                {
+                    let result = fetch_new_api_usage(
+                        &client,
+                        base_url,
+                        api_key,
+                        new_api_access_token,
+                        new_api_session_cookie,
+                        day_start_unix,
+                        Some(quota_per_unit),
+                    )
+                    .await;
+                    if result.is_ok() {
+                        provider_usage_detections().lock().await.insert(
+                            cache_key,
+                            ProviderUsageDetection {
+                                protocol: ProviderUsageProtocol::NewApi,
+                            },
+                        );
+                    }
+                    result
+                } else {
+                    let result = fetch_sub2_usage(
+                        &client,
+                        base_url,
+                        api_key,
+                        new_api_session_cookie,
+                        timezone.as_deref(),
+                    )
+                    .await;
+                    if result.is_ok() {
+                        provider_usage_detections().lock().await.insert(
+                            cache_key,
+                            ProviderUsageDetection {
+                                protocol: ProviderUsageProtocol::Sub2,
+                            },
+                        );
+                    }
+                    result
+                }
             }
-
-            let result = fetch_sub2_usage(
-                &client,
-                base_url,
-                api_key,
-                new_api_session_cookie,
-                timezone.as_deref(),
-            )
-            .await;
-            if result.is_ok() {
-                provider_usage_detections().lock().await.insert(
-                    cache_key,
-                    ProviderUsageDetection {
-                        protocol: ProviderUsageProtocol::Sub2,
-                    },
-                );
-            }
-            result
         }
+    };
+
+    match result {
+        Ok(snapshot) => {
+            let merged = cached_snapshot
+                .as_ref()
+                .map(|cached| merge_provider_usage_snapshots(&snapshot, cached))
+                .unwrap_or(snapshot);
+            if let Some(session_cookie) = new_api_session_cookie {
+                cache_provider_session_usage(base_url, session_cookie, merged.clone()).await;
+            }
+            Ok(merged)
+        }
+        Err(error) => cached_snapshot.ok_or(error),
     }
 }
 
@@ -1440,10 +1619,10 @@ mod tests {
     use super::{
         active_codex_key_runtime, build_new_api_url, build_provider_models_url,
         build_provider_usage_url, cache_provider_session_usage, cached_provider_session_usage,
-        merge_profile_codex_args, merge_provider_model_payloads, migrate_provider_settings,
-        normalize_new_api_usage_payload, normalize_provider_api_base_url,
-        normalize_sub2_usage_payload, profile_for_selection, profile_uses_gateway,
-        summarize_new_api_logs,
+        merge_profile_codex_args, merge_provider_model_payloads, merge_provider_usage_snapshots,
+        migrate_provider_settings, normalize_new_api_usage_payload,
+        normalize_provider_api_base_url, normalize_sub2_usage_payload, profile_for_selection,
+        profile_uses_gateway, summarize_new_api_logs,
     };
     use crate::codex::args::parse_codex_args;
     use crate::types::{AppSettings, CodexKeyProfile, CredentialSelection};
@@ -1638,6 +1817,69 @@ mod tests {
             .await
             .is_none());
         });
+    }
+
+    #[test]
+    fn provider_usage_merges_live_spend_with_cached_page_balance() {
+        let cached_page = serde_json::json!({
+            "source": "page",
+            "balanceUsd": 1.29,
+            "todayCostUsd": null,
+            "totalCostUsd": 9.8,
+            "spendPeriod": "total",
+            "isUnlimited": false,
+            "isPartial": true,
+        });
+        let live_api = serde_json::json!({
+            "source": "new-api",
+            "balanceUsd": null,
+            "balanceScope": "token",
+            "todayCostUsd": 0.5327,
+            "totalCostUsd": null,
+            "spendPeriod": "today",
+            "isUnlimited": true,
+            "isPartial": false,
+        });
+
+        let merged = merge_provider_usage_snapshots(&live_api, &cached_page);
+
+        assert_eq!(merged["balanceUsd"], serde_json::json!(1.29));
+        assert_eq!(merged["todayCostUsd"], serde_json::json!(0.5327));
+        assert_eq!(merged["totalCostUsd"], serde_json::json!(9.8));
+        assert_eq!(merged["spendPeriod"], serde_json::json!("today"));
+        assert_eq!(merged["balanceScope"], serde_json::json!("account"));
+        assert_eq!(merged["isUnlimited"], serde_json::json!(false));
+        assert_eq!(merged["isPartial"], serde_json::json!(false));
+
+        let live_key_balance = serde_json::json!({
+            "source": "new-api",
+            "balanceUsd": 3.5,
+            "balanceScope": "account",
+            "todayCostUsd": 0.7,
+            "totalCostUsd": null,
+            "isUnlimited": false,
+            "isPartial": false,
+        });
+        let key_preferred = merge_provider_usage_snapshots(&live_key_balance, &cached_page);
+        assert_eq!(key_preferred["balanceUsd"], serde_json::json!(3.5));
+        assert_eq!(key_preferred["balanceScope"], serde_json::json!("account"));
+
+        let live_token_balance = serde_json::json!({
+            "source": "new-api",
+            "balanceUsd": 2.0,
+            "balanceScope": "token",
+            "todayCostUsd": 0.7,
+            "totalCostUsd": null,
+            "isUnlimited": false,
+            "isPartial": false,
+        });
+        let account_fallback = merge_provider_usage_snapshots(&live_token_balance, &cached_page);
+        assert_eq!(account_fallback["balanceUsd"], serde_json::json!(1.29));
+        assert_eq!(
+            account_fallback["balanceScope"],
+            serde_json::json!("account")
+        );
+        assert_eq!(account_fallback["todayCostUsd"], serde_json::json!(0.7));
     }
 
     #[test]

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildThirdPartyUsageUrl,
+  mergeThirdPartyUsageSnapshots,
   normalizeThirdPartyUsagePayload,
 } from "./thirdPartyKeyUsage";
 
@@ -149,6 +150,81 @@ describe("thirdPartyKeyUsage", () => {
       totalCostUsd: 9.8,
       spendPeriod: "total",
       averageLatencyMs: null,
+      isUnlimited: false,
+      isPartial: false,
+    });
+  });
+
+  it("keeps cached Cookie balance when a refreshed Key snapshot only has spend", () => {
+    expect(
+      mergeThirdPartyUsageSnapshots(
+        {
+          source: "new-api",
+          balanceUsd: null,
+          todayCostUsd: 0.5327,
+          totalCostUsd: null,
+          spendPeriod: "today",
+          averageLatencyMs: 9440,
+          isUnlimited: true,
+          isPartial: false,
+        },
+        {
+          source: "page",
+          balanceUsd: 1.29,
+          todayCostUsd: null,
+          totalCostUsd: 9.8,
+          spendPeriod: "total",
+          averageLatencyMs: null,
+          isUnlimited: false,
+          isPartial: true,
+        },
+      ),
+    ).toEqual({
+      source: "new-api",
+      balanceUsd: 1.29,
+      balanceScope: "account",
+      todayCostUsd: 0.5327,
+      totalCostUsd: 9.8,
+      spendPeriod: "today",
+      averageLatencyMs: 9440,
+      isUnlimited: false,
+      isPartial: false,
+    });
+  });
+
+  it("uses an account Cookie balance when Key only exposes token quota", () => {
+    expect(
+      mergeThirdPartyUsageSnapshots(
+        {
+          source: "new-api",
+          balanceUsd: 2,
+          balanceScope: "token",
+          todayCostUsd: 0.7,
+          totalCostUsd: null,
+          spendPeriod: "today",
+          averageLatencyMs: 900,
+          isUnlimited: false,
+          isPartial: false,
+        },
+        {
+          source: "page",
+          balanceUsd: 1.29,
+          todayCostUsd: null,
+          totalCostUsd: 9.8,
+          spendPeriod: "total",
+          averageLatencyMs: null,
+          isUnlimited: false,
+          isPartial: true,
+        },
+      ),
+    ).toEqual({
+      source: "new-api",
+      balanceUsd: 1.29,
+      balanceScope: "account",
+      todayCostUsd: 0.7,
+      totalCostUsd: 9.8,
+      spendPeriod: "today",
+      averageLatencyMs: 900,
       isUnlimited: false,
       isPartial: false,
     });

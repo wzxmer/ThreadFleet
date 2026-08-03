@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { getWorkspaceThirdPartyKeyUsage } from "@/services/tauri";
-import type { ThirdPartyKeyUsageSnapshot } from "../utils/thirdPartyKeyUsage";
+import {
+  mergeThirdPartyUsageSnapshots,
+  type ThirdPartyKeyUsageSnapshot,
+} from "../utils/thirdPartyKeyUsage";
 
 const THIRD_PARTY_KEY_USAGE_REFRESH_MS = 60_000;
 
@@ -50,8 +53,12 @@ export function useThirdPartyKeyUsage({
       getWorkspaceThirdPartyKeyUsage(trimmedWorkspaceId)
         .then((nextSnapshot) => {
           if (!canceled) {
-            snapshotCacheRef.current.set(requestKey, nextSnapshot);
-            setState({ requestKey, snapshot: nextSnapshot });
+            const mergedSnapshot = mergeThirdPartyUsageSnapshots(
+              nextSnapshot,
+              snapshotCacheRef.current.get(requestKey) ?? null,
+            );
+            snapshotCacheRef.current.set(requestKey, mergedSnapshot);
+            setState({ requestKey, snapshot: mergedSnapshot });
           }
         })
         .catch(() => {

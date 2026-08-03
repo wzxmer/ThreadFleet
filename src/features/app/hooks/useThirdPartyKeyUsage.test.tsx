@@ -81,6 +81,51 @@ describe("useThirdPartyKeyUsage", () => {
     expect(getWorkspaceThirdPartyKeyUsageMock).toHaveBeenCalledTimes(2);
   });
 
+  it("retains a Cookie balance when refresh returns Key spend only", async () => {
+    getWorkspaceThirdPartyKeyUsageMock
+      .mockResolvedValueOnce({
+        source: "page",
+        balanceUsd: 1.29,
+        todayCostUsd: null,
+        totalCostUsd: 9.8,
+        spendPeriod: "total",
+        averageLatencyMs: null,
+        isUnlimited: false,
+        isPartial: true,
+      })
+      .mockResolvedValueOnce({
+        source: "new-api",
+        balanceUsd: null,
+        todayCostUsd: 0.5327,
+        totalCostUsd: null,
+        spendPeriod: "today",
+        averageLatencyMs: 9440,
+        isUnlimited: true,
+        isPartial: false,
+      });
+
+    const { result } = renderHook(() =>
+      useThirdPartyKeyUsage({ enabled: true, workspaceId: "ws-usage" }),
+    );
+
+    await flushPromises();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+
+    expect(result.current).toEqual({
+      source: "new-api",
+      balanceUsd: 1.29,
+      balanceScope: "account",
+      todayCostUsd: 0.5327,
+      totalCostUsd: 9.8,
+      spendPeriod: "today",
+      averageLatencyMs: 9440,
+      isUnlimited: false,
+      isPartial: false,
+    });
+  });
+
   it("ignores a stale response after the active profile changes", async () => {
     let resolveOldRequest: ((value: unknown) => void) | undefined;
     getWorkspaceThirdPartyKeyUsageMock

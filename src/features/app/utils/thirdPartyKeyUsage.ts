@@ -10,6 +10,44 @@ export type ThirdPartyKeyUsageSnapshot = {
   source: "sub2" | "new-api" | "page" | null;
 };
 
+export function mergeThirdPartyUsageSnapshots(
+  primary: ThirdPartyKeyUsageSnapshot | null,
+  fallback: ThirdPartyKeyUsageSnapshot | null,
+): ThirdPartyKeyUsageSnapshot | null {
+  if (!primary) return fallback;
+  if (!fallback) return primary;
+
+  const primaryBalanceScope =
+    primary.balanceScope ?? (primary.source === "page" ? "account" : undefined);
+  const fallbackBalanceScope =
+    fallback.balanceScope ?? (fallback.source === "page" ? "account" : undefined);
+  const primaryHasAccountBalance =
+    primary.balanceUsd !== null && primaryBalanceScope !== "token";
+  const fallbackHasAccountBalance =
+    fallback.balanceUsd !== null && fallbackBalanceScope !== "token";
+  const usePrimaryBalance =
+    primaryHasAccountBalance ||
+    (!fallbackHasAccountBalance && primary.balanceUsd !== null);
+  const balanceUsd = usePrimaryBalance ? primary.balanceUsd : fallback.balanceUsd;
+  const balanceScope = usePrimaryBalance
+    ? primaryBalanceScope
+    : fallbackBalanceScope ?? primaryBalanceScope;
+  const todayCostUsd = primary.todayCostUsd ?? fallback.todayCostUsd;
+  const totalCostUsd = primary.totalCostUsd ?? fallback.totalCostUsd;
+
+  return {
+    balanceUsd,
+    ...(balanceScope ? { balanceScope } : {}),
+    todayCostUsd,
+    totalCostUsd,
+    spendPeriod: todayCostUsd !== null ? "today" : totalCostUsd !== null ? "total" : null,
+    averageLatencyMs: primary.averageLatencyMs ?? fallback.averageLatencyMs,
+    isUnlimited: balanceUsd === null && primary.isUnlimited,
+    isPartial: primary.isPartial && fallback.isPartial,
+    source: primary.source ?? fallback.source,
+  };
+}
+
 type ThirdPartyUsageTodayPayload = {
   actual_cost?: unknown;
 };
