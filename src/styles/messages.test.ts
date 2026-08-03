@@ -126,6 +126,20 @@ describe("message tool group interaction styles", () => {
     expect(headingRule?.[1]).toContain("color: inherit");
   });
 
+  it("gives multi-result switching a wide capsule hit area", () => {
+    expect(messagesCss).toMatch(
+      /\.subagent-result-select-wrap\s*\{[^}]*width:\s*min\(100%,\s*320px\);[^}]*min-width:\s*min\(260px,\s*100%\);/s,
+    );
+    const selectRule = messagesCss.match(
+      /\.subagent-result-select\s*\{([\s\S]*?)\n\}/,
+    );
+    expect(selectRule?.[1]).toContain("box-sizing: border-box");
+    expect(selectRule?.[1]).toContain("width: 100%");
+    expect(selectRule?.[1]).toContain("border-radius: 999px");
+    expect(selectRule?.[1]).toContain("padding: 4px 30px 4px 11px");
+    expect(messagesCss).toContain(".subagent-result-select-wrap::after");
+  });
+
   it("keeps checkpoint text paired with the runtime conversation canvas", () => {
     const checkpointRule = messagesCss.match(
       /\.subagent-checkpoint-inline\s*\{([\s\S]*?)\n\}/,
@@ -212,13 +226,13 @@ describe("message tool group interaction styles", () => {
 
   it("gives native conversations a readable assistant stream and timed user cards", () => {
     expect(messagesCss).toMatch(
-      /\.messages-view\s*\{[^}]*--conversation-user-text:\s*#dfe5ea;[^}]*--conversation-assistant-text:\s*#dfe5ea;/s,
+      /\.messages-view\s*\{[^}]*--conversation-user-text:\s*var\(--cm-text-primary\);[^}]*--conversation-assistant-text:\s*var\(--cm-text-primary\);/s,
     );
     expect(messagesCss).toMatch(
-      /\.app:is\(\.layout-desktop, \.layout-compact\):not\(\.layout-phone\) \.messages-view\s*\{[^}]*--conversation-user-text:\s*#dfe5ea;[^}]*--conversation-assistant-text:\s*#dfe5ea;/s,
+      /\.app:is\(\.layout-desktop, \.layout-compact\):not\(\.layout-phone\) \.messages-view\s*\{[^}]*--conversation-user-text:\s*var\(--cm-text-primary\);[^}]*--conversation-assistant-text:\s*var\(--cm-text-primary\);/s,
     );
     expect(messagesCss).toMatch(
-      /:root:not\(\[data-theme\]\) \.messages-view,\s*:root\[data-theme="light"\] \.messages-view\s*\{[^}]*--conversation-user-text:\s*#37414b;[^}]*--conversation-assistant-text:\s*#37414b;/s,
+      /:root:not\(\[data-theme\]\) \.messages-view,\s*:root\[data-theme="light"\] \.messages-view\s*\{[^}]*--conversation-user-text:\s*var\(--cm-text-primary\);[^}]*--conversation-assistant-text:\s*var\(--cm-text-primary\);/s,
     );
     expect(messagesCss).toMatch(
       /\.messages-reading-native \.messages-inner\s*\{[^}]*max-width:\s*min\(100%, var\(--conversation-reading-width, 860px\)\);[^}]*gap:\s*22px;/s,

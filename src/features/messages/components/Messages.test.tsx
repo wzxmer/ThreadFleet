@@ -161,6 +161,33 @@ describe("Messages", () => {
     expect(container.querySelector(".working-text")).toBeNull();
   });
 
+  it("accepts a user identity rule without a markdown heading", () => {
+    const { container } = render(
+      <Messages
+        items={[
+          {
+            id: "assistant-identity-rule",
+            kind: "message",
+            role: "assistant",
+            text: "Done",
+          },
+        ]}
+        threadId="thread-1"
+        workspaceId="ws-1"
+        isThinking={false}
+        assistantInstructionContent={
+          "You are a careful assistant.\nIdentity: 浮生助手"
+        }
+        openTargets={[]}
+        selectedOpenAppId=""
+      />,
+    );
+
+    expect(container.querySelector(".message-agent-name")?.textContent).toBe(
+      "浮生助手",
+    );
+  });
+
   it("normalizes the turn model to a provider name instead of showing its slug", () => {
     const summary: TurnExecutionSummary = {
       schemaVersion: 1,
@@ -211,6 +238,59 @@ describe("Messages", () => {
         ?.getAttribute("data-state"),
     ).toBe("completed");
     expect(container.textContent).not.toContain("gpt-5-codex");
+  });
+
+  it("ignores the model display name and uses the model family", () => {
+    const summary: TurnExecutionSummary = {
+      schemaVersion: 1,
+      executionId: "exec-configured-model",
+      workspaceId: "ws-1",
+      threadId: "thread-1",
+      turnId: "turn-configured-model",
+      turnChain: ["turn-configured-model"],
+      modelId: "gpt-global-model",
+      status: "completed",
+      startedAtMs: 1,
+      endedAtMs: 2,
+      workingDurationMs: 1,
+      addedLines: null,
+      deletedLines: null,
+      diffRevision: 0,
+      recordRevision: 1,
+      updatedAtMs: 2,
+    };
+
+    const { container } = render(
+      <Messages
+        items={[
+          {
+            id: "assistant-configured-model",
+            kind: "message",
+            role: "assistant",
+            text: "Done",
+            turnId: "turn-configured-model",
+          },
+        ]}
+        threadId="thread-1"
+        workspaceId="ws-1"
+        isThinking={false}
+        messageReadingStyle="native"
+        assistantModelOptions={[
+          {
+            id: "gpt-global-model",
+            model: "gpt-global-model",
+            displayName: "Claude Override",
+          },
+        ]}
+        turnExecutionSummaries={[summary]}
+        openTargets={[]}
+        selectedOpenAppId=""
+      />,
+    );
+
+    expect(container.querySelector(".message-agent-name")?.textContent).toBe(
+      "GPT",
+    );
   });
 
   it("shows turn activity and code changes on the final assistant message", () => {
@@ -703,6 +783,52 @@ describe("Messages", () => {
     expect(onOpenThreadLink).toHaveBeenCalledWith("child-thread", "ws-1");
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByRole("dialog", { name: "检查许可证" })).toBeNull();
+  });
+
+  it("uses a wide capsule selector when multiple child results are available", () => {
+    const subagentResults: SubagentResultSummary[] = [
+      {
+        threadId: "child-thread-1",
+        title: "检查许可证",
+        status: "completed",
+        summary: "许可证检查完成。",
+        content: "许可证检查完成。",
+        checkpointCount: 1,
+        updatedAt: 1,
+      },
+      {
+        threadId: "child-thread-2",
+        title: "检查配置",
+        status: "running",
+        summary: "正在检查配置。",
+        content: "正在检查配置。",
+        checkpointCount: 1,
+        updatedAt: 2,
+      },
+    ];
+
+    render(
+      <Messages
+        items={[]}
+        threadId="thread-parent"
+        workspaceId="ws-1"
+        isThinking={false}
+        openTargets={[]}
+        selectedOpenAppId=""
+        subagentResults={subagentResults}
+      />,
+    );
+
+    const selector = screen.getByRole("button", { name: "切换子会话结果" });
+    expect(selector.className).toContain("subagent-result-select");
+    expect(screen.getAllByText("检查许可证")).not.toHaveLength(0);
+    expect(screen.queryByText("检查配置")).toBeNull();
+
+    fireEvent.click(selector);
+    fireEvent.click(screen.getByRole("option", { name: "检查配置" }));
+
+    expect(screen.getAllByText("检查配置")).not.toHaveLength(0);
+    expect(screen.queryByText("许可证检查完成。")).toBeNull();
   });
 
   it("renders checkpoint injections as visible system rows without user actions", () => {
@@ -2722,7 +2848,7 @@ describe("Messages", () => {
 
     await waitFor(() => {
       const groupHeaders = container.querySelectorAll(".tool-group-header");
-      expect(groupHeaders.length).toBe(1);
+      expect(groupHeaders.length).toBe(2);
     });
     expect(screen.getByText("A message between explore blocks")).toBeTruthy();
     screen.getAllByLabelText(/展开(?:工具调用|过程消息)/).forEach((button) => {
@@ -3067,6 +3193,7 @@ describe("Messages", () => {
         id: "assistant-final-collapse",
         kind: "message",
         role: "assistant",
+        phase: "final_answer",
         text: "Final result is ready.",
       },
     ];
@@ -3107,6 +3234,7 @@ describe("Messages", () => {
         id: "assistant-final-late",
         kind: "message",
         role: "assistant",
+        phase: "final_answer",
         text: "Final result is ready.",
       },
     ];
@@ -3162,6 +3290,7 @@ describe("Messages", () => {
         id: "assistant-final-before-late-process",
         kind: "message",
         role: "assistant",
+        phase: "final_answer",
         text: "Final result is ready.",
       },
     ];
@@ -3220,6 +3349,7 @@ describe("Messages", () => {
         id: "assistant-process-collapse-1",
         kind: "message",
         role: "assistant",
+        phase: "commentary",
         text: "Interim process answer should collapse.",
       },
       {
@@ -3235,6 +3365,7 @@ describe("Messages", () => {
         id: "assistant-final-process-collapse",
         kind: "message",
         role: "assistant",
+        phase: "final_answer",
         text: "Final result is ready.",
       },
     ];
@@ -3326,13 +3457,13 @@ describe("Messages", () => {
     expect(processGroup?.querySelector(".message-agent-meta")).toBeNull();
   });
 
-  it("folds late same-turn tools into a final message without a phase marker", async () => {
+  it("keeps historical assistant messages visible when phase markers are absent", async () => {
     const items: ConversationItem[] = [
       {
         id: "assistant-late-unphased-process",
         kind: "message",
         role: "assistant",
-        text: "先检查开发版状态。",
+        text: "历史正文第一段。",
         turnId: "turn-late-unphased",
       },
       {
@@ -3349,7 +3480,7 @@ describe("Messages", () => {
         id: "assistant-late-unphased-final",
         kind: "message",
         role: "assistant",
-        text: "开发版已经启动。",
+        text: "历史正文最终段。",
         turnId: "turn-late-unphased",
       },
       {
@@ -3375,19 +3506,11 @@ describe("Messages", () => {
       />,
     );
 
-    await waitFor(() => {
-      expect(screen.queryByText("first check")).toBeNull();
-      expect(screen.queryByText("second check")).toBeNull();
-    });
-    expect(screen.getByText("2 次工具调用")).toBeTruthy();
+    expect(screen.getByText("历史正文第一段。")).toBeTruthy();
+    expect(screen.getByText("历史正文最终段。")).toBeTruthy();
     expect(
       container.querySelectorAll(".message-agent-process-toggle"),
-    ).toHaveLength(1);
-    expect(container.querySelectorAll(".tool-group-header")).toHaveLength(0);
-
-    fireEvent.click(screen.getByRole("button", { name: "展开过程消息" }));
-    expect(screen.getByText("first check")).toBeTruthy();
-    expect(screen.getByText("second check")).toBeTruthy();
+    ).toHaveLength(0);
   });
 
   it("collapses dense tool runs again inside expanded process details", async () => {
@@ -3512,6 +3635,7 @@ describe("Messages", () => {
         id: "assistant-process-line-stats",
         kind: "message",
         role: "assistant",
+        phase: "commentary",
         text: "Editing files.",
       },
       {
@@ -3527,6 +3651,7 @@ describe("Messages", () => {
         id: "assistant-final-line-stats",
         kind: "message",
         role: "assistant",
+        phase: "final_answer",
         text: "Done.",
       },
     ];
@@ -3738,6 +3863,7 @@ describe("Messages", () => {
         id: "assistant-process-no-user-1",
         kind: "message",
         role: "assistant",
+        phase: "commentary",
         text: "跑消息和设置测试，抓 UI 交互回归。",
       },
       {
@@ -3753,6 +3879,7 @@ describe("Messages", () => {
         id: "assistant-process-no-user-2",
         kind: "message",
         role: "assistant",
+        phase: "commentary",
         text: "测试过。再补一条回归。",
       },
       {
@@ -3768,6 +3895,7 @@ describe("Messages", () => {
         id: "assistant-final-no-user",
         kind: "message",
         role: "assistant",
+        phase: "final_answer",
         text: "最终结果已完成。",
       },
     ];
@@ -3990,6 +4118,7 @@ describe("Messages", () => {
         id: "assistant-turn-process-1",
         kind: "message",
         role: "assistant",
+        phase: "commentary",
         text: "第一轮过程消息",
       },
       {
@@ -4005,6 +4134,7 @@ describe("Messages", () => {
         id: "assistant-turn-final-1",
         kind: "message",
         role: "assistant",
+        phase: "final_answer",
         text: "第一轮最终结果",
       },
       {
@@ -4017,6 +4147,7 @@ describe("Messages", () => {
         id: "assistant-turn-process-2",
         kind: "message",
         role: "assistant",
+        phase: "commentary",
         text: "第二轮过程消息",
       },
       {
@@ -4032,6 +4163,7 @@ describe("Messages", () => {
         id: "assistant-turn-final-2",
         kind: "message",
         role: "assistant",
+        phase: "final_answer",
         text: "第二轮最终结果",
       },
     ];
@@ -4093,6 +4225,7 @@ describe("Messages", () => {
             id: "assistant-final-after-plan",
             kind: "message",
             role: "assistant",
+            phase: "final_answer",
             text: "Final result is ready.",
           },
         ]}

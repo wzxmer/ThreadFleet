@@ -9,6 +9,10 @@ import Users from "lucide-react/dist/esm/icons/users";
 import X from "lucide-react/dist/esm/icons/x";
 import type { ParsedFileLocation } from "../../../utils/fileLinks";
 import { useI18n } from "@/features/i18n/I18nProvider";
+import {
+  RoundedSelect,
+  type RoundedSelectOption,
+} from "@/features/design-system/components/select/RoundedSelect";
 import { Markdown } from "./Markdown";
 import type { SubagentResultStatus, SubagentResultSummary } from "../utils/subagentResults";
 
@@ -46,8 +50,21 @@ export function SubagentResultSummary({
 }: SubagentResultSummaryProps) {
   const { t } = useI18n();
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
+  const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [copiedThreadId, setCopiedThreadId] = useState<string | null>(null);
   const selected = results.find((result) => result.threadId === selectedThreadId) ?? null;
+  const activeResult =
+    results.find((result) => result.threadId === activeThreadId) ??
+    results[0] ??
+    null;
+  const isSwitchable = results.length > 1;
+
+  useEffect(() => {
+    if (activeThreadId && results.some((result) => result.threadId === activeThreadId)) {
+      return;
+    }
+    setActiveThreadId(results[0]?.threadId ?? null);
+  }, [activeThreadId, results]);
 
   useEffect(() => {
     if (selectedThreadId && !selected) {
@@ -77,6 +94,15 @@ export function SubagentResultSummary({
     }),
     [t],
   );
+  const resultOptions = useMemo<RoundedSelectOption[]>(
+    () =>
+      results.map((result) => ({
+        value: result.threadId,
+        label: result.title,
+        title: `${result.title} · ${statusLabel[result.status]}`,
+      })),
+    [results, statusLabel],
+  );
 
   if (results.length === 0) {
     return null;
@@ -95,6 +121,83 @@ export function SubagentResultSummary({
     }
   };
 
+  const handleActiveResultChange = (threadId: string) => {
+    setActiveThreadId(threadId);
+    if (selectedThreadId && selectedThreadId !== threadId) {
+      setSelectedThreadId(null);
+    }
+  };
+
+  const renderResultRow = (result: SubagentResultSummary) => (
+    <article
+      key={result.threadId}
+      className={`subagent-result-row is-${result.status}`}
+    >
+      <button
+        type="button"
+        className="subagent-result-main"
+        onClick={() => setSelectedThreadId(result.threadId)}
+        aria-label={`${t("messages.subagentViewDetails")}: ${result.title}`}
+        aria-expanded={selectedThreadId === result.threadId}
+      >
+        <span className="subagent-result-status" title={statusLabel[result.status]}>
+          {statusIcon(result.status)}
+        </span>
+        <span className="subagent-result-copy">
+          <span className="subagent-result-title-line">
+            <span className="subagent-result-title">{result.title}</span>
+            <span className="subagent-result-status-label">{statusLabel[result.status]}</span>
+          </span>
+          <span className="subagent-result-preview">
+            {result.summary || t("messages.subagentNoResult")}
+          </span>
+        </span>
+        <ChevronRight className="subagent-result-open-icon" size={15} aria-hidden />
+      </button>
+      <div className="subagent-result-actions">
+        <button
+          type="button"
+          className="ghost icon-button subagent-result-action"
+          onClick={() => void copyResult(result)}
+          aria-label={
+            copiedThreadId === result.threadId
+              ? t("messages.subagentCopied")
+              : t("messages.subagentCopyResult")
+          }
+          title={
+            copiedThreadId === result.threadId
+              ? t("messages.subagentCopied")
+              : t("messages.subagentCopyResult")
+          }
+          disabled={!result.content}
+        >
+          {copiedThreadId === result.threadId ? (
+            <Clipboard size={14} aria-hidden />
+          ) : (
+            <Copy size={14} aria-hidden />
+          )}
+        </button>
+        {onOpenThreadLink && (
+          <button
+            type="button"
+            className="ghost icon-button subagent-result-action"
+            onClick={() => onOpenThreadLink(result.threadId, workspaceId)}
+            aria-label={t("messages.subagentOpenThread")}
+            title={t("messages.subagentOpenThread")}
+          >
+            <Users size={14} aria-hidden />
+          </button>
+        )}
+      </div>
+    </article>
+  );
+
+  const visibleResults = isSwitchable
+    ? activeResult
+      ? [activeResult]
+      : []
+    : results;
+
   return (
     <section className="subagent-results" aria-label={t("messages.subagentResults")}>
       <div className="subagent-results-header">
@@ -103,71 +206,35 @@ export function SubagentResultSummary({
           <span>{t("messages.subagentResults")}</span>
           <span className="subagent-results-count">{results.length}</span>
         </div>
+        {isSwitchable && activeResult ? (
+          <div className="subagent-result-select-wrap">
+            <RoundedSelect
+              value={activeResult.threadId}
+              options={resultOptions}
+              onChange={handleActiveResultChange}
+              ariaLabel={t("messages.subagentSelectResult")}
+              className="subagent-result-select"
+              popoverClassName="subagent-result-select-popover"
+            >
+              <span className="subagent-result-select-content">
+                <span
+                  className={`subagent-result-select-status is-${activeResult.status}`}
+                >
+                  {statusIcon(activeResult.status)}
+                </span>
+                <span className="subagent-result-select-title">
+                  {activeResult.title}
+                </span>
+                <span className="subagent-result-select-status-label">
+                  {statusLabel[activeResult.status]}
+                </span>
+              </span>
+            </RoundedSelect>
+          </div>
+        ) : null}
       </div>
       <div className="subagent-results-list">
-        {results.map((result) => (
-          <article
-            key={result.threadId}
-            className={`subagent-result-row is-${result.status}`}
-          >
-            <button
-              type="button"
-              className="subagent-result-main"
-              onClick={() => setSelectedThreadId(result.threadId)}
-              aria-label={`${t("messages.subagentViewDetails")}: ${result.title}`}
-              aria-expanded={selectedThreadId === result.threadId}
-            >
-              <span className="subagent-result-status" title={statusLabel[result.status]}>
-                {statusIcon(result.status)}
-              </span>
-              <span className="subagent-result-copy">
-                <span className="subagent-result-title-line">
-                  <span className="subagent-result-title">{result.title}</span>
-                  <span className="subagent-result-status-label">{statusLabel[result.status]}</span>
-                </span>
-                <span className="subagent-result-preview">
-                  {result.summary || t("messages.subagentNoResult")}
-                </span>
-              </span>
-              <ChevronRight className="subagent-result-open-icon" size={15} aria-hidden />
-            </button>
-            <div className="subagent-result-actions">
-              <button
-                type="button"
-                className="ghost icon-button subagent-result-action"
-                onClick={() => void copyResult(result)}
-                aria-label={
-                  copiedThreadId === result.threadId
-                    ? t("messages.subagentCopied")
-                    : t("messages.subagentCopyResult")
-                }
-                title={
-                  copiedThreadId === result.threadId
-                    ? t("messages.subagentCopied")
-                    : t("messages.subagentCopyResult")
-                }
-                disabled={!result.content}
-              >
-                {copiedThreadId === result.threadId ? (
-                  <Clipboard size={14} aria-hidden />
-                ) : (
-                  <Copy size={14} aria-hidden />
-                )}
-              </button>
-              {onOpenThreadLink && (
-                <button
-                  type="button"
-                  className="ghost icon-button subagent-result-action"
-                  onClick={() => onOpenThreadLink(result.threadId, workspaceId)}
-                  aria-label={t("messages.subagentOpenThread")}
-                  title={t("messages.subagentOpenThread")}
-                >
-                  <Users size={14} aria-hidden />
-                </button>
-              )}
-            </div>
-          </article>
-        ))}
+        {visibleResults.map(renderResultRow)}
       </div>
       {selected && (
         <aside className="subagent-result-drawer" role="dialog" aria-label={selected.title}>

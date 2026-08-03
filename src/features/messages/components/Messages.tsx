@@ -144,7 +144,9 @@ function coalesceDenseProcessToolGroups(
 }
 
 function extractAssistantIdentity(content?: string | null) {
-  const match = content?.match(/^#{1,6}\s+Identity\s*:\s*(.+)$/im);
+  const match = content?.match(
+    /^(?:#{1,6}\s+)?Identity\s*:\s*(.+)$/im,
+  );
   return match?.[1]?.replace(/[*_`]/g, "").trim() || null;
 }
 
@@ -159,7 +161,7 @@ function resolveAssistantName(
   const option = modelOptions.find(
     (candidate) => candidate.id === modelId || candidate.model === modelId,
   );
-  const descriptor = [modelId, option?.model, option?.displayName]
+  const descriptor = [modelId, option?.model]
     .filter(Boolean)
     .join(" ")
     .toLowerCase();

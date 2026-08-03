@@ -452,9 +452,7 @@ export function useMessagesViewState({
       finalAssistantIndex =
         activeTurnId && turnId === activeTurnId
           ? fallbackAssistantIndex
-          : finalAssistantIndex >= 0
-            ? finalAssistantIndex
-            : fallbackAssistantIndex;
+          : finalAssistantIndex;
       if (finalAssistantIndex < 0 || turnEntries.length <= 1) {
         result.push(...turnEntries);
         turnEntries = [];

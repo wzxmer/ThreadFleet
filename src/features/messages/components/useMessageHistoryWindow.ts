@@ -95,11 +95,15 @@ export function useMessageHistoryWindow<T>({
       }
 
       let range = normalizeRange(previous.range, items.length);
-      if (items.length > previous.totalItems && range.end >= previous.totalItems) {
-        range = {
-          start: range.start,
-          end: items.length,
-        };
+      if (items.length > previous.totalItems) {
+        if (previous.totalItems === 0) {
+          range = buildLatestRange(items.length, batchSize);
+        } else if (range.end >= previous.totalItems) {
+          range = {
+            start: range.start,
+            end: items.length,
+          };
+        }
       }
       if (
         previous.totalItems === items.length &&
