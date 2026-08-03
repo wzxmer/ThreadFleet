@@ -21,9 +21,11 @@ describe("resolveRuntimeThemeAppearance", () => {
     expect(appearance.conversationAppearance.messageUserBubbleColor).toBe(
       "var(--cm-light-control-bg)",
     );
-    expect(appearance.conversationAppearance.messageUserTextColor).toBe("#000");
+    expect(appearance.conversationAppearance.messageUserTextColor).toBe(
+      "var(--cm-light-text-primary)",
+    );
     expect(appearance.conversationAppearance.messageAssistantTextColor).toBe(
-      "#000",
+      "var(--cm-light-text-primary)",
     );
     expect(appearance.conversationAppearance.messageAssistantAccentColor).toBe(
       "var(--cm-light-accent)",

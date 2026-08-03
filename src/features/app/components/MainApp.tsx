@@ -1855,6 +1855,7 @@ export default function MainApp() {
     clearDraftForThread,
     workspaceHomeState,
     agentMdState,
+    globalAgentMdContent,
   } = composerWorkspaceState;
   const {
     runs: workspaceRuns,
@@ -1881,6 +1882,10 @@ export default function MainApp() {
     refresh: refreshAgentMd,
     save: saveAgentMd,
   } = agentMdState;
+  const assistantInstructionContent = [globalAgentMdContent, agentMdContent]
+    .map((content) => content.trim())
+    .filter(Boolean)
+    .join("\n\n");
   const promptActions = useMainAppPromptActions({
     activeWorkspace,
     connectWorkspace,
@@ -2473,7 +2478,7 @@ export default function MainApp() {
     activeWorkspaceId,
     activeThreadId,
     activeItems,
-    agentMdContent,
+    agentMdContent: assistantInstructionContent,
     threadHistoryPageByThread,
     onLoadOlderThreadHistory: loadOlderThreadHistory,
     itemsByThread,

@@ -24,10 +24,10 @@ const NATIVE_DARK_APPEARANCE: ConversationAppearance = {
 const NATIVE_LIGHT_APPEARANCE: ConversationAppearance = {
   messageCanvasColor: "var(--cm-light-main-bg)",
   messageUserBubbleColor: "var(--cm-light-control-bg)",
-  messageUserTextColor: "#000",
+  messageUserTextColor: "var(--cm-light-text-primary)",
   messageAssistantBubbleColor: "var(--cm-light-panel-bg)",
   messageAssistantAccentColor: "var(--cm-light-accent)",
-  messageAssistantTextColor: "#000",
+  messageAssistantTextColor: "var(--cm-light-text-primary)",
   composerInputBackgroundColor: "var(--cm-light-panel-bg)",
 };
 

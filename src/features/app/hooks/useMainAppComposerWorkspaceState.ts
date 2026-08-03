@@ -13,6 +13,7 @@ import { computePlanFollowupState } from "@/features/messages/utils/messageRende
 import { useComposerController } from "@app/hooks/useComposerController";
 import { useComposerInsert } from "@app/hooks/useComposerInsert";
 import { useWorkspaceFileListing } from "@app/hooks/useWorkspaceFileListing";
+import { useGlobalAgentMd } from "@app/hooks/useGlobalAgentMd";
 import { useWorkspaceAgentMd } from "@/features/workspaces/hooks/useWorkspaceAgentMd";
 import { useWorkspaceHome } from "@/features/workspaces/hooks/useWorkspaceHome";
 import { isLocalCodexWorkspaceId } from "@/features/workspaces/domain/localCodexWorkspace";
@@ -312,6 +313,7 @@ export function useMainAppComposerWorkspaceState({
     activeWorkspace: projectActiveWorkspace,
     onDebug: addDebugEntry,
   });
+  const globalAgentMdContent = useGlobalAgentMd();
 
   return {
     showWorkspaceHome,
@@ -331,6 +333,7 @@ export function useMainAppComposerWorkspaceState({
     recentThreadsUpdatedAt,
     workspaceHomeState,
     agentMdState,
+    globalAgentMdContent,
     ...composerState,
   };
 }
