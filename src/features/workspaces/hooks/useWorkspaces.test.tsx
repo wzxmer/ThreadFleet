@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceInfo } from "../../../types";
+import { STORAGE_KEY_ACTIVE_WORKSPACE } from "@utils/activeSelectionStorage";
 import {
   addWorkspace,
   addWorkspaceFromGitUrl,
@@ -649,5 +650,37 @@ describe("useWorkspaces.addWorkspaceFromGitUrl", () => {
       "repo",
     );
     expect(result.current.activeWorkspace?.id).toBe("from-url");
+  });
+});
+
+describe("useWorkspaces active selection persistence", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    vi.mocked(listWorkspaces).mockResolvedValue([workspaceOne]);
+  });
+
+  it("restores the persisted workspace after the workspace list loads", async () => {
+    localStorage.setItem(
+      STORAGE_KEY_ACTIVE_WORKSPACE,
+      JSON.stringify(workspaceOne.id),
+    );
+
+    const { result } = renderHook(() => useWorkspaces());
+
+    await waitFor(() => expect(result.current.hasLoaded).toBe(true));
+    expect(result.current.activeWorkspaceId).toBe(workspaceOne.id);
+  });
+
+  it("keeps an explicit home selection when a refresh completes", async () => {
+    const { result } = renderHook(() => useWorkspaces());
+    await waitFor(() => expect(result.current.hasLoaded).toBe(true));
+
+    act(() => result.current.setActiveWorkspaceId(null));
+    await act(async () => {
+      await result.current.refreshWorkspaces();
+    });
+
+    expect(result.current.activeWorkspaceId).toBeNull();
+    expect(localStorage.getItem(STORAGE_KEY_ACTIVE_WORKSPACE)).toBe("null");
   });
 });

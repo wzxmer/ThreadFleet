@@ -28,6 +28,7 @@ import {
   steerTurn,
 } from "@services/tauri";
 import { STORAGE_KEY_DETACHED_REVIEW_LINKS } from "@threads/utils/threadStorage";
+import { STORAGE_KEY_ACTIVE_THREADS } from "@utils/activeSelectionStorage";
 import { LOCAL_CODEX_WORKSPACE_ID } from "@/features/workspaces/domain/localCodexWorkspace";
 import {
   clearActiveManagedSessionsCache,
@@ -191,6 +192,121 @@ describe("useThreads UX integration", () => {
   afterEach(() => {
     vi.useRealTimers();
     nowSpy.mockRestore();
+  });
+
+  it("restores the persisted active thread for the workspace", async () => {
+    localStorage.setItem(
+      STORAGE_KEY_ACTIVE_THREADS,
+      JSON.stringify({ "ws-1": "thread-persisted" }),
+    );
+
+    const { result } = renderHook(() =>
+      useThreads({
+        activeWorkspace: workspace,
+        onWorkspaceConnected: vi.fn(),
+      }),
+    );
+
+    await waitFor(() => {
+      expect(result.current.activeThreadId).toBe("thread-persisted");
+    });
+  });
+
+  it("loads history for a persisted active thread after its initial list arrives", async () => {
+    localStorage.setItem(
+      STORAGE_KEY_ACTIVE_THREADS,
+      JSON.stringify({ "ws-1": "thread-persisted" }),
+    );
+    vi.mocked(listWorkspaces).mockResolvedValue([workspace]);
+    vi.mocked(listThreads).mockResolvedValue({
+      result: {
+        data: [
+          {
+            id: "thread-persisted",
+            cwd: "/tmp/codex",
+            name: "Persisted thread",
+            preview: "Persisted preview",
+            updated_at: 2000,
+          },
+        ],
+        nextCursor: null,
+      },
+    });
+    vi.mocked(readThread).mockResolvedValue({
+      result: {
+        thread: {
+          id: "thread-persisted",
+          turns: [
+            {
+              items: [
+                {
+                  type: "userMessage",
+                  id: "persisted-user-1",
+                  content: [{ type: "text", text: "Continue" }],
+                },
+                {
+                  type: "agentMessage",
+                  id: "persisted-assistant-1",
+                  text: "Restored answer",
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+
+    const { result } = renderHook(() =>
+      useThreads({
+        activeWorkspace: workspace,
+        onWorkspaceConnected: vi.fn(),
+      }),
+    );
+
+    await act(async () => {
+      await result.current.listThreadsForWorkspace(workspace);
+    });
+
+    await waitFor(() => {
+      expect(readThread).toHaveBeenCalledWith("ws-1", "thread-persisted");
+      expect(
+        result.current.activeItems.some(
+          (item) =>
+            item.kind === "message" &&
+            item.role === "assistant" &&
+            item.text === "Restored answer",
+        ),
+      ).toBe(true);
+    });
+    expect(readThread).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not restore the persisted thread after the user starts a new draft", async () => {
+    localStorage.setItem(
+      STORAGE_KEY_ACTIVE_THREADS,
+      JSON.stringify({ "ws-1": "thread-persisted" }),
+    );
+    vi.mocked(listWorkspaces).mockResolvedValue([workspace]);
+    vi.mocked(listThreads).mockResolvedValue({
+      result: { data: [], nextCursor: null },
+    });
+
+    const { result } = renderHook(() =>
+      useThreads({
+        activeWorkspace: workspace,
+        onWorkspaceConnected: vi.fn(),
+      }),
+    );
+
+    act(() => {
+      result.current.setActiveThreadId(null);
+    });
+    await act(async () => {
+      await result.current.listThreadsForWorkspace(workspace);
+    });
+
+    expect(result.current.activeThreadId).toBeNull();
+    expect(readThread).not.toHaveBeenCalled();
   });
 
   it("reads selected threads when no local items exist", async () => {

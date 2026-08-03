@@ -51,6 +51,11 @@ import {
   makeCustomNameKey,
   saveCustomName,
 } from "@threads/utils/threadStorage";
+import {
+  loadActiveThreadSelections,
+  saveActiveThreadSelections,
+  type ActiveThreadSelectionMap,
+} from "@utils/activeSelectionStorage";
 import { getParentThreadIdFromThread } from "@threads/utils/threadRpc";
 import {
   buildThreadSummaryFromThread,
@@ -172,17 +177,28 @@ export function useThreads({
       ? CHAT_SCROLLBACK_DEFAULT
       : chatHistoryScrollbackItems;
 
+  const initialActiveThreadSelectionsRef = useRef<ActiveThreadSelectionMap | null>(
+    null,
+  );
   const [state, dispatch] = useReducer(
     threadReducer,
     maxItemsPerThread,
-    (initialMaxItemsPerThread) => ({
-      ...initialState,
-      maxItemsPerThread: initialMaxItemsPerThread,
-    }),
+    (initialMaxItemsPerThread) => {
+      const persistedSelections = loadActiveThreadSelections();
+      initialActiveThreadSelectionsRef.current = persistedSelections;
+      return {
+        ...initialState,
+        activeThreadIdByWorkspace: persistedSelections,
+        maxItemsPerThread: initialMaxItemsPerThread,
+      };
+    },
   );
   useEffect(() => {
     dispatch({ type: "setMaxItemsPerThread", maxItemsPerThread });
   }, [dispatch, maxItemsPerThread]);
+  useEffect(() => {
+    saveActiveThreadSelections(state.activeThreadIdByWorkspace);
+  }, [state.activeThreadIdByWorkspace]);
   const loadedThreadsRef = useRef<Record<string, boolean>>({});
   const loadedThreadRuntimeKeyRef = useRef<Record<string, string>>({});
   const replaceOnResumeRef = useRef<Record<string, boolean>>({});
@@ -1462,6 +1478,51 @@ export function useThreads({
     },
     [getThreadListRuntimeContext, itemsByThreadRef, loadedThreadRuntimeKeyRef, loadedThreadsRef],
   );
+
+  const startupHistoryRestoreAttemptedRef = useRef(new Set<string>());
+  useEffect(() => {
+    const workspaceId = activeWorkspaceId;
+    const threadId = activeThreadId;
+    const persistedThreadId = workspaceId
+      ? initialActiveThreadSelectionsRef.current?.[workspaceId] ?? null
+      : null;
+    if (
+      !workspaceId ||
+      !threadId ||
+      threadId !== persistedThreadId ||
+      state.threadsByWorkspace[workspaceId] === undefined
+    ) {
+      return;
+    }
+    const runtimeContext = getThreadListRuntimeContext();
+    const restoreKey = [
+      workspaceId,
+      threadId,
+      runtimeContext.sourceId ?? "",
+      runtimeContext.runtimeGeneration,
+    ].join(":");
+    if (startupHistoryRestoreAttemptedRef.current.has(restoreKey)) {
+      return;
+    }
+    startupHistoryRestoreAttemptedRef.current.add(restoreKey);
+    if (
+      hasLocalThreadSnapshot(threadId) &&
+      !isThreadHistoryEvicted(threadId)
+    ) {
+      loadedThreadsRef.current[threadId] = true;
+      return;
+    }
+    void restoreThreadHistory(workspaceId, threadId);
+  }, [
+    activeThreadId,
+    activeWorkspaceId,
+    getThreadListRuntimeContext,
+    hasLocalThreadSnapshot,
+    isThreadHistoryEvicted,
+    loadedThreadsRef,
+    restoreThreadHistory,
+    state.threadsByWorkspace,
+  ]);
 
   const setActiveThreadId = useCallback(
     (threadId: string | null, workspaceId?: string) => {

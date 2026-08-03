@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Dispatch, SetStateAction } from "react";
 import type {
   AppSettings,
   DebugEntry,
@@ -20,6 +21,10 @@ import {
 } from "./useWorkspaceCrud";
 import { useWorkspaceGroupOps } from "./useWorkspaceGroupOps";
 import { useWorktreeOps } from "./useWorktreeOps";
+import {
+  loadActiveWorkspaceId,
+  saveActiveWorkspaceId,
+} from "@utils/activeSelectionStorage";
 
 export type UseWorkspacesOptions = {
   onDebug?: (entry: DebugEntry) => void;
@@ -74,7 +79,19 @@ export type UseWorkspacesResult = {
 
 export function useWorkspaces(options: UseWorkspacesOptions = {}): UseWorkspacesResult {
   const [workspaces, setWorkspaces] = useState<WorkspaceInfo[]>([]);
-  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
+  const [activeWorkspaceId, setActiveWorkspaceIdState] = useState<string | null>(
+    () => loadActiveWorkspaceId(),
+  );
+  const setActiveWorkspaceId = useCallback<
+    Dispatch<SetStateAction<string | null>>
+  >((next) => {
+    setActiveWorkspaceIdState((previous) => {
+      const resolved = typeof next === "function" ? next(previous) : next;
+      const normalized = resolved?.trim() || null;
+      saveActiveWorkspaceId(normalized);
+      return normalized;
+    });
+  }, []);
   const [hasLoaded, setHasLoaded] = useState(false);
   const workspaceSettingsRef = useRef<Map<string, WorkspaceSettings>>(new Map());
   const { onDebug, appSettings, onUpdateAppSettings } = options;
