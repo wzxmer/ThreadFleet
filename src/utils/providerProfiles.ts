@@ -45,6 +45,16 @@ export const PROVIDER_REASONING_EFFORT_VALUES = [
 
 const LUNA_BASE_MODEL_ID = "gpt-5.6-luna";
 
+const KNOWN_MODEL_REASONING_EFFORTS: Record<
+  string,
+  { supported: readonly string[]; default: string }
+> = {
+  [LUNA_BASE_MODEL_ID]: {
+    supported: ["xhigh", "max"],
+    default: "max",
+  },
+};
+
 function isDuckCodingProvider(profile: CodexKeyProfile): boolean {
   const baseUrl = resolveCodexProviderBaseUrl(profile.providerKind, profile.baseUrl);
   if (!baseUrl) {
@@ -187,6 +197,10 @@ export function resolveCodexProviderModelOptions(
   const inferDuckReasoning = isDuckCodingProvider(profile);
   return cachedModels.map((model) => {
     const explicitModelDefault = normalizeReasoningEffortValue(model.defaultReasoningEffort);
+    const knownModelReasoning =
+      model.supportedReasoningEfforts === undefined && explicitModelDefault === null
+        ? KNOWN_MODEL_REASONING_EFFORTS[model.id.trim().toLocaleLowerCase()]
+        : undefined;
     const canInferReasoning =
       inferDuckReasoning &&
       model.supportedReasoningEfforts === undefined &&
@@ -194,12 +208,23 @@ export function resolveCodexProviderModelOptions(
     const inferredReasoningEffort = canInferReasoning
       ? inferReasoningEffortFromModelId(model.id)
       : null;
-    const modelDefault = explicitModelDefault ?? inferredReasoningEffort;
+    const modelDefault =
+      explicitModelDefault ?? inferredReasoningEffort ?? knownModelReasoning?.default;
     const hasModelReasoningMetadata =
       model.supportedReasoningEfforts !== undefined ||
       explicitModelDefault !== null ||
-      inferredReasoningEffort !== null;
+      inferredReasoningEffort !== null ||
+      knownModelReasoning !== undefined;
     const modelEfforts = parseReasoningEffortOptions(model.supportedReasoningEfforts ?? []);
+    for (const reasoningEffort of knownModelReasoning?.supported ?? []) {
+      if (
+        !modelEfforts.some(
+          (option) => option.reasoningEffort.toLocaleLowerCase() === reasoningEffort,
+        )
+      ) {
+        modelEfforts.push({ reasoningEffort, description: "" });
+      }
+    }
     if (
       inferredReasoningEffort &&
       !modelEfforts.some(

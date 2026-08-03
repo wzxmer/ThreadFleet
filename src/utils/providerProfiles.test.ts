@@ -248,6 +248,35 @@ describe("resolveCodexProviderBaseUrl", () => {
     expect(model.defaultReasoningEffort).toBe("xhigh");
   });
 
+  it("preserves explicit ultra when a model advertises it", () => {
+    const [model] = resolveCodexProviderModelOptions({
+      id: "custom",
+      name: "Custom",
+      providerKind: "custom",
+      keyEnvVar: "OPENAI_API_KEY",
+      key: "secret",
+      baseUrlEnvVar: "OPENAI_BASE_URL",
+      baseUrl: "https://api.example.com/v1",
+      model: "ultra-model",
+      cachedModels: [{
+        id: "ultra-model",
+        name: "Ultra Model",
+        contextWindow: null,
+        supportedReasoningEfforts: [
+          { reasoningEffort: "high", description: "" },
+          { reasoningEffort: "ultra", description: "" },
+        ],
+        defaultReasoningEffort: "ultra",
+      }],
+    });
+
+    expect(model.supportedReasoningEfforts.map((option) => option.reasoningEffort)).toEqual([
+      "high",
+      "ultra",
+    ]);
+    expect(model.defaultReasoningEffort).toBe("ultra");
+  });
+
   it("keeps the provider fallback when legacy metadata is null", () => {
     const [model] = resolveCodexProviderModelOptions({
       id: "legacy",
@@ -308,14 +337,10 @@ describe("resolveCodexProviderBaseUrl", () => {
     });
     expect(models.find((model) => model.id === "gpt-5.6-luna")).toMatchObject({
       supportedReasoningEfforts: [
-        { reasoningEffort: "low", description: "" },
-        { reasoningEffort: "medium", description: "" },
-        { reasoningEffort: "high", description: "" },
         { reasoningEffort: "xhigh", description: "" },
         { reasoningEffort: "max", description: "" },
-        { reasoningEffort: "ultra", description: "" },
       ],
-      defaultReasoningEffort: "medium",
+      defaultReasoningEffort: "max",
     });
   });
 
