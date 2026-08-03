@@ -995,6 +995,8 @@ pub(crate) fn build_codex_command_with_bin(
 fn computer_control_app_server_args() -> Vec<String> {
     vec![
         "-c".to_string(),
+        "features.code_mode_host=true".to_string(),
+        "-c".to_string(),
         COMPUTER_USE_DISABLE_OVERRIDE.to_string(),
         "app-server".to_string(),
     ]
@@ -1525,6 +1527,8 @@ mod tests {
                 "model=custom",
                 "-c",
                 "plugins.computer-use@openai-bundled.enabled=true",
+                "-c",
+                "features.code_mode_host=true",
                 "-c",
                 "plugins.computer-use@openai-bundled.enabled=false",
                 "app-server",

@@ -1149,11 +1149,6 @@ fn merge_profile_codex_args(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| "Provider profiles require a provider base URL".to_string())?;
-    let wire_api = if profile_uses_gateway(profile) {
-        "chat"
-    } else {
-        "responses"
-    };
     for value in [
         format!("model_provider={CODEX_MONITOR_PROVIDER_ID}"),
         format!("model_providers.{CODEX_MONITOR_PROVIDER_ID}.name=ThreadFleet"),
@@ -1161,7 +1156,7 @@ fn merge_profile_codex_args(
         format!(
             "model_providers.{CODEX_MONITOR_PROVIDER_ID}.env_key={CODEX_MONITOR_PROVIDER_KEY_ENV}"
         ),
-        format!("model_providers.{CODEX_MONITOR_PROVIDER_ID}.wire_api={wire_api}"),
+        format!("model_providers.{CODEX_MONITOR_PROVIDER_ID}.wire_api=responses"),
         format!("model_providers.{CODEX_MONITOR_PROVIDER_ID}.requires_openai_auth=false"),
         format!("model_providers.{CODEX_MONITOR_PROVIDER_ID}.supports_websockets=false"),
     ] {
@@ -1570,7 +1565,7 @@ mod tests {
             pair[0] == "-c" && pair[1] == "model_providers.codex_monitor.supports_websockets=false"
         }));
         assert!(args.windows(2).any(|pair| {
-            pair[0] == "-c" && pair[1] == "model_providers.codex_monitor.wire_api=chat"
+            pair[0] == "-c" && pair[1] == "model_providers.codex_monitor.wire_api=responses"
         }));
         assert!(args
             .windows(2)

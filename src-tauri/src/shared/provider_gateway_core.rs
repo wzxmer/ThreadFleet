@@ -2,7 +2,7 @@ use futures_util::StreamExt;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, CONTENT_TYPE};
 use serde::Serialize;
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::str::FromStr;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -210,6 +210,7 @@ async fn handle_responses_compat_request(
     let body: Value = serde_json::from_slice(&request.body)
         .map_err(|_| "Gateway Responses request body is not valid JSON".to_string())?;
     let stream_response = body.get("stream").and_then(Value::as_bool).unwrap_or(false);
+    let custom_tool_names = custom_tool_names(&body);
     let chat_body = responses_request_to_chat_completions_with_reasoning(
         &body,
         max_output_tokens,
@@ -231,7 +232,7 @@ async fn handle_responses_compat_request(
         return write_proxy_response(stream, response).await;
     }
     if stream_response {
-        write_responses_stream_from_chat_stream(stream, response).await
+        write_responses_stream_from_chat_stream(stream, response, &custom_tool_names).await
     } else {
         let chat_response_text = response
             .text()
@@ -239,7 +240,8 @@ async fn handle_responses_compat_request(
             .map_err(|_| "Failed to read chat completions response".to_string())?;
         let chat_response: Value = serde_json::from_str(&chat_response_text)
             .map_err(|_| "Failed to parse chat completions response".to_string())?;
-        let response_body = chat_completion_to_response(&chat_response);
+        let response_body =
+            chat_completion_to_response_with_custom_tools(&chat_response, &custom_tool_names);
         write_json_response(stream, reqwest::StatusCode::OK, &response_body).await
     }
 }
@@ -744,17 +746,12 @@ fn copy_generation_field(source: &Value, target: &mut Value, source_key: &str, t
 }
 
 fn copy_function_tools(source: &Value, target: &mut Value) {
-    let tools = source
-        .get("tools")
-        .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|tool| {
-                    let kind = tool.get("type").and_then(Value::as_str)?;
-                    if kind != "function" {
-                        return None;
-                    }
+    let tools = response_tool_definitions(source)
+        .into_iter()
+        .filter_map(|tool| {
+            let kind = tool.get("type").and_then(Value::as_str)?;
+            match kind {
+                "function" => {
                     let function = if let Some(function) = tool.get("function") {
                         function.clone()
                     } else {
@@ -765,15 +762,86 @@ fn copy_function_tools(source: &Value, target: &mut Value) {
                         })
                     };
                     Some(json!({ "type": "function", "function": function }))
-                })
-                .collect::<Vec<_>>()
+                }
+                "custom" => custom_tool_to_chat_function(tool),
+                _ => None,
+            }
         })
-        .unwrap_or_default();
+        .collect::<Vec<_>>();
     if !tools.is_empty() {
         if let Some(map) = target.as_object_mut() {
             map.insert("tools".to_string(), Value::Array(tools));
         }
     }
+}
+
+fn custom_tool_to_chat_function(tool: &Value) -> Option<Value> {
+    let name = tool.get("name").and_then(Value::as_str)?.trim();
+    if name.is_empty() {
+        return None;
+    }
+    let description = tool
+        .get("description")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|description| !description.is_empty())
+        .unwrap_or("Executes a custom tool.");
+    let mut compatibility_description =
+        format!("{description}\n\nProvide the complete custom tool input in the `input` string.");
+    if let Some(format) = tool.get("format") {
+        let format = serde_json::to_string(format).unwrap_or_default();
+        if !format.is_empty() {
+            compatibility_description.push_str(" Expected input format: ");
+            compatibility_description.push_str(&format);
+        }
+    }
+    Some(json!({
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": compatibility_description,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "input": {
+                        "type": "string",
+                        "description": "The complete custom tool input."
+                    }
+                },
+                "required": ["input"],
+                "additionalProperties": false
+            }
+        }
+    }))
+}
+
+fn response_tool_definitions(source: &Value) -> Vec<&Value> {
+    let mut tools: Vec<&Value> = source
+        .get("tools")
+        .and_then(Value::as_array)
+        .map(|items| items.iter().collect())
+        .unwrap_or_default();
+    if let Some(input) = source.get("input").and_then(Value::as_array) {
+        for item in input {
+            if item.get("type").and_then(Value::as_str) == Some("additional_tools") {
+                if let Some(additional_tools) = item.get("tools").and_then(Value::as_array) {
+                    tools.extend(additional_tools);
+                }
+            }
+        }
+    }
+    tools
+}
+
+fn custom_tool_names(source: &Value) -> BTreeSet<String> {
+    response_tool_definitions(source)
+        .into_iter()
+        .filter(|tool| tool.get("type").and_then(Value::as_str) == Some("custom"))
+        .filter_map(|tool| tool.get("name").and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 fn copy_function_tool_choice(source: &Value, target: &mut Value) {
@@ -784,7 +852,12 @@ fn copy_function_tool_choice(source: &Value, target: &mut Value) {
         Value::String(choice) if matches!(choice.as_str(), "auto" | "none" | "required") => {
             Some(Value::String(choice.clone()))
         }
-        Value::Object(choice) if choice.get("type").and_then(Value::as_str) == Some("function") => {
+        Value::Object(choice)
+            if matches!(
+                choice.get("type").and_then(Value::as_str),
+                Some("function" | "custom")
+            ) =>
+        {
             let name = choice
                 .get("name")
                 .or_else(|| {
@@ -824,7 +897,8 @@ fn append_response_input_messages(input: Option<&Value>, messages: &mut Vec<Valu
     };
     for item in items {
         match item.get("type").and_then(Value::as_str) {
-            Some("function_call") => {
+            Some("additional_tools") => continue,
+            Some("function_call" | "custom_tool_call") => {
                 let Some(name) = item.get("name").and_then(Value::as_str) else {
                     continue;
                 };
@@ -833,7 +907,12 @@ fn append_response_input_messages(input: Option<&Value>, messages: &mut Vec<Valu
                     .or_else(|| item.get("id"))
                     .and_then(Value::as_str)
                     .unwrap_or("call_gateway");
-                let arguments = normalize_historical_function_arguments(item.get("arguments"));
+                let arguments =
+                    if item.get("type").and_then(Value::as_str) == Some("custom_tool_call") {
+                        custom_tool_input_to_function_arguments(item.get("input"))
+                    } else {
+                        normalize_historical_function_arguments(item.get("arguments"))
+                    };
                 messages.push(json!({
                     "role": "assistant",
                     "content": Value::Null,
@@ -845,7 +924,7 @@ fn append_response_input_messages(input: Option<&Value>, messages: &mut Vec<Valu
                 }));
                 continue;
             }
-            Some("function_call_output") => {
+            Some("function_call_output" | "custom_tool_call_output") => {
                 let Some(call_id) = item.get("call_id").and_then(Value::as_str) else {
                     continue;
                 };
@@ -880,6 +959,15 @@ fn normalize_historical_function_arguments(arguments: Option<&Value>) -> String 
         },
         _ => "{}".to_string(),
     }
+}
+
+fn custom_tool_input_to_function_arguments(input: Option<&Value>) -> String {
+    let input = match input {
+        Some(Value::String(input)) => input.clone(),
+        Some(input) => serde_json::to_string(input).unwrap_or_default(),
+        None => String::new(),
+    };
+    serde_json::to_string(&json!({ "input": input })).unwrap_or_else(|_| "{}".to_string())
 }
 
 fn response_tool_output_to_string(output: &Value) -> String {
@@ -921,6 +1009,13 @@ fn response_content_to_chat_content(content: Option<&Value>) -> Value {
 }
 
 pub(crate) fn chat_completion_to_response(chat_response: &Value) -> Value {
+    chat_completion_to_response_with_custom_tools(chat_response, &BTreeSet::new())
+}
+
+fn chat_completion_to_response_with_custom_tools(
+    chat_response: &Value,
+    custom_tool_names: &BTreeSet<String>,
+) -> Value {
     let id = format_response_id(chat_response.get("id").and_then(Value::as_str));
     let created_at = chat_response
         .get("created")
@@ -959,9 +1054,9 @@ pub(crate) fn chat_completion_to_response(chat_response: &Value) -> Value {
         .and_then(Value::as_array)
     {
         output.extend(
-            tool_calls
-                .iter()
-                .filter_map(chat_tool_call_to_response_item),
+            tool_calls.iter().filter_map(|tool_call| {
+                chat_tool_call_to_response_item(tool_call, custom_tool_names)
+            }),
         );
     }
     json!({
@@ -976,7 +1071,10 @@ pub(crate) fn chat_completion_to_response(chat_response: &Value) -> Value {
     })
 }
 
-fn chat_tool_call_to_response_item(tool_call: &Value) -> Option<Value> {
+fn chat_tool_call_to_response_item(
+    tool_call: &Value,
+    custom_tool_names: &BTreeSet<String>,
+) -> Option<Value> {
     let function = tool_call.get("function")?;
     let name = function.get("name")?.as_str()?;
     let arguments = function
@@ -987,8 +1085,19 @@ fn chat_tool_call_to_response_item(tool_call: &Value) -> Option<Value> {
         .get("id")
         .and_then(Value::as_str)
         .unwrap_or("call_gateway");
+    let id = format!("fc_{}", unique_suffix());
+    if custom_tool_names.contains(name) {
+        return Some(json!({
+            "id": id,
+            "type": "custom_tool_call",
+            "status": "completed",
+            "call_id": call_id,
+            "name": name,
+            "input": custom_tool_input_from_function_arguments(arguments)
+        }));
+    }
     Some(json!({
-        "id": format!("fc_{}", unique_suffix()),
+        "id": id,
         "type": "function_call",
         "status": "completed",
         "call_id": call_id,
@@ -997,18 +1106,32 @@ fn chat_tool_call_to_response_item(tool_call: &Value) -> Option<Value> {
     }))
 }
 
+fn custom_tool_input_from_function_arguments(arguments: &str) -> String {
+    serde_json::from_str::<Value>(arguments)
+        .ok()
+        .and_then(|arguments| {
+            arguments
+                .get("input")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| arguments.to_string())
+}
+
 #[derive(Default)]
 struct StreamingToolCall {
     item_id: String,
     call_id: String,
     name: String,
     arguments: String,
+    is_custom: bool,
     added: bool,
 }
 
 async fn write_responses_stream_from_chat_stream(
     stream: &mut TcpStream,
     response: reqwest::Response,
+    custom_tool_names: &BTreeSet<String>,
 ) -> Result<(), String> {
     let is_event_stream = response
         .headers()
@@ -1024,7 +1147,12 @@ async fn write_responses_stream_from_chat_stream(
             .map_err(|err| format!("Failed to read upstream chat completions response: {err}"))?;
         let chat_response = serde_json::from_str::<Value>(&response_text)
             .map_err(|err| format!("Failed to parse upstream chat completions response: {err}"))?;
-        return write_responses_stream_from_chat_response(stream, &chat_response).await;
+        return write_responses_stream_from_chat_response(
+            stream,
+            &chat_response,
+            custom_tool_names,
+        )
+        .await;
     }
 
     write_sse_headers(stream, reqwest::StatusCode::OK).await?;
@@ -1064,6 +1192,7 @@ async fn write_responses_stream_from_chat_stream(
                 &mut accumulated,
                 &mut message_id,
                 &mut tool_calls,
+                custom_tool_names,
             )
             .await?;
         }
@@ -1076,6 +1205,7 @@ async fn write_responses_stream_from_chat_stream(
             &mut accumulated,
             &mut message_id,
             &mut tool_calls,
+            custom_tool_names,
         )
         .await?;
     }
@@ -1096,17 +1226,7 @@ async fn write_responses_stream_from_chat_stream(
     }
     for (index, tool_call) in &tool_calls {
         let output_index = index + usize::from(message_id.is_some());
-        write_sse_event(
-            stream,
-            "response.function_call_arguments.done",
-            json!({
-                "type": "response.function_call_arguments.done",
-                "item_id": tool_call.item_id,
-                "output_index": output_index,
-                "arguments": tool_call.arguments,
-            }),
-        )
-        .await?;
+        write_tool_call_input_done(stream, tool_call, output_index).await?;
         write_sse_event(
             stream,
             "response.output_item.done",
@@ -1163,6 +1283,7 @@ async fn process_chat_stream_event(
     accumulated: &mut String,
     message_id: &mut Option<String>,
     tool_calls: &mut BTreeMap<usize, StreamingToolCall>,
+    custom_tool_names: &BTreeSet<String>,
 ) -> Result<(), String> {
     for data in parse_sse_data_lines(raw_event) {
         if data.trim() == "[DONE]" {
@@ -1187,7 +1308,14 @@ async fn process_chat_stream_event(
             )
             .await?;
         }
-        append_chat_stream_tool_calls(stream, &value, tool_calls, message_id.is_some()).await?;
+        append_chat_stream_tool_calls(
+            stream,
+            &value,
+            tool_calls,
+            message_id.is_some(),
+            custom_tool_names,
+        )
+        .await?;
     }
     Ok(())
 }
@@ -1195,9 +1323,10 @@ async fn process_chat_stream_event(
 async fn write_responses_stream_from_chat_response(
     stream: &mut TcpStream,
     chat_response: &Value,
+    custom_tool_names: &BTreeSet<String>,
 ) -> Result<(), String> {
     write_sse_headers(stream, reqwest::StatusCode::OK).await?;
-    let response = chat_completion_to_response(chat_response);
+    let response = chat_completion_to_response_with_custom_tools(chat_response, custom_tool_names);
     let response_id = response
         .get("id")
         .and_then(Value::as_str)
@@ -1333,6 +1462,33 @@ async fn write_responses_stream_from_chat_response(
                 )
                 .await?;
             }
+            Some("custom_tool_call") => {
+                let input = item.get("input").and_then(Value::as_str).unwrap_or("");
+                if !input.is_empty() {
+                    write_sse_event(
+                        stream,
+                        "response.custom_tool_call_input.delta",
+                        json!({
+                            "type": "response.custom_tool_call_input.delta",
+                            "item_id": item_id,
+                            "output_index": output_index,
+                            "delta": input,
+                        }),
+                    )
+                    .await?;
+                }
+                write_sse_event(
+                    stream,
+                    "response.custom_tool_call_input.done",
+                    json!({
+                        "type": "response.custom_tool_call_input.done",
+                        "item_id": item_id,
+                        "output_index": output_index,
+                        "input": input,
+                    }),
+                )
+                .await?;
+            }
             _ => {}
         }
 
@@ -1409,6 +1565,7 @@ async fn append_chat_stream_tool_calls(
     value: &Value,
     tool_calls: &mut BTreeMap<usize, StreamingToolCall>,
     has_message: bool,
+    custom_tool_names: &BTreeSet<String>,
 ) -> Result<(), String> {
     let deltas = value
         .get("choices")
@@ -1446,12 +1603,11 @@ async fn append_chat_stream_tool_calls(
         if let Some(function) = function {
             if let Some(name) = function.get("name").and_then(Value::as_str) {
                 state.name.push_str(name);
+                state.is_custom = custom_tool_names.contains(&state.name);
             }
             let arguments = function.get("arguments").and_then(Value::as_str);
             let output_index = index + usize::from(has_message);
-            if !state.added
-                && (!state.call_id.is_empty() || !state.name.is_empty() || arguments.is_some())
-            {
+            if !state.added && !state.name.is_empty() {
                 write_sse_event(
                     stream,
                     "response.output_item.added",
@@ -1466,17 +1622,9 @@ async fn append_chat_stream_tool_calls(
             }
             if let Some(arguments) = arguments {
                 state.arguments.push_str(arguments);
-                write_sse_event(
-                    stream,
-                    "response.function_call_arguments.delta",
-                    json!({
-                        "type": "response.function_call_arguments.delta",
-                        "item_id": state.item_id,
-                        "output_index": output_index,
-                        "delta": arguments,
-                    }),
-                )
-                .await?;
+                if state.added {
+                    write_tool_call_input_delta(stream, state, output_index, arguments).await?;
+                }
             }
         }
     }
@@ -1484,6 +1632,16 @@ async fn append_chat_stream_tool_calls(
 }
 
 fn streaming_tool_call_item(tool_call: &StreamingToolCall, status: &str) -> Value {
+    if tool_call.is_custom {
+        return json!({
+            "id": tool_call.item_id,
+            "type": "custom_tool_call",
+            "status": status,
+            "call_id": tool_call.call_id,
+            "name": tool_call.name,
+            "input": custom_tool_input_from_function_arguments(&tool_call.arguments)
+        });
+    }
     json!({
         "id": tool_call.item_id,
         "type": "function_call",
@@ -1492,6 +1650,61 @@ fn streaming_tool_call_item(tool_call: &StreamingToolCall, status: &str) -> Valu
         "name": tool_call.name,
         "arguments": tool_call.arguments
     })
+}
+
+async fn write_tool_call_input_delta(
+    stream: &mut TcpStream,
+    tool_call: &StreamingToolCall,
+    output_index: usize,
+    delta: &str,
+) -> Result<(), String> {
+    let event = if tool_call.is_custom {
+        "response.custom_tool_call_input.delta"
+    } else {
+        "response.function_call_arguments.delta"
+    };
+    write_sse_event(
+        stream,
+        event,
+        json!({
+            "type": event,
+            "item_id": tool_call.item_id,
+            "output_index": output_index,
+            "delta": delta,
+        }),
+    )
+    .await
+}
+
+async fn write_tool_call_input_done(
+    stream: &mut TcpStream,
+    tool_call: &StreamingToolCall,
+    output_index: usize,
+) -> Result<(), String> {
+    let (event, value_key, value) = if tool_call.is_custom {
+        (
+            "response.custom_tool_call_input.done",
+            "input",
+            custom_tool_input_from_function_arguments(&tool_call.arguments),
+        )
+    } else {
+        (
+            "response.function_call_arguments.done",
+            "arguments",
+            tool_call.arguments.clone(),
+        )
+    };
+    write_sse_event(
+        stream,
+        event,
+        json!({
+            "type": event,
+            "item_id": tool_call.item_id,
+            "output_index": output_index,
+            value_key: value,
+        }),
+    )
+    .await
 }
 
 async fn write_chat_completions_stream(
@@ -1828,8 +2041,9 @@ async fn write_proxy_response(
 mod tests {
     use super::{
         append_utf8_stream_chunk, build_upstream_url, chat_completion_to_response,
-        chat_stream_event_flags, finish_utf8_stream, gateway_request_is_authorized,
-        is_chat_completions_streaming, provider_value_has_probe_function_call, read_http_request,
+        chat_completion_to_response_with_custom_tools, chat_stream_event_flags, finish_utf8_stream,
+        gateway_request_is_authorized, is_chat_completions_streaming,
+        provider_value_has_probe_function_call, read_http_request,
         responses_request_to_chat_completions,
         responses_request_to_chat_completions_with_reasoning,
         should_rewrite_chat_completions_stream, split_next_sse_event, start_provider_gateway,
@@ -1839,6 +2053,7 @@ mod tests {
     use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE};
     use reqwest::StatusCode;
     use serde_json::json;
+    use std::collections::BTreeSet;
     use std::io::ErrorKind;
     use std::time::Duration;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -1971,7 +2186,8 @@ mod tests {
             let response = truncated_event_stream_response().await;
             let (mut server, mut client) = downstream_pair().await;
             let writer = tokio::spawn(async move {
-                write_responses_stream_from_chat_stream(&mut server, response).await
+                write_responses_stream_from_chat_stream(&mut server, response, &BTreeSet::new())
+                    .await
             });
             let mut output = Vec::new();
             read_truncated_downstream(&mut client, &mut output).await;
@@ -1986,7 +2202,8 @@ mod tests {
             let response = completed_event_stream_response().await;
             let (mut server, mut client) = downstream_pair().await;
             let writer = tokio::spawn(async move {
-                write_responses_stream_from_chat_stream(&mut server, response).await
+                write_responses_stream_from_chat_stream(&mut server, response, &BTreeSet::new())
+                    .await
             });
             let mut output = Vec::new();
             client.read_to_end(&mut output).await.unwrap();
@@ -2006,7 +2223,8 @@ mod tests {
             let response = function_call_event_stream_response().await;
             let (mut server, mut client) = downstream_pair().await;
             let writer = tokio::spawn(async move {
-                write_responses_stream_from_chat_stream(&mut server, response).await
+                write_responses_stream_from_chat_stream(&mut server, response, &BTreeSet::new())
+                    .await
             });
             let mut output = Vec::new();
             client.read_to_end(&mut output).await.unwrap();
@@ -2024,12 +2242,36 @@ mod tests {
     }
 
     #[test]
+    fn streamed_chat_function_call_emits_responses_custom_tool_events() {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let response = function_call_event_stream_response().await;
+            let (mut server, mut client) = downstream_pair().await;
+            let custom_tool_names = BTreeSet::from(["shell_command".to_string()]);
+            let writer = tokio::spawn(async move {
+                write_responses_stream_from_chat_stream(&mut server, response, &custom_tool_names)
+                    .await
+            });
+            let mut output = Vec::new();
+            client.read_to_end(&mut output).await.unwrap();
+            writer.await.unwrap().unwrap();
+
+            let output = String::from_utf8_lossy(&output);
+            assert!(output.contains("response.custom_tool_call_input.delta"));
+            assert!(output.contains("response.custom_tool_call_input.done"));
+            assert!(output.contains("\"type\":\"custom_tool_call\""));
+            assert!(output.contains("\"input\":\"{\\\"command\\\":\\\"pwd\\\"}\""));
+            assert!(!output.contains("\"type\":\"function_call\""));
+        });
+    }
+
+    #[test]
     fn streamed_chat_function_call_keeps_unterminated_final_event() {
         tokio::runtime::Runtime::new().unwrap().block_on(async {
             let response = unterminated_function_call_event_stream_response().await;
             let (mut server, mut client) = downstream_pair().await;
             let writer = tokio::spawn(async move {
-                write_responses_stream_from_chat_stream(&mut server, response).await
+                write_responses_stream_from_chat_stream(&mut server, response, &BTreeSet::new())
+                    .await
             });
             let mut output = Vec::new();
             client.read_to_end(&mut output).await.unwrap();
@@ -2047,7 +2289,8 @@ mod tests {
             let response = non_streaming_function_call_response().await;
             let (mut server, mut client) = downstream_pair().await;
             let writer = tokio::spawn(async move {
-                write_responses_stream_from_chat_stream(&mut server, response).await
+                write_responses_stream_from_chat_stream(&mut server, response, &BTreeSet::new())
+                    .await
             });
             let mut output = Vec::new();
             client.read_to_end(&mut output).await.unwrap();
@@ -2294,6 +2537,80 @@ mod tests {
     }
 
     #[test]
+    fn responses_request_maps_custom_tool_to_chat_function() {
+        let chat = responses_request_to_chat_completions(
+            &json!({
+                "model": "gpt-5.6-luna",
+                "input": "Run pwd.",
+                "tools": [{
+                    "type": "custom",
+                    "name": "exec",
+                    "description": "Runs JavaScript through the local tool runtime.",
+                    "format": { "type": "grammar", "syntax": "lark", "definition": "start: /.+/" }
+                }]
+            }),
+            None,
+        )
+        .expect("chat body");
+
+        assert_eq!(
+            chat["tools"],
+            json!([{
+                "type": "function",
+                "function": {
+                    "name": "exec",
+                    "description": "Runs JavaScript through the local tool runtime.\n\nProvide the complete custom tool input in the `input` string. Expected input format: {\"definition\":\"start: /.+/\",\"syntax\":\"lark\",\"type\":\"grammar\"}",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "input": {
+                                "type": "string",
+                                "description": "The complete custom tool input."
+                            }
+                        },
+                        "required": ["input"],
+                        "additionalProperties": false
+                    }
+                }
+            }])
+        );
+    }
+
+    #[test]
+    fn responses_lite_additional_tools_map_to_chat_functions_without_messages() {
+        let chat = responses_request_to_chat_completions(
+            &json!({
+                "model": "gpt-5.6-luna",
+                "input": [{
+                    "type": "additional_tools",
+                    "role": "developer",
+                    "tools": [{
+                        "type": "custom",
+                        "name": "exec",
+                        "description": "Runs JavaScript through the local tool runtime.",
+                        "format": { "type": "grammar", "syntax": "lark" }
+                    }]
+                }, {
+                    "type": "message",
+                    "role": "developer",
+                    "content": [{ "type": "input_text", "text": "Use available tools." }]
+                }, {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{ "type": "input_text", "text": "Run Get-Location." }]
+                }]
+            }),
+            None,
+        )
+        .expect("chat body");
+
+        assert_eq!(chat["tools"][0]["function"]["name"], "exec");
+        assert_eq!(chat["messages"].as_array().map(Vec::len), Some(2));
+        assert_eq!(chat["messages"][0]["role"], "system");
+        assert_eq!(chat["messages"][1]["role"], "user");
+    }
+
+    #[test]
     fn responses_request_maps_function_call_history_to_chat_messages() {
         let chat = responses_request_to_chat_completions(
             &json!({
@@ -2322,6 +2639,40 @@ mod tests {
         assert_eq!(
             chat["messages"][0]["tool_calls"][0]["function"]["arguments"],
             "{\"command\":\"pwd\"}"
+        );
+        assert_eq!(chat["messages"][1]["role"], "tool");
+        assert_eq!(chat["messages"][1]["tool_call_id"], "call_123");
+        assert_eq!(chat["messages"][1]["content"], "D:/Project/ThreadFleet");
+    }
+
+    #[test]
+    fn responses_request_maps_custom_tool_call_history_to_chat_messages() {
+        let chat = responses_request_to_chat_completions(
+            &json!({
+                "model": "gpt-5.6-luna",
+                "input": [{
+                    "type": "custom_tool_call",
+                    "call_id": "call_123",
+                    "name": "exec",
+                    "input": "const result = await tools.exec_command({ cmd: 'pwd' });"
+                }, {
+                    "type": "custom_tool_call_output",
+                    "call_id": "call_123",
+                    "output": "D:/Project/ThreadFleet"
+                }]
+            }),
+            None,
+        )
+        .expect("chat body");
+
+        assert_eq!(chat["messages"][0]["role"], "assistant");
+        assert_eq!(
+            chat["messages"][0]["tool_calls"][0]["function"]["name"],
+            "exec"
+        );
+        assert_eq!(
+            chat["messages"][0]["tool_calls"][0]["function"]["arguments"],
+            "{\"input\":\"const result = await tools.exec_command({ cmd: 'pwd' });\"}"
         );
         assert_eq!(chat["messages"][1]["role"], "tool");
         assert_eq!(chat["messages"][1]["tool_call_id"], "call_123");
@@ -2454,6 +2805,41 @@ mod tests {
         assert_eq!(response["output"][0]["name"], "shell_command");
         assert_eq!(response["output"][0]["arguments"], "{\"command\":\"pwd\"}");
         assert_eq!(response["output_text"], "");
+    }
+
+    #[test]
+    fn chat_completion_tool_call_maps_to_responses_custom_tool_call() {
+        let custom_tool_names = BTreeSet::from(["exec".to_string()]);
+        let response = chat_completion_to_response_with_custom_tools(
+            &json!({
+                "id": "chatcmpl_tools",
+                "model": "gpt-5.6-luna",
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "content": null,
+                        "tool_calls": [{
+                            "id": "call_123",
+                            "type": "function",
+                            "function": {
+                                "name": "exec",
+                                "arguments": "{\"input\":\"await tools.exec_command({ cmd: 'pwd' });\"}"
+                            }
+                        }]
+                    }
+                }]
+            }),
+            &custom_tool_names,
+        );
+
+        assert_eq!(response["output"].as_array().map(Vec::len), Some(1));
+        assert_eq!(response["output"][0]["type"], "custom_tool_call");
+        assert_eq!(response["output"][0]["call_id"], "call_123");
+        assert_eq!(response["output"][0]["name"], "exec");
+        assert_eq!(
+            response["output"][0]["input"],
+            "await tools.exec_command({ cmd: 'pwd' });"
+        );
     }
 
     #[test]
