@@ -1276,6 +1276,72 @@ describe("useThreadMessaging telemetry", () => {
     expect(sendUserMessageService).not.toHaveBeenCalled();
   });
 
+  it("coalesces concurrent runtime resume failures into one error message", async () => {
+    let resolveResume: (threadId: string | null) => void = () => {};
+    const resumePromise = new Promise<string | null>((resolve) => {
+      resolveResume = resolve;
+    });
+    const ensureThreadRuntimeForWorkspace = vi.fn(() => resumePromise);
+    const pushThreadErrorMessage = vi.fn();
+    const { result } = renderHook(() =>
+      useThreadMessaging({
+        activeWorkspace: workspace,
+        activeThreadId: "thread-1",
+        accessMode: "current",
+        model: null,
+        effort: null,
+        collaborationMode: null,
+        reviewDeliveryMode: "inline",
+        steerEnabled: false,
+        customPrompts: [],
+        threadStatusById: {},
+        activeTurnIdByThread: {},
+        rateLimitsByWorkspace: {},
+        pendingInterruptsRef: { current: new Set<string>() },
+        dispatch: vi.fn(),
+        getCustomName: vi.fn(() => undefined),
+        markProcessing: vi.fn(),
+        markReviewing: vi.fn(),
+        setActiveTurnId: vi.fn(),
+        recordThreadActivity: vi.fn(),
+        safeMessageActivity: vi.fn(),
+        onDebug: vi.fn(),
+        pushThreadErrorMessage,
+        ensureThreadForActiveWorkspace: vi.fn(async () => "thread-1"),
+        ensureThreadForWorkspace: vi.fn(async () => "thread-1"),
+        ensureThreadRuntimeForWorkspace,
+        refreshThread: vi.fn(async () => null),
+        forkThreadForWorkspace: vi.fn(async () => null),
+        updateThreadParent: vi.fn(),
+      }),
+    );
+
+    let sendResults: SendMessageResult[] = [];
+    await act(async () => {
+      const sends = [
+        result.current.sendUserMessage("first"),
+        result.current.sendUserMessage("second"),
+        result.current.sendUserMessage("third"),
+      ];
+      await Promise.resolve();
+      resolveResume(null);
+      sendResults = await Promise.all(sends);
+    });
+
+    expect(ensureThreadRuntimeForWorkspace).toHaveBeenCalledTimes(1);
+    expect(pushThreadErrorMessage).toHaveBeenCalledTimes(1);
+    expect(pushThreadErrorMessage).toHaveBeenCalledWith(
+      "thread-1",
+      expect.any(String),
+    );
+    expect(sendResults).toEqual([
+      { status: "blocked" },
+      { status: "blocked" },
+      { status: "blocked" },
+    ]);
+    expect(sendUserMessageService).not.toHaveBeenCalled();
+  });
+
   it("resumes the thread runtime and retries turn/start once when the thread is missing", async () => {
     vi.mocked(sendUserMessageService)
       .mockResolvedValueOnce({

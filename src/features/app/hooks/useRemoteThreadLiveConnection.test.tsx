@@ -1,13 +1,23 @@
 // @vitest-environment jsdom
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useRemoteThreadLiveConnection } from "./useRemoteThreadLiveConnection";
+import {
+  collectRemoteEventGapRecoveryTargets,
+  useRemoteThreadLiveConnection,
+} from "./useRemoteThreadLiveConnection";
 
 const appServerListeners = new Set<(event: any) => void>();
+const remoteBackendEventGapListeners = new Set<(event: any) => void>();
 const subscribeAppServerEventsMock = vi.fn((listener: (event: any) => void) => {
   appServerListeners.add(listener);
   return () => {
     appServerListeners.delete(listener);
+  };
+});
+const subscribeRemoteBackendEventGapMock = vi.fn((listener: (event: any) => void) => {
+  remoteBackendEventGapListeners.add(listener);
+  return () => {
+    remoteBackendEventGapListeners.delete(listener);
   };
 });
 
@@ -18,6 +28,8 @@ const pushErrorToastMock = vi.fn();
 vi.mock("@services/events", () => ({
   subscribeAppServerEvents: (listener: (event: any) => void) =>
     subscribeAppServerEventsMock(listener),
+  subscribeRemoteBackendEventGap: (listener: (event: any) => void) =>
+    subscribeRemoteBackendEventGapMock(listener),
 }));
 
 vi.mock("@services/tauri", () => ({
@@ -58,7 +70,9 @@ describe("useRemoteThreadLiveConnection", () => {
       value: () => hasFocus,
     });
     appServerListeners.clear();
+    remoteBackendEventGapListeners.clear();
     subscribeAppServerEventsMock.mockClear();
+    subscribeRemoteBackendEventGapMock.mockClear();
     threadLiveSubscribeMock.mockClear();
     threadLiveUnsubscribeMock.mockClear();
     pushErrorToastMock.mockClear();
@@ -66,6 +80,68 @@ describe("useRemoteThreadLiveConnection", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("collects resident and active background threads across connected workspaces", () => {
+    const targets = collectRemoteEventGapRecoveryTargets({
+      workspaces: [
+        {
+          id: "ws-1",
+          name: "Workspace 1",
+          path: "/tmp/ws-1",
+          connected: true,
+          settings: { sidebarCollapsed: false },
+        },
+        {
+          id: "ws-2",
+          name: "Workspace 2",
+          path: "/tmp/ws-2",
+          connected: true,
+          settings: { sidebarCollapsed: false },
+        },
+        {
+          id: "ws-offline",
+          name: "Offline",
+          path: "/tmp/offline",
+          connected: false,
+          settings: { sidebarCollapsed: false },
+        },
+      ],
+      threadsByWorkspace: {
+        "ws-1": [
+          { id: "thread-active" },
+          { id: "thread-resident" },
+          { id: "thread-idle" },
+        ],
+        "ws-2": [
+          { id: "thread-processing" },
+          { id: "thread-reviewing" },
+          { id: "thread-active-turn" },
+        ],
+        "ws-offline": [{ id: "thread-offline" }],
+      },
+      itemsByThread: {
+        "thread-active": [],
+        "thread-resident": [],
+        "thread-offline": [],
+      },
+      threadStatusById: {
+        "thread-processing": { isProcessing: true },
+        "thread-reviewing": { isReviewing: true },
+      },
+      activeTurnIdByThread: {
+        "thread-active-turn": "turn-1",
+      },
+      activeWorkspaceId: "ws-1",
+      activeThreadId: "thread-active",
+    });
+
+    expect(targets).toEqual([
+      { workspaceId: "ws-1", threadId: "thread-resident" },
+      { workspaceId: "ws-2", threadId: "thread-processing" },
+      { workspaceId: "ws-2", threadId: "thread-reviewing" },
+      { workspaceId: "ws-2", threadId: "thread-active-turn" },
+    ]);
   });
 
   it("does not reconnect during normal idle period without detach signal", async () => {
@@ -152,6 +228,377 @@ describe("useRemoteThreadLiveConnection", () => {
 
     expect(threadLiveSubscribeMock.mock.calls.length).toBeGreaterThanOrEqual(2);
     expect(refreshThread.mock.calls.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("hydrates and reattaches after the remote backend transport disconnects", async () => {
+    const refreshThread = vi.fn().mockResolvedValue(undefined);
+
+    renderHook(() =>
+      useRemoteThreadLiveConnection({
+        backendMode: "remote",
+        activeWorkspace: {
+          id: "ws-1",
+          name: "Workspace",
+          path: "/tmp/ws-1",
+          connected: true,
+          settings: { sidebarCollapsed: false },
+        },
+        activeThreadId: "thread-1",
+        activeThreadHasLocalSnapshot: true,
+        activeThreadIsProcessing: true,
+        refreshThread,
+      }),
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(threadLiveSubscribeMock).toHaveBeenCalledTimes(1);
+    expect(refreshThread).toHaveBeenCalledTimes(0);
+
+    await act(async () => {
+      for (const listener of remoteBackendEventGapListeners) {
+        listener({ reason: "disconnected" });
+      }
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(refreshThread).toHaveBeenCalledTimes(1);
+    expect(threadLiveSubscribeMock.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("waits for connection-wide recovery before hydrating the active thread", async () => {
+    let resolveConnectionRecovery: () => void = () => {};
+    const recoverEventGap = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveConnectionRecovery = resolve;
+        }),
+    );
+    const refreshThread = vi.fn().mockResolvedValue(undefined);
+
+    renderHook(() =>
+      useRemoteThreadLiveConnection({
+        backendMode: "remote",
+        activeWorkspace: {
+          id: "ws-1",
+          name: "Workspace",
+          path: "/tmp/ws-1",
+          connected: true,
+          settings: { sidebarCollapsed: false },
+        },
+        activeThreadId: "thread-1",
+        activeThreadHasLocalSnapshot: true,
+        activeThreadIsProcessing: true,
+        refreshThread,
+        recoverEventGap,
+      }),
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await act(async () => {
+      for (const listener of remoteBackendEventGapListeners) {
+        listener({ reason: "lagged", skipped: 2 });
+      }
+      await Promise.resolve();
+    });
+
+    expect(recoverEventGap).toHaveBeenCalledTimes(1);
+    expect(refreshThread).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveConnectionRecovery();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(refreshThread).toHaveBeenCalledWith("ws-1", "thread-1");
+  });
+
+  it("retries while connection-wide event-gap recovery remains unresolved", async () => {
+    const recoverEventGap = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("workspace list unavailable"))
+      .mockResolvedValue(undefined);
+    const refreshThread = vi.fn().mockResolvedValue(undefined);
+
+    renderHook(() =>
+      useRemoteThreadLiveConnection({
+        backendMode: "remote",
+        activeWorkspace: {
+          id: "ws-1",
+          name: "Workspace",
+          path: "/tmp/ws-1",
+          connected: true,
+          settings: { sidebarCollapsed: false },
+        },
+        activeThreadId: "thread-1",
+        activeThreadHasLocalSnapshot: true,
+        activeThreadIsProcessing: true,
+        refreshThread,
+        recoverEventGap,
+      }),
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await act(async () => {
+      for (const listener of remoteBackendEventGapListeners) {
+        listener({ reason: "disconnected" });
+      }
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(recoverEventGap).toHaveBeenCalledTimes(1);
+    expect(refreshThread).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      vi.advanceTimersByTime(5_000);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(recoverEventGap).toHaveBeenCalledTimes(2);
+    expect(refreshThread).toHaveBeenCalledTimes(2);
+  });
+
+  it("runs connection-wide recovery without an active thread selection", async () => {
+    const recoverEventGap = vi.fn().mockResolvedValue(undefined);
+    const refreshThread = vi.fn().mockResolvedValue(undefined);
+
+    renderHook(() =>
+      useRemoteThreadLiveConnection({
+        backendMode: "remote",
+        activeWorkspace: {
+          id: "ws-1",
+          name: "Workspace",
+          path: "/tmp/ws-1",
+          connected: true,
+          settings: { sidebarCollapsed: false },
+        },
+        activeThreadId: null,
+        refreshThread,
+        recoverEventGap,
+      }),
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await act(async () => {
+      for (const listener of remoteBackendEventGapListeners) {
+        listener({ reason: "disconnected" });
+      }
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(recoverEventGap).toHaveBeenCalledTimes(1);
+    expect(refreshThread).not.toHaveBeenCalled();
+    expect(threadLiveSubscribeMock).not.toHaveBeenCalled();
+  });
+
+  it("hydrates a terminal thread after an event gap without reattaching live updates", async () => {
+    const refreshThread = vi.fn().mockResolvedValue(undefined);
+
+    renderHook(() =>
+      useRemoteThreadLiveConnection({
+        backendMode: "remote",
+        activeWorkspace: {
+          id: "ws-1",
+          name: "Workspace",
+          path: "/tmp/ws-1",
+          connected: true,
+          settings: { sidebarCollapsed: false },
+        },
+        activeThreadId: "thread-1",
+        activeThreadNeedsLiveConnection: false,
+        refreshThread,
+      }),
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(threadLiveSubscribeMock).not.toHaveBeenCalled();
+
+    await act(async () => {
+      for (const listener of remoteBackendEventGapListeners) {
+        listener({ reason: "lagged", skipped: 2 });
+      }
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(refreshThread).toHaveBeenCalledTimes(1);
+    expect(threadLiveSubscribeMock).not.toHaveBeenCalled();
+  });
+
+  it("retries recovery while a confirmed remote event gap remains unresolved", async () => {
+    const refreshThread = vi
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue(undefined);
+
+    renderHook(() =>
+      useRemoteThreadLiveConnection({
+        backendMode: "remote",
+        activeWorkspace: {
+          id: "ws-1",
+          name: "Workspace",
+          path: "/tmp/ws-1",
+          connected: true,
+          settings: { sidebarCollapsed: false },
+        },
+        activeThreadId: "thread-1",
+        activeThreadHasLocalSnapshot: true,
+        activeThreadIsProcessing: true,
+        refreshThread,
+      }),
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      for (const listener of remoteBackendEventGapListeners) {
+        listener({ reason: "disconnected" });
+      }
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(refreshThread).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      vi.advanceTimersByTime(5_000);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(refreshThread).toHaveBeenCalledTimes(2);
+    expect(threadLiveSubscribeMock.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("cancels event-gap recovery when remote live state is no longer desired", async () => {
+    let resolveRefresh: () => void = () => {};
+    const refreshThread = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveRefresh = resolve;
+        }),
+    );
+    const workspace = {
+      id: "ws-1",
+      name: "Workspace",
+      path: "/tmp/ws-1",
+      connected: true,
+      settings: { sidebarCollapsed: false },
+    };
+
+    const { rerender } = renderHook(
+      ({ backendMode }) =>
+        useRemoteThreadLiveConnection({
+          backendMode,
+          activeWorkspace: workspace,
+          activeThreadId: "thread-1",
+          activeThreadHasLocalSnapshot: true,
+          activeThreadIsProcessing: true,
+          refreshThread,
+        }),
+      { initialProps: { backendMode: "remote" } },
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(threadLiveSubscribeMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      for (const listener of remoteBackendEventGapListeners) {
+        listener({ reason: "disconnected" });
+      }
+      await Promise.resolve();
+    });
+    expect(refreshThread).toHaveBeenCalledTimes(1);
+
+    rerender({ backendMode: "local" });
+    await act(async () => {
+      resolveRefresh();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(threadLiveSubscribeMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels stale event-gap retry after switching remote threads", async () => {
+    let resolveRefresh: () => void = () => {};
+    const refreshThread = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveRefresh = resolve;
+          }),
+      )
+      .mockResolvedValue(undefined);
+    const workspace = {
+      id: "ws-1",
+      name: "Workspace",
+      path: "/tmp/ws-1",
+      connected: true,
+      settings: { sidebarCollapsed: false },
+    };
+
+    const { rerender } = renderHook(
+      ({ threadId }) =>
+        useRemoteThreadLiveConnection({
+          backendMode: "remote",
+          activeWorkspace: workspace,
+          activeThreadId: threadId,
+          activeThreadHasLocalSnapshot: true,
+          activeThreadIsProcessing: true,
+          refreshThread,
+        }),
+      { initialProps: { threadId: "thread-1" } },
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      for (const listener of remoteBackendEventGapListeners) {
+        listener({ reason: "disconnected" });
+      }
+      await Promise.resolve();
+    });
+    expect(refreshThread).toHaveBeenCalledWith("ws-1", "thread-1");
+
+    await act(async () => {
+      rerender({ threadId: "thread-2" });
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      resolveRefresh();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(5_000);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(refreshThread).toHaveBeenCalledTimes(1);
   });
 
   it("reattaches without resume hydration when a processing thread already has a local snapshot", async () => {

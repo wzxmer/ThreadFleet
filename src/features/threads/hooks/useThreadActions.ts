@@ -993,6 +993,7 @@ export function useThreadActions({
         maxPages?: number;
         refreshReason?: ThreadListRefreshReason;
         knownWorkspaces?: WorkspaceInfo[];
+        throwOnError?: boolean;
       },
     ) => {
       const targets = workspaces.filter((workspace) => workspace.id);
@@ -1555,6 +1556,9 @@ export function useThreadActions({
           label: "thread/list error",
           payload: error instanceof Error ? error.message : String(error),
         });
+        if (options?.throwOnError) {
+          throw error;
+        }
       } finally {
         if (!preserveState) {
           targets.forEach((workspace) => {

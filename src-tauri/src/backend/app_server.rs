@@ -474,6 +474,7 @@ async fn track_active_turn_event(
 }
 
 const PENDING_TURN_ID: &str = "__codex_monitor_pending_turn__";
+const APP_SERVER_STOPPED_MESSAGE: &str = "Codex app-server stopped unexpectedly.";
 
 fn remove_matching_active_turn(
     active_turns: &mut HashMap<String, String>,
@@ -493,55 +494,103 @@ async fn clear_pending_turn_marker(session: &WorkspaceSession, thread_id: &str) 
         .await;
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct OutputEndTurnErrorTarget {
+    workspace_id: Option<String>,
+    thread_id: String,
+    turn_id: String,
+}
+
+fn collect_output_end_turn_error_targets(
+    request_contexts: &HashMap<u64, RequestContext>,
+    active_turns: &[(String, String)],
+) -> Vec<OutputEndTurnErrorTarget> {
+    let pending_start_thread_ids = request_contexts
+        .values()
+        .filter(|context| context.method == "turn/start")
+        .filter_map(|context| context.thread_id.clone())
+        .collect::<HashSet<_>>();
+    let mut seen_thread_ids = HashSet::new();
+    let mut targets = Vec::new();
+
+    for (thread_id, turn_id) in active_turns {
+        if pending_start_thread_ids.contains(thread_id) {
+            continue;
+        }
+        if !seen_thread_ids.insert(thread_id.clone()) {
+            continue;
+        }
+        targets.push(OutputEndTurnErrorTarget {
+            workspace_id: None,
+            thread_id: thread_id.clone(),
+            turn_id: if turn_id == PENDING_TURN_ID {
+                String::new()
+            } else {
+                turn_id.clone()
+            },
+        });
+    }
+
+    for context in request_contexts.values() {
+        if context.method != "turn/steer" {
+            continue;
+        }
+        let Some(thread_id) = context.thread_id.as_ref() else {
+            continue;
+        };
+        if pending_start_thread_ids.contains(thread_id) {
+            continue;
+        }
+        if !seen_thread_ids.insert(thread_id.clone()) {
+            continue;
+        }
+        targets.push(OutputEndTurnErrorTarget {
+            workspace_id: Some(context.workspace_id.clone()),
+            thread_id: thread_id.clone(),
+            turn_id: String::new(),
+        });
+    }
+
+    targets
+}
+
 async fn fail_pending_and_active_turns_after_output_end<E: EventSink>(
     session: &WorkspaceSession,
     event_sink: &E,
     fallback_workspace_id: &str,
 ) {
-    let message = "Codex app-server stopped unexpectedly.";
+    let message = APP_SERVER_STOPPED_MESSAGE;
     let pending = {
         let mut pending = session.pending.lock().await;
         pending.drain().collect::<Vec<_>>()
     };
-    let mut request_context = {
+    let request_context = {
         let mut request_context = session.request_context.lock().await;
         request_context.drain().collect::<HashMap<_, _>>()
     };
+    let active_turns = {
+        let mut active_turns = session.active_turns.lock().await;
+        active_turns.drain().collect::<Vec<_>>()
+    };
+    session.active_turns_changed.notify_waiters();
 
+    let error_targets = collect_output_end_turn_error_targets(&request_context, &active_turns);
     for (id, sender) in pending {
-        if let Some(context) = request_context.remove(&id) {
-            if matches!(context.method.as_str(), "turn/start" | "turn/steer") {
-                if let Some(thread_id) = context.thread_id.as_deref() {
-                    event_sink.emit_app_server_event(AppServerEvent {
-                        workspace_id: context.workspace_id.clone(),
-                        message: build_turn_error_event(thread_id, "", message),
-                    });
-                }
-            }
-        }
         let _ = sender.send(json!({
             "id": id,
             "error": { "message": message }
         }));
     }
 
-    let active_turns = {
-        let mut active_turns = session.active_turns.lock().await;
-        active_turns.drain().collect::<Vec<_>>()
-    };
-    session.active_turns_changed.notify_waiters();
-    if active_turns.is_empty() {
-        return;
-    }
     let thread_workspace = session.thread_workspace.lock().await.clone();
-    for (thread_id, turn_id) in active_turns {
-        let workspace_id = thread_workspace
-            .get(&thread_id)
-            .cloned()
+    for target in error_targets {
+        let workspace_id = target
+            .workspace_id
+            .or_else(|| thread_workspace.get(&target.thread_id).cloned())
             .unwrap_or_else(|| fallback_workspace_id.to_string());
         event_sink.emit_app_server_event(AppServerEvent {
             workspace_id,
-            message: build_turn_error_event(&thread_id, &turn_id, message),
+            message: build_turn_error_event(&target.thread_id, &target.turn_id, message),
         });
     }
 }
@@ -738,7 +787,13 @@ impl WorkspaceSession {
     }
 
     async fn write_message(&self, value: Value) -> Result<(), String> {
+        if self.output_closed.load(Ordering::SeqCst) {
+            return Err(APP_SERVER_STOPPED_MESSAGE.to_string());
+        }
         let mut stdin = self.stdin.lock().await;
+        if self.output_closed.load(Ordering::SeqCst) {
+            return Err(APP_SERVER_STOPPED_MESSAGE.to_string());
+        }
         let mut line = serde_json::to_string(&value).map_err(|e| e.to_string())?;
         line.push('\n');
         stdin
@@ -758,6 +813,9 @@ impl WorkspaceSession {
         method: &str,
         params: Value,
     ) -> Result<Value, String> {
+        if self.output_closed.load(Ordering::SeqCst) {
+            return Err(APP_SERVER_STOPPED_MESSAGE.to_string());
+        }
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = oneshot::channel();
         let thread_id = extract_thread_id(&json!({ "params": params.clone() }));
@@ -1498,14 +1556,123 @@ pub(crate) async fn spawn_history_workspace_session<E: EventSink>(
 mod tests {
     use super::{
         build_codex_command_with_bin, build_initialize_params, build_turn_error_event,
-        computer_control_app_server_args, extract_related_thread_ids,
-        extract_thread_entries_from_thread_list_result, extract_thread_id, normalize_root_path,
-        remove_matching_active_turn, resolve_workspace_for_cwd,
-        should_suppress_hidden_thread_event, source_subagent_kind,
-        thread_started_is_memory_consolidation,
+        collect_output_end_turn_error_targets, computer_control_app_server_args,
+        extract_related_thread_ids, extract_thread_entries_from_thread_list_result,
+        extract_thread_id, normalize_root_path, remove_matching_active_turn,
+        resolve_workspace_for_cwd, should_suppress_hidden_thread_event, source_subagent_kind,
+        thread_started_is_memory_consolidation, RequestContext, WorkspaceSession, PENDING_TURN_ID,
     };
     use serde_json::json;
     use std::collections::HashMap;
+    use std::process::Stdio;
+    use tokio::process::Command;
+    use tokio::time::{timeout, Duration};
+
+    fn spawn_stdin_waiting_child() -> (tokio::process::Child, tokio::process::ChildStdin) {
+        #[cfg(windows)]
+        let mut command = {
+            let mut command = Command::new("cmd");
+            command.args(["/C", "more"]);
+            command
+        };
+        #[cfg(not(windows))]
+        let mut command = {
+            let mut command = Command::new("sh");
+            command.args(["-c", "cat >/dev/null"]);
+            command
+        };
+        command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        let mut child = command.spawn().expect("spawn stdin-waiting child");
+        let stdin = child.stdin.take().expect("child stdin");
+        (child, stdin)
+    }
+
+    #[test]
+    fn output_end_leaves_pending_turn_start_failure_to_the_rpc_response() {
+        let request_contexts = HashMap::from([
+            (
+                1,
+                RequestContext {
+                    workspace_id: "ws-1".to_string(),
+                    method: "turn/start".to_string(),
+                    thread_id: Some("thread-1".to_string()),
+                },
+            ),
+            (
+                2,
+                RequestContext {
+                    workspace_id: "ws-1".to_string(),
+                    method: "turn/steer".to_string(),
+                    thread_id: Some("thread-1".to_string()),
+                },
+            ),
+        ]);
+        let active_turns = vec![("thread-1".to_string(), PENDING_TURN_ID.to_string())];
+
+        let targets = collect_output_end_turn_error_targets(&request_contexts, &active_turns);
+
+        assert!(targets.is_empty());
+    }
+
+    #[test]
+    fn output_end_never_exposes_the_internal_pending_turn_marker() {
+        let active_turns = vec![("thread-1".to_string(), PENDING_TURN_ID.to_string())];
+
+        let targets = collect_output_end_turn_error_targets(&HashMap::new(), &active_turns);
+
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].turn_id, "");
+    }
+
+    #[test]
+    fn output_end_prefers_the_real_active_turn_over_pending_steer_context() {
+        let request_contexts = HashMap::from([(
+            1,
+            RequestContext {
+                workspace_id: "ws-request".to_string(),
+                method: "turn/steer".to_string(),
+                thread_id: Some("thread-1".to_string()),
+            },
+        )]);
+        let active_turns = vec![("thread-1".to_string(), "turn-real".to_string())];
+
+        let targets = collect_output_end_turn_error_targets(&request_contexts, &active_turns);
+
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].turn_id, "turn-real");
+        assert_eq!(targets[0].workspace_id, None);
+    }
+
+    #[test]
+    fn closed_output_rejects_new_requests_without_waiting_for_rpc_timeout() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime")
+            .block_on(async {
+                let (child, stdin) = spawn_stdin_waiting_child();
+                let session =
+                    WorkspaceSession::test_new(None, None, child, stdin, "ws-1".to_string());
+                session.mark_output_closed();
+
+                let result = timeout(
+                    Duration::from_millis(25),
+                    session.send_request("thread/list", json!({})),
+                )
+                .await;
+                session.shutdown().await;
+
+                assert_eq!(
+                    result.expect("closed output should reject immediately"),
+                    Err("Codex app-server stopped unexpectedly.".to_string())
+                );
+                assert!(session.pending.lock().await.is_empty());
+                assert!(session.request_context.lock().await.is_empty());
+            });
+    }
 
     #[test]
     fn mandatory_computer_use_override_follows_user_args_and_precedes_subcommand() {

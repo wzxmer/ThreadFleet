@@ -160,12 +160,24 @@ pub(super) async fn handle_rpc_request(
 
 pub(super) async fn forward_events(
     mut rx: broadcast::Receiver<DaemonEvent>,
-    out_tx_events: mpsc::UnboundedSender<String>,
+    out_tx_events: mpsc::Sender<String>,
 ) {
     loop {
         let event = match rx.recv().await {
             Ok(event) => event,
-            Err(broadcast::error::RecvError::Lagged(_)) => continue,
+            Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                let payload = json!({
+                    "method": "remote/events_lagged",
+                    "params": { "skipped": skipped },
+                });
+                let Ok(payload) = serde_json::to_string(&payload) else {
+                    continue;
+                };
+                if out_tx_events.send(payload).await.is_err() {
+                    break;
+                }
+                continue;
+            }
             Err(broadcast::error::RecvError::Closed) => break,
         };
 
@@ -173,15 +185,66 @@ pub(super) async fn forward_events(
             continue;
         };
 
-        if out_tx_events.send(payload).is_err() {
+        if out_tx_events.send(payload).await.is_err() {
             break;
         }
     }
 }
 
+#[cfg(test)]
+mod event_forwarding_tests {
+    use super::forward_events;
+    use crate::backend::events::AppServerEvent;
+    use crate::DaemonEvent;
+    use serde_json::{json, Value};
+    use tokio::sync::{broadcast, mpsc};
+
+    #[test]
+    fn lagged_event_receiver_reports_the_gap_before_forwarding_new_events() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime")
+            .block_on(async {
+                let (events_tx, events_rx) = broadcast::channel(1);
+                let (out_tx, mut out_rx) = mpsc::channel(4);
+
+                for turn_id in ["turn-1", "turn-2"] {
+                    assert!(
+                        events_tx
+                            .send(DaemonEvent::AppServer(AppServerEvent {
+                                workspace_id: "ws-1".to_string(),
+                                message: json!({
+                                    "method": "turn/completed",
+                                    "params": { "turnId": turn_id },
+                                }),
+                            }))
+                            .is_ok(),
+                        "broadcast event"
+                    );
+                }
+                drop(events_tx);
+
+                forward_events(events_rx, out_tx).await;
+
+                let gap: Value =
+                    serde_json::from_str(&out_rx.recv().await.expect("gap notification"))
+                        .expect("valid gap notification");
+                assert_eq!(gap["method"], "remote/events_lagged");
+                assert_eq!(gap["params"]["skipped"], 1);
+
+                let latest: Value =
+                    serde_json::from_str(&out_rx.recv().await.expect("latest event"))
+                        .expect("valid event notification");
+                assert_eq!(latest["method"], "app-server-event");
+                assert_eq!(latest["params"]["message"]["params"]["turnId"], "turn-2");
+            });
+    }
+}
+
 pub(super) fn spawn_rpc_response_task(
     state: Arc<DaemonState>,
-    out_tx: mpsc::UnboundedSender<String>,
+    out_tx: mpsc::Sender<String>,
     id: Option<u64>,
     method: String,
     params: Value,
@@ -198,7 +261,7 @@ pub(super) fn spawn_rpc_response_task(
             Err(message) => build_error_response(id, &message),
         };
         if let Some(response) = response {
-            let _ = out_tx.send(response);
+            let _ = out_tx.send(response).await;
         }
     });
 }

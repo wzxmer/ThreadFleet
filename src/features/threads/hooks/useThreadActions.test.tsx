@@ -2832,6 +2832,20 @@ describe("useThreadActions", () => {
     );
   });
 
+  it("propagates thread list failures for authoritative event-gap recovery", async () => {
+    vi.mocked(listThreads).mockRejectedValue(new Error("remote unavailable"));
+    const { result } = renderActions();
+
+    await expect(
+      result.current.listThreadsForWorkspaces([workspace], {
+        preserveState: true,
+        refreshReason: "remote_event_gap",
+        knownWorkspaces: [workspace],
+        throwOnError: true,
+      }),
+    ).rejects.toThrow("remote unavailable");
+  });
+
   it("assigns shared-root threads to a single target workspace when listing multiple workspaces", async () => {
     const workspaceAlias: WorkspaceInfo = {
       ...workspaceTwo,

@@ -131,6 +131,46 @@ These arrive on the same frontend event stream but are not Codex v2
 - `codex/event/skills_update_available` (handled via
   `isSkillsUpdateAvailableEvent(...)` in `useSkills.ts`)
 
+### Remote transport continuity
+
+Remote-mode transport continuity uses internal bridge signals rather than Codex
+app-server methods:
+
+- Each daemon client has a bounded 2048-message outbound queue. A receiver that
+  falls behind the daemon broadcast receives `remote/events_lagged` with the
+  skipped event count instead of losing the gap silently.
+- Remote connection establishment is single-flight. Concurrent startup or
+  recovery RPCs reuse one transport, and a stale failed client cannot clear a
+  newer healthy connection. Daemon RPC business errors are returned without
+  discarding the healthy transport.
+- The Tauri remote adapter maps daemon lag and TCP read/write termination to the
+  local `remote-backend-event-gap` event. This event is not forwarded through
+  `useAppServerEvents` and is not part of the Codex protocol.
+- Daemon client handling exits when either its reader ends or its outbound
+  writer stops, so a failed write cannot leave an idle read task retained.
+- Daemon heartbeats arrive every 15 seconds. After the client has observed that
+  the connected daemon supports heartbeats, forty-five seconds without any
+  inbound heartbeat, response, or event is treated as a disconnected transport
+  so half-open TCP connections use the same recovery path. Connections to older
+  daemons that never send a heartbeat retain the legacy no-timeout behavior.
+- A confirmed gap refreshes the thread lists for every connected workspace and
+  performs authoritative `thread/read` recovery for resident, processing,
+  reviewing, and active-turn threads. The selected thread is then reattached
+  when it still needs live updates. This also runs when no thread is selected,
+  so a connection-level gap is never reduced to selected-thread state.
+- Failed list or thread recovery retries every five seconds only while the
+  confirmed gap and remote backend generation remain current. Switching the
+  selected workspace or thread invalidates stale selected-thread retries.
+
+### App-server output termination
+
+- When app-server stdout ends, pending `turn/start` failures remain owned by
+  their RPC responses. Active turns and pending steer operations receive at
+  most one synthetic terminal `error` event per thread.
+- The internal pending-turn marker is never emitted to the frontend.
+- Requests made after stdout closure fail immediately with the stopped-server
+  error instead of waiting for the normal RPC timeout.
+
 ## Conversation Compaction Signals (Codex v2)
 
 Codex currently exposes two compaction signals:

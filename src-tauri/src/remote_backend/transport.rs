@@ -3,16 +3,21 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
-use serde_json::Value;
+use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
-use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::io::{
+    AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader, Lines,
+};
 use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::time::timeout;
 
 use super::protocol::{parse_incoming_line, IncomingMessage, DISCONNECTED_MESSAGE};
 
 pub(crate) type PendingMap = HashMap<u64, oneshot::Sender<Result<Value, String>>>;
 const OUTBOUND_QUEUE_CAPACITY: usize = 512;
+const REMOTE_INBOUND_IDLE_TIMEOUT: Duration = Duration::from_secs(45);
 
 #[derive(Clone, Debug)]
 pub(crate) enum RemoteTransportConfig {
@@ -71,13 +76,16 @@ where
     let connected = Arc::new(AtomicBool::new(true));
     let connected_for_writer = Arc::clone(&connected);
     let connected_for_reader = Arc::clone(&connected);
+    let app_for_writer = app.clone();
 
     tokio::spawn(async move {
         while let Some(message) = out_rx.recv().await {
             if writer.write_all(message.as_bytes()).await.is_err()
                 || writer.write_all(b"\n").await.is_err()
             {
-                mark_disconnected(&pending_for_writer, &connected_for_writer).await;
+                if mark_disconnected(&pending_for_writer, &connected_for_writer).await {
+                    emit_remote_backend_event_gap(&app_for_writer, "disconnected", None);
+                }
                 break;
             }
         }
@@ -103,25 +111,54 @@ async fn read_loop<R>(
     R: AsyncRead + Unpin + Send + 'static,
 {
     let mut lines = BufReader::new(reader).lines();
+    let mut heartbeat_observed = false;
 
-    while let Ok(Some(line)) = lines.next_line().await {
+    loop {
+        let next_line = if heartbeat_observed {
+            next_line_until_idle(&mut lines, REMOTE_INBOUND_IDLE_TIMEOUT).await
+        } else {
+            lines.next_line().await.ok().flatten()
+        };
+        let Some(line) = next_line else {
+            break;
+        };
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
         }
-        dispatch_incoming_line(&app, &pending, trimmed).await;
+        heartbeat_observed |= dispatch_incoming_line(&app, &pending, trimmed).await;
     }
 
-    mark_disconnected(&pending, &connected).await;
+    if mark_disconnected(&pending, &connected).await {
+        emit_remote_backend_event_gap(&app, "disconnected", None);
+    }
+}
+
+async fn next_line_until_idle<R>(lines: &mut Lines<R>, idle_timeout: Duration) -> Option<String>
+where
+    R: AsyncBufRead + Unpin,
+{
+    match timeout(idle_timeout, lines.next_line()).await {
+        Ok(Ok(Some(line))) => Some(line),
+        _ => None,
+    }
+}
+
+fn emit_remote_backend_event_gap(app: &AppHandle, reason: &str, skipped: Option<u64>) {
+    let payload = match skipped {
+        Some(skipped) => json!({ "reason": reason, "skipped": skipped }),
+        None => json!({ "reason": reason }),
+    };
+    let _ = app.emit("remote-backend-event-gap", payload);
 }
 
 pub(crate) async fn dispatch_incoming_line(
     app: &AppHandle,
     pending: &Arc<Mutex<PendingMap>>,
     line: &str,
-) {
+) -> bool {
     let Some(message) = parse_incoming_line(line) else {
-        return;
+        return false;
     };
 
     match message {
@@ -130,29 +167,88 @@ pub(crate) async fn dispatch_incoming_line(
             if let Some(sender) = sender {
                 let _ = sender.send(payload);
             }
+            false
         }
-        IncomingMessage::Notification { method, params } => match method.as_str() {
-            "app-server-event" => {
-                let _ = app.emit("app-server-event", params);
+        IncomingMessage::Notification { method, params } => {
+            let is_heartbeat = method == "remote/heartbeat";
+            match method.as_str() {
+                "app-server-event" => {
+                    let _ = app.emit("app-server-event", params);
+                }
+                "terminal-output" => {
+                    let _ = app.emit("terminal-output", params);
+                }
+                "terminal-exit" => {
+                    let _ = app.emit("terminal-exit", params);
+                }
+                "remote/events_lagged" => {
+                    let skipped = params.get("skipped").and_then(Value::as_u64);
+                    emit_remote_backend_event_gap(app, "lagged", skipped);
+                }
+                _ => {}
             }
-            "terminal-output" => {
-                let _ = app.emit("terminal-output", params);
-            }
-            "terminal-exit" => {
-                let _ = app.emit("terminal-exit", params);
-            }
-            _ => {}
-        },
+            is_heartbeat
+        }
     }
 }
 
 pub(crate) async fn mark_disconnected(
     pending: &Arc<Mutex<PendingMap>>,
     connected: &Arc<AtomicBool>,
-) {
-    connected.store(false, Ordering::SeqCst);
+) -> bool {
+    let was_connected = connected.swap(false, Ordering::SeqCst);
     let mut pending = pending.lock().await;
     for (_, sender) in pending.drain() {
         let _ = sender.send(Err(DISCONNECTED_MESSAGE.to_string()));
+    }
+    was_connected
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{mark_disconnected, next_line_until_idle, PendingMap};
+    use crate::remote_backend::protocol::DISCONNECTED_MESSAGE;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::Arc;
+    use std::time::Duration;
+    use tokio::io::{duplex, AsyncBufReadExt, BufReader};
+    use tokio::sync::{oneshot, Mutex};
+
+    #[test]
+    fn inbound_idle_timeout_detects_a_half_open_transport() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime")
+            .block_on(async {
+                let (reader, _writer) = duplex(64);
+                let mut lines = BufReader::new(reader).lines();
+
+                assert_eq!(
+                    next_line_until_idle(&mut lines, Duration::from_millis(10)).await,
+                    None
+                );
+            });
+    }
+
+    #[test]
+    fn disconnect_transition_is_reported_once_and_fails_pending_requests() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime")
+            .block_on(async {
+                let pending = Arc::new(Mutex::new(PendingMap::new()));
+                let connected = Arc::new(AtomicBool::new(true));
+                let (sender, receiver) = oneshot::channel();
+                pending.lock().await.insert(7, sender);
+
+                assert!(mark_disconnected(&pending, &connected).await);
+                assert_eq!(
+                    receiver.await.expect("pending response"),
+                    Err(DISCONNECTED_MESSAGE.to_string())
+                );
+                assert!(!mark_disconnected(&pending, &connected).await);
+            });
     }
 }

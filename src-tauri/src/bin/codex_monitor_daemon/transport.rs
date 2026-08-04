@@ -3,6 +3,24 @@ use super::rpc::{
     spawn_rpc_response_task,
 };
 use super::*;
+use futures_util::future::{select, Either};
+use tokio::io::{AsyncBufRead, Lines};
+use tokio::sync::oneshot;
+
+async fn next_client_line<R>(
+    lines: &mut Lines<R>,
+    writer_closed: &mut oneshot::Receiver<()>,
+) -> std::io::Result<Option<String>>
+where
+    R: AsyncBufRead + Unpin,
+{
+    let next_line = lines.next_line();
+    futures_util::pin_mut!(next_line);
+    match select(next_line, writer_closed).await {
+        Either::Left((line, _)) => line,
+        Either::Right((_, _)) => Ok(None),
+    }
+}
 
 pub(super) async fn handle_client(
     socket: TcpStream,
@@ -14,7 +32,8 @@ pub(super) async fn handle_client(
     let (reader, mut writer) = socket.into_split();
     let mut lines = BufReader::new(reader).lines();
 
-    let (out_tx, mut out_rx) = mpsc::unbounded_channel::<String>();
+    let (out_tx, mut out_rx) = mpsc::channel::<String>(REMOTE_CLIENT_OUTBOUND_QUEUE_CAPACITY);
+    let (writer_closed_tx, mut writer_closed_rx) = oneshot::channel();
     let write_task = tokio::spawn(async move {
         while let Some(message) = out_rx.recv().await {
             if writer.write_all(message.as_bytes()).await.is_err() {
@@ -24,6 +43,7 @@ pub(super) async fn handle_client(
                 break;
             }
         }
+        let _ = writer_closed_tx.send(());
     });
 
     let mut authenticated = config.token.is_none();
@@ -41,7 +61,7 @@ pub(super) async fn handle_client(
                 let Ok(message) = serde_json::to_string(&payload) else {
                     continue;
                 };
-                if out_tx_heartbeat.send(message).is_err() {
+                if out_tx_heartbeat.send(message).await.is_err() {
                     break;
                 }
             }
@@ -56,7 +76,7 @@ pub(super) async fn handle_client(
         events_task = Some(tokio::spawn(forward_events(rx, out_tx_events)));
     }
 
-    while let Ok(Some(line)) = lines.next_line().await {
+    while let Ok(Some(line)) = next_client_line(&mut lines, &mut writer_closed_rx).await {
         let line = line.trim();
         if line.is_empty() {
             continue;
@@ -78,7 +98,9 @@ pub(super) async fn handle_client(
         if !authenticated {
             if method != "auth" {
                 if let Some(response) = build_error_response(id, "unauthorized") {
-                    let _ = out_tx.send(response);
+                    if out_tx.send(response).await.is_err() {
+                        break;
+                    }
                 }
                 continue;
             }
@@ -87,14 +109,18 @@ pub(super) async fn handle_client(
             let provided = parse_auth_token(&params).unwrap_or_default();
             if expected != provided {
                 if let Some(response) = build_error_response(id, "invalid token") {
-                    let _ = out_tx.send(response);
+                    if out_tx.send(response).await.is_err() {
+                        break;
+                    }
                 }
                 continue;
             }
 
             authenticated = true;
             if let Some(response) = build_result_response(id, json!({ "ok": true })) {
-                let _ = out_tx.send(response);
+                if out_tx.send(response).await.is_err() {
+                    break;
+                }
             }
 
             let rx = events.subscribe();
@@ -121,4 +147,36 @@ pub(super) async fn handle_client(
     }
     heartbeat_task.abort();
     write_task.abort();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::next_client_line;
+    use tokio::io::{duplex, AsyncBufReadExt, BufReader};
+    use tokio::sync::oneshot;
+    use tokio::time::{timeout, Duration};
+
+    #[test]
+    fn writer_shutdown_interrupts_an_idle_client_reader() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime")
+            .block_on(async {
+                let (reader, _peer) = duplex(64);
+                let mut lines = BufReader::new(reader).lines();
+                let (writer_closed_tx, mut writer_closed_rx) = oneshot::channel();
+                writer_closed_tx.send(()).expect("signal writer shutdown");
+
+                let line = timeout(
+                    Duration::from_millis(25),
+                    next_client_line(&mut lines, &mut writer_closed_rx),
+                )
+                .await
+                .expect("writer shutdown should interrupt idle read")
+                .expect("client read result");
+
+                assert_eq!(line, None);
+            });
+    }
 }

@@ -19,19 +19,30 @@ export type TerminalExitEvent = {
   terminalId: string;
 };
 
+export type RemoteBackendEventGapEvent = {
+  reason: "disconnected" | "lagged";
+  skipped?: number;
+};
+
 type SubscriptionOptions = {
   onError?: (error: unknown) => void;
 };
 
 type Listener<T> = (payload: T) => void;
 
+const EVENT_LISTEN_RETRY_DELAY_MS = 250;
+const EVENT_LISTEN_RETRY_MAX_DELAY_MS = 5_000;
+
 function createEventHub<T>(eventName: string) {
   const listeners = new Set<Listener<T>>();
+  const listenErrorListeners = new Set<(error: unknown) => void>();
   let unlisten: Unsubscribe | null = null;
   let listenPromise: Promise<Unsubscribe> | null = null;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  let retryDelayMs = EVENT_LISTEN_RETRY_DELAY_MS;
 
-  const start = (options?: SubscriptionOptions) => {
-    if (unlisten || listenPromise) {
+  const start = () => {
+    if (unlisten || listenPromise || retryTimer !== null) {
       return;
     }
     listenPromise = listen<T>(eventName, (event) => {
@@ -46,6 +57,7 @@ function createEventHub<T>(eventName: string) {
     listenPromise
       .then((handler) => {
         listenPromise = null;
+        retryDelayMs = EVENT_LISTEN_RETRY_DELAY_MS;
         if (listeners.size === 0) {
           handler();
           return;
@@ -54,11 +66,33 @@ function createEventHub<T>(eventName: string) {
       })
       .catch((error) => {
         listenPromise = null;
-        options?.onError?.(error);
+        for (const listener of listenErrorListeners) {
+          try {
+            listener(error);
+          } catch (listenerError) {
+            console.error(`[events] ${eventName} error listener failed`, listenerError);
+          }
+        }
+        if (listeners.size > 0 && retryTimer === null) {
+          const delayMs = retryDelayMs;
+          retryDelayMs = Math.min(
+            retryDelayMs * 2,
+            EVENT_LISTEN_RETRY_MAX_DELAY_MS,
+          );
+          retryTimer = setTimeout(() => {
+            retryTimer = null;
+            start();
+          }, delayMs);
+        }
       });
   };
 
   const stop = () => {
+    if (retryTimer !== null) {
+      clearTimeout(retryTimer);
+      retryTimer = null;
+    }
+    retryDelayMs = EVENT_LISTEN_RETRY_DELAY_MS;
     if (unlisten) {
       try {
         unlisten();
@@ -73,10 +107,19 @@ function createEventHub<T>(eventName: string) {
     onEvent: Listener<T>,
     options?: SubscriptionOptions,
   ): Unsubscribe => {
+    const onListenError = options?.onError
+      ? (error: unknown) => options.onError?.(error)
+      : null;
     listeners.add(onEvent);
-    start(options);
+    if (onListenError) {
+      listenErrorListeners.add(onListenError);
+    }
+    start();
     return () => {
       listeners.delete(onEvent);
+      if (onListenError) {
+        listenErrorListeners.delete(onListenError);
+      }
       if (listeners.size === 0) {
         stop();
       }
@@ -91,6 +134,9 @@ const dictationDownloadHub = createEventHub<DictationModelStatus>("dictation-dow
 const dictationEventHub = createEventHub<DictationEvent>("dictation-event");
 const terminalOutputHub = createEventHub<TerminalOutputEvent>("terminal-output");
 const terminalExitHub = createEventHub<TerminalExitEvent>("terminal-exit");
+const remoteBackendEventGapHub = createEventHub<RemoteBackendEventGapEvent>(
+  "remote-backend-event-gap",
+);
 const updaterCheckHub = createEventHub<void>("updater-check");
 const releaseAssetDownloadProgressHub = createEventHub<ReleaseAssetDownloadProgress>(
   "release-asset-download-progress",
@@ -153,6 +199,13 @@ export function subscribeTerminalExit(
   options?: SubscriptionOptions,
 ): Unsubscribe {
   return terminalExitHub.subscribe(onEvent, options);
+}
+
+export function subscribeRemoteBackendEventGap(
+  onEvent: (event: RemoteBackendEventGapEvent) => void,
+  options?: SubscriptionOptions,
+): Unsubscribe {
+  return remoteBackendEventGapHub.subscribe(onEvent, options);
 }
 
 export function subscribeUpdaterCheck(

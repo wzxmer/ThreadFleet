@@ -12,6 +12,7 @@ export type ThreadListRefreshReason =
   | "manual_refresh"
   | "sort_change"
   | "app_server_runtime_refresh"
+  | "remote_event_gap"
   | "unknown";
 
 export type ThreadListContinuityState = {

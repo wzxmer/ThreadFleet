@@ -97,6 +97,11 @@ type PendingTurnStartHandle = PendingTurnStart & {
   threadId: string;
 };
 
+type ThreadRuntimeResumeAttempt = {
+  promise: Promise<string | null>;
+  failureReported: boolean;
+};
+
 function createOptimisticUserMessage(
   attachments: string[],
   replaceMessageId?: string,
@@ -443,6 +448,9 @@ export function useThreadMessaging({
 }: UseThreadMessagingOptions) {
   const { t } = useI18n();
   const interruptInFlightRef = useRef(new Set<string>());
+  const runtimeResumeAttemptsRef = useRef(
+    new Map<string, ThreadRuntimeResumeAttempt>(),
+  );
   const pendingTurnStartSequenceRef = useRef(0);
   const computerControlDecisionByThreadRef = useRef(
     new Map<string, { turnId: string | null; decisionId: string }>(),
@@ -450,6 +458,33 @@ export function useThreadMessaging({
   const [pendingTurnStartByThread, setPendingTurnStartByThread] = useState<
     Record<string, PendingTurnStart>
   >({});
+  const getRuntimeResumeAttempt = useCallback(
+    (workspaceId: string, threadId: string, force = false) => {
+      if (!ensureThreadRuntimeForWorkspace) {
+        return null;
+      }
+      const key = `${workspaceId}:${threadId}:${force ? "force" : "default"}`;
+      const existing = runtimeResumeAttemptsRef.current.get(key);
+      if (existing) {
+        return existing;
+      }
+      const attempt: ThreadRuntimeResumeAttempt = {
+        promise: force
+          ? ensureThreadRuntimeForWorkspace(workspaceId, threadId, true)
+          : ensureThreadRuntimeForWorkspace(workspaceId, threadId),
+        failureReported: false,
+      };
+      runtimeResumeAttemptsRef.current.set(key, attempt);
+      const clearAttempt = () => {
+        if (runtimeResumeAttemptsRef.current.get(key) === attempt) {
+          runtimeResumeAttemptsRef.current.delete(key);
+        }
+      };
+      void attempt.promise.then(clearAttempt, clearAttempt);
+      return attempt;
+    },
+    [ensureThreadRuntimeForWorkspace],
+  );
   const beginPendingTurnStart = useCallback(
     (threadId: string): PendingTurnStartHandle => {
       pendingTurnStartSequenceRef.current += 1;
@@ -641,18 +676,26 @@ export function useThreadMessaging({
       }
       if (!shouldSteer && ensureThreadRuntimeForWorkspace) {
         let resumedThreadId: string | null;
+        const runtimeResumeAttempt = getRuntimeResumeAttempt(
+          workspace.id,
+          threadId,
+        );
+        if (!runtimeResumeAttempt) {
+          clearPendingTurnStart(pendingTurnStart);
+          return { status: "blocked" };
+        }
         try {
-          resumedThreadId = await ensureThreadRuntimeForWorkspace(
-            workspace.id,
-            threadId,
-          );
+          resumedThreadId = await runtimeResumeAttempt.promise;
         } catch (error) {
           clearPendingTurnStart(pendingTurnStart);
           throw error;
         }
         if (!resumedThreadId) {
-          pushThreadErrorMessage(threadId, t("threads.runtimeResumeFailed"));
-          safeMessageActivity();
+          if (!runtimeResumeAttempt.failureReported) {
+            runtimeResumeAttempt.failureReported = true;
+            pushThreadErrorMessage(threadId, t("threads.runtimeResumeFailed"));
+            safeMessageActivity();
+          }
           clearPendingTurnStart(pendingTurnStart);
           return { status: "blocked" };
         }
@@ -1034,11 +1077,15 @@ export function useThreadMessaging({
               error: error instanceof Error ? error.message : String(error),
             },
           });
-          const resumedThreadId = await ensureThreadRuntimeForWorkspace(
+          const runtimeResumeAttempt = getRuntimeResumeAttempt(
             workspace.id,
             threadId,
             true,
           );
+          if (!runtimeResumeAttempt) {
+            return false;
+          }
+          const resumedThreadId = await runtimeResumeAttempt.promise;
           if (!resumedThreadId) {
             return false;
           }

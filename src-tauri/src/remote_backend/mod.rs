@@ -68,42 +68,92 @@ struct RemoteBackendInner {
     connected: Arc<std::sync::atomic::AtomicBool>,
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum RemoteCallErrorKind {
+    Disconnected,
+    Transport,
+    Rpc,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct RemoteCallError {
+    kind: RemoteCallErrorKind,
+    message: String,
+}
+
+impl RemoteCallError {
+    fn disconnected() -> Self {
+        Self {
+            kind: RemoteCallErrorKind::Disconnected,
+            message: DISCONNECTED_MESSAGE.to_string(),
+        }
+    }
+
+    fn transport(message: String) -> Self {
+        Self {
+            kind: RemoteCallErrorKind::Transport,
+            message,
+        }
+    }
+
+    fn rpc(message: String) -> Self {
+        Self {
+            kind: RemoteCallErrorKind::Rpc,
+            message,
+        }
+    }
+
+    fn invalidates_connection(&self) -> bool {
+        self.kind != RemoteCallErrorKind::Rpc
+    }
+}
+
 impl RemoteBackend {
-    pub(crate) async fn call(&self, method: &str, params: Value) -> Result<Value, String> {
+    fn same_connection(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.inner, &other.inner)
+    }
+
+    async fn call(&self, method: &str, params: Value) -> Result<Value, RemoteCallError> {
         if !self.inner.connected.load(Ordering::SeqCst) {
-            return Err(DISCONNECTED_MESSAGE.to_string());
+            return Err(RemoteCallError::disconnected());
         }
 
         let id = self.inner.next_id.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.inner.pending.lock().await.insert(id, tx);
 
-        let message = build_request_line(id, method, params)?;
+        let message = match build_request_line(id, method, params) {
+            Ok(message) => message,
+            Err(error) => {
+                self.inner.pending.lock().await.remove(&id);
+                return Err(RemoteCallError::rpc(error));
+            }
+        };
         match timeout(REMOTE_SEND_TIMEOUT, self.inner.out_tx.send(message)).await {
             Ok(Ok(())) => {}
             Ok(Err(_)) => {
                 self.inner.pending.lock().await.remove(&id);
-                return Err(DISCONNECTED_MESSAGE.to_string());
+                return Err(RemoteCallError::disconnected());
             }
             Err(_) => {
                 self.inner.pending.lock().await.remove(&id);
-                return Err(format!(
+                return Err(RemoteCallError::transport(format!(
                     "remote backend request dispatch timed out after {} seconds",
                     REMOTE_SEND_TIMEOUT.as_secs()
-                ));
+                )));
             }
         }
 
         let request_timeout = request_timeout_for_method(method);
         match timeout(request_timeout, rx).await {
-            Ok(Ok(result)) => result,
-            Ok(Err(_)) => Err(DISCONNECTED_MESSAGE.to_string()),
+            Ok(Ok(result)) => result.map_err(RemoteCallError::rpc),
+            Ok(Err(_)) => Err(RemoteCallError::disconnected()),
             Err(_) => {
                 self.inner.pending.lock().await.remove(&id);
-                Err(format!(
+                Err(RemoteCallError::transport(format!(
                     "remote backend request timed out after {} seconds",
                     request_timeout.as_secs()
-                ))
+                )))
             }
         }
     }
@@ -139,24 +189,38 @@ pub(crate) async fn call_remote(
     let client = ensure_remote_backend(state, app.clone()).await?;
     match client.call(method, params.clone()).await {
         Ok(value) => Ok(value),
-        Err(err) if err == DISCONNECTED_MESSAGE => {
-            *state.remote_backend.lock().await = None;
+        Err(err) if err.kind == RemoteCallErrorKind::Disconnected => {
+            invalidate_remote_backend_if_current(state, &client).await;
             if !can_retry_after_disconnect(method) {
-                return Err(err);
+                return Err(err.message);
             }
             let retry_client = ensure_remote_backend(state, app).await?;
             match retry_client.call(method, params).await {
                 Ok(value) => Ok(value),
                 Err(retry_err) => {
-                    *state.remote_backend.lock().await = None;
-                    Err(retry_err)
+                    if retry_err.invalidates_connection() {
+                        invalidate_remote_backend_if_current(state, &retry_client).await;
+                    }
+                    Err(retry_err.message)
                 }
             }
         }
         Err(err) => {
-            *state.remote_backend.lock().await = None;
-            Err(err)
+            if err.invalidates_connection() {
+                invalidate_remote_backend_if_current(state, &client).await;
+            }
+            Err(err.message)
         }
+    }
+}
+
+async fn invalidate_remote_backend_if_current(state: &AppState, client: &RemoteBackend) {
+    let mut guard = state.remote_backend.lock().await;
+    if guard
+        .as_ref()
+        .is_some_and(|current| current.same_connection(client))
+    {
+        *guard = None;
     }
 }
 
@@ -230,13 +294,13 @@ fn can_retry_after_disconnect(method: &str) -> bool {
 }
 
 async fn ensure_remote_backend(state: &AppState, app: AppHandle) -> Result<RemoteBackend, String> {
-    {
-        let guard = state.remote_backend.lock().await;
-        if let Some(client) = guard.as_ref() {
-            return Ok(client.clone());
-        }
+    let mut guard = state.remote_backend.lock().await;
+    if let Some(client) = guard.as_ref() {
+        return Ok(client.clone());
     }
 
+    // Keep connection establishment single-flight so concurrent startup RPCs
+    // cannot create and immediately discard competing event transports.
     let transport_config = {
         let settings = state.app_settings.lock().await;
         resolve_transport_config(&settings)?
@@ -263,14 +327,12 @@ async fn ensure_remote_backend(state: &AppState, app: AppHandle) -> Result<Remot
             client
                 .call("auth", json!({ "token": token }))
                 .await
-                .map(|_| ())?;
+                .map(|_| ())
+                .map_err(|error| error.message)?;
         }
     }
 
-    {
-        let mut guard = state.remote_backend.lock().await;
-        *guard = Some(client.clone());
-    }
+    *guard = Some(client.clone());
 
     Ok(client)
 }
@@ -293,10 +355,16 @@ fn resolve_transport_config(
 mod tests {
     use super::{
         can_retry_after_disconnect, request_timeout_for_method, resolve_transport_config,
+        RemoteBackend, RemoteBackendInner, RemoteCallErrorKind,
         REMOTE_LONG_RUNNING_REQUEST_TIMEOUT, REMOTE_REQUEST_TIMEOUT,
     };
+    use crate::remote_backend::transport::PendingMap;
     use crate::remote_backend::transport::RemoteTransportConfig;
     use crate::types::AppSettings;
+    use serde_json::{json, Value};
+    use std::sync::atomic::{AtomicBool, AtomicU64};
+    use std::sync::Arc;
+    use tokio::sync::{mpsc, Mutex};
 
     #[test]
     fn resolve_tcp_transport_uses_remote_host() {
@@ -363,5 +431,49 @@ mod tests {
             request_timeout_for_method("list_threads"),
             REMOTE_REQUEST_TIMEOUT
         );
+    }
+
+    #[test]
+    fn rpc_error_does_not_invalidate_a_healthy_remote_connection() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime")
+            .block_on(async {
+                let (out_tx, mut out_rx) = mpsc::channel(1);
+                let pending = Arc::new(Mutex::new(PendingMap::new()));
+                let client = RemoteBackend {
+                    inner: Arc::new(RemoteBackendInner {
+                        out_tx,
+                        pending: Arc::clone(&pending),
+                        next_id: AtomicU64::new(1),
+                        connected: Arc::new(AtomicBool::new(true)),
+                    }),
+                };
+
+                let call_task = tokio::spawn({
+                    let client = client.clone();
+                    async move { client.call("read_thread", json!({})).await }
+                });
+                let request: Value =
+                    serde_json::from_str(&out_rx.recv().await.expect("outbound request"))
+                        .expect("request json");
+                let request_id = request
+                    .get("id")
+                    .and_then(Value::as_u64)
+                    .expect("request id");
+                pending
+                    .lock()
+                    .await
+                    .remove(&request_id)
+                    .expect("pending response")
+                    .send(Err("thread not found".to_string()))
+                    .expect("deliver rpc error");
+
+                let error = call_task.await.expect("call task").expect_err("rpc error");
+                assert_eq!(error.kind, RemoteCallErrorKind::Rpc);
+                assert_eq!(error.message, "thread not found");
+                assert!(!error.invalidates_connection());
+            });
     }
 }

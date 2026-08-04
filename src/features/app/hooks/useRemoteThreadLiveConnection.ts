@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { subscribeAppServerEvents } from "@services/events";
+import {
+  subscribeAppServerEvents,
+  subscribeRemoteBackendEventGap,
+} from "@services/events";
 import { threadLiveSubscribe, threadLiveUnsubscribe } from "@services/tauri";
 import {
   getAppServerParams,
@@ -11,11 +14,17 @@ import type { WorkspaceInfo } from "@/types";
 export type RemoteThreadConnectionState = "live" | "polling" | "disconnected";
 
 const SELF_DETACH_IGNORE_WINDOW_MS = 10_000;
+const TRANSPORT_RECOVERY_RETRY_DELAY_MS = 5_000;
 
 type ReconnectOptions = {
   runResume?: boolean;
   attachLive?: boolean;
-  reason?: "thread-switch" | "focus" | "detached-recovery" | "connected-recovery";
+  reason?:
+    | "thread-switch"
+    | "focus"
+    | "detached-recovery"
+    | "connected-recovery"
+    | "transport-recovery";
 };
 
 type UseRemoteThreadLiveConnectionOptions = {
@@ -27,7 +36,69 @@ type UseRemoteThreadLiveConnectionOptions = {
   activeThreadNeedsLiveConnection?: boolean;
   refreshThread: (workspaceId: string, threadId: string) => Promise<unknown> | unknown;
   reconnectWorkspace?: (workspace: WorkspaceInfo) => Promise<unknown> | unknown;
+  recoverEventGap?: () => Promise<unknown> | unknown;
 };
+
+type RemoteEventGapRecoveryState = {
+  workspaces: WorkspaceInfo[];
+  threadsByWorkspace: Record<string, Array<{ id: string }>>;
+  itemsByThread: Record<string, unknown>;
+  threadStatusById: Record<
+    string,
+    { isProcessing?: boolean; isReviewing?: boolean } | undefined
+  >;
+  activeTurnIdByThread: Record<string, string | null | undefined>;
+  activeWorkspaceId: string | null;
+  activeThreadId: string | null;
+};
+
+export type RemoteEventGapRecoveryTarget = {
+  workspaceId: string;
+  threadId: string;
+};
+
+export function collectRemoteEventGapRecoveryTargets({
+  workspaces,
+  threadsByWorkspace,
+  itemsByThread,
+  threadStatusById,
+  activeTurnIdByThread,
+  activeWorkspaceId,
+  activeThreadId,
+}: RemoteEventGapRecoveryState): RemoteEventGapRecoveryTarget[] {
+  const targets: RemoteEventGapRecoveryTarget[] = [];
+  const seen = new Set<string>();
+
+  workspaces
+    .filter((workspace) => workspace.connected)
+    .forEach((workspace) => {
+      (threadsByWorkspace[workspace.id] ?? []).forEach((thread) => {
+        const status = threadStatusById[thread.id];
+        const hasResidentSnapshot = Object.prototype.hasOwnProperty.call(
+          itemsByThread,
+          thread.id,
+        );
+        const needsAuthoritativeRead =
+          hasResidentSnapshot ||
+          status?.isProcessing === true ||
+          status?.isReviewing === true ||
+          Boolean(activeTurnIdByThread[thread.id]);
+        const isCurrentActiveThread =
+          workspace.id === activeWorkspaceId && thread.id === activeThreadId;
+        const key = `${workspace.id}\u0000${thread.id}`;
+        if (
+          needsAuthoritativeRead &&
+          !isCurrentActiveThread &&
+          !seen.has(key)
+        ) {
+          seen.add(key);
+          targets.push({ workspaceId: workspace.id, threadId: thread.id });
+        }
+      });
+    });
+
+  return targets;
+}
 
 function keyForThread(workspaceId: string, threadId: string) {
   return `${workspaceId}:${threadId}`;
@@ -85,6 +156,7 @@ export function useRemoteThreadLiveConnection({
   activeThreadNeedsLiveConnection = true,
   refreshThread,
   reconnectWorkspace,
+  recoverEventGap,
 }: UseRemoteThreadLiveConnectionOptions) {
   const activeWorkspaceId = activeWorkspace?.id ?? null;
   const activeWorkspaceConnected = activeWorkspace?.connected ?? false;
@@ -107,6 +179,7 @@ export function useRemoteThreadLiveConnection({
   const activeThreadNeedsLiveConnectionRef = useRef(activeThreadNeedsLiveConnection);
   const refreshThreadRef = useRef(refreshThread);
   const reconnectWorkspaceRef = useRef(reconnectWorkspace);
+  const recoverEventGapRef = useRef(recoverEventGap);
   const connectionStateRef = useRef(connectionState);
   const activeSubscriptionKeyRef = useRef<string | null>(null);
   const desiredSubscriptionKeyRef = useRef<string | null>(null);
@@ -127,6 +200,7 @@ export function useRemoteThreadLiveConnection({
     activeThreadNeedsLiveConnectionRef.current = activeThreadNeedsLiveConnection;
     refreshThreadRef.current = refreshThread;
     reconnectWorkspaceRef.current = reconnectWorkspace;
+    recoverEventGapRef.current = recoverEventGap;
   }, [
     backendMode,
     activeWorkspace,
@@ -136,6 +210,7 @@ export function useRemoteThreadLiveConnection({
     activeThreadNeedsLiveConnection,
     refreshThread,
     reconnectWorkspace,
+    recoverEventGap,
   ]);
 
   useEffect(() => {
@@ -242,7 +317,12 @@ export function useRemoteThreadLiveConnection({
           }
 
           if (shouldResume) {
-            await Promise.resolve(refreshThreadRef.current(workspaceId, threadId));
+            const refreshedThreadId = await Promise.resolve(
+              refreshThreadRef.current(workspaceId, threadId),
+            );
+            if (refreshedThreadId === null) {
+              throw new Error("thread/read did not return a thread");
+            }
           }
           if (sequence !== reconnectSequenceRef.current) {
             return false;
@@ -333,6 +413,8 @@ export function useRemoteThreadLiveConnection({
     }
 
     if (!nextKey) {
+      reconnectSequenceRef.current += 1;
+      inFlightReconnectRef.current = null;
       reconcileDisconnectedState();
       return;
     }
@@ -459,6 +541,91 @@ export function useRemoteThreadLiveConnection({
       unlisten();
     };
   }, [reconnectLive, reconcileDisconnectedState, setState]);
+
+  useEffect(() => {
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let recoveryGeneration = 0;
+
+    const clearRetry = () => {
+      if (retryTimer !== null) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+    };
+
+    const attemptRecovery = async (generation: number) => {
+      if (backendModeRef.current !== "remote") {
+        return;
+      }
+
+      reconnectSequenceRef.current += 1;
+      inFlightReconnectRef.current = null;
+      activeSubscriptionKeyRef.current = null;
+      setState("disconnected");
+
+      let connectionWideRecovered = true;
+      try {
+        await Promise.resolve(recoverEventGapRef.current?.());
+      } catch {
+        connectionWideRecovered = false;
+      }
+      if (
+        generation !== recoveryGeneration ||
+        backendModeRef.current !== "remote"
+      ) {
+        return;
+      }
+
+      const workspaceId = activeWorkspaceRef.current?.id ?? null;
+      const threadId = activeThreadIdRef.current;
+      const activeThreadRecovered =
+        workspaceId && threadId
+          ? await reconnectLive(workspaceId, threadId, {
+              runResume: true,
+              attachLive: activeThreadNeedsLiveConnectionRef.current,
+              reason: "transport-recovery",
+            })
+          : true;
+      if (
+        generation !== recoveryGeneration ||
+        backendModeRef.current !== "remote"
+      ) {
+        return;
+      }
+      if (connectionWideRecovered && activeThreadRecovered) {
+        if (!workspaceId || !threadId) {
+          reconcileDisconnectedState();
+        }
+        return;
+      }
+
+      setState("disconnected");
+
+      retryTimer = setTimeout(() => {
+        retryTimer = null;
+        void attemptRecovery(generation);
+      }, TRANSPORT_RECOVERY_RETRY_DELAY_MS);
+    };
+
+    const unlisten = subscribeRemoteBackendEventGap(() => {
+      recoveryGeneration += 1;
+      clearRetry();
+      void attemptRecovery(recoveryGeneration);
+    });
+
+    return () => {
+      recoveryGeneration += 1;
+      clearRetry();
+      unlisten();
+    };
+  }, [
+    activeThreadId,
+    activeWorkspaceId,
+    backendMode,
+    reconnectLive,
+    reconcileDisconnectedState,
+    setState,
+  ]);
 
   useEffect(() => {
     let unlistenWindowFocus: (() => void) | null = null;

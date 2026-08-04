@@ -79,7 +79,10 @@ import { useNewAgentDraft } from "@app/hooks/useNewAgentDraft";
 import { useSystemNotificationThreadLinks } from "@app/hooks/useSystemNotificationThreadLinks";
 import { useThreadListSortKey } from "@app/hooks/useThreadListSortKey";
 import { useThreadListActions } from "@app/hooks/useThreadListActions";
-import { useRemoteThreadLiveConnection } from "@app/hooks/useRemoteThreadLiveConnection";
+import {
+  collectRemoteEventGapRecoveryTargets,
+  useRemoteThreadLiveConnection,
+} from "@app/hooks/useRemoteThreadLiveConnection";
 import { useTrayLabels } from "@app/hooks/useTrayLabels";
 import { useSessionCleanupScheduler } from "@app/hooks/useSessionCleanupScheduler";
 import { I18nProvider } from "@/features/i18n/I18nProvider";
@@ -1034,6 +1037,50 @@ export default function MainApp() {
     threadListRuntimeContext.runtimeGeneration,
     workspaces,
   ]);
+  const recoverRemoteEventGap = useCallback(async () => {
+    const connectedWorkspaces = workspaces.filter(
+      (workspace) => workspace.connected,
+    );
+    if (connectedWorkspaces.length === 0) {
+      return;
+    }
+    const recoveryTargets = collectRemoteEventGapRecoveryTargets({
+      workspaces: connectedWorkspaces,
+      threadsByWorkspace,
+      itemsByThread,
+      threadStatusById,
+      activeTurnIdByThread,
+      activeWorkspaceId,
+      activeThreadId,
+    });
+
+    await Promise.all([
+      listThreadsForWorkspaces(connectedWorkspaces, {
+        preserveState: true,
+        refreshReason: "remote_event_gap",
+        knownWorkspaces: workspaces,
+        throwOnError: true,
+      }),
+      ...recoveryTargets.map(async ({ workspaceId, threadId }) => {
+        const refreshedThreadId = await refreshThread(workspaceId, threadId);
+        if (!refreshedThreadId) {
+          throw new Error(
+            `Remote event-gap recovery failed for thread ${threadId}.`,
+          );
+        }
+      }),
+    ]);
+  }, [
+    activeThreadId,
+    activeTurnIdByThread,
+    activeWorkspaceId,
+    itemsByThread,
+    listThreadsForWorkspaces,
+    refreshThread,
+    threadStatusById,
+    threadsByWorkspace,
+    workspaces,
+  ]);
   const { connectionState: remoteThreadConnectionState, reconnectLive } =
     useRemoteThreadLiveConnection({
       backendMode: appSettings.backendMode,
@@ -1044,6 +1091,7 @@ export default function MainApp() {
       activeThreadNeedsLiveConnection: activeThreadNeedsBackgroundRefresh,
       refreshThread,
       reconnectWorkspace: connectWorkspace,
+      recoverEventGap: recoverRemoteEventGap,
     });
 
   const { mobileThreadRefreshLoading, handleMobileThreadRefresh } =

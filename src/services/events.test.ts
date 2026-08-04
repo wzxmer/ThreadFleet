@@ -7,6 +7,7 @@ import {
   subscribeMenuCycleCollaborationMode,
   subscribeMenuCycleModel,
   subscribeMenuNewAgent,
+  subscribeRemoteBackendEventGap,
   subscribeTerminalOutput,
 } from "./events";
 
@@ -125,5 +126,62 @@ describe("events subscriptions", () => {
     expect(onError).toHaveBeenCalledWith(error);
 
     cleanup();
+  });
+
+  it("delivers remote backend continuity gaps", () => {
+    let listener: EventCallback<{ reason: "lagged"; skipped: number }> = () => {};
+    vi.mocked(listen).mockImplementation((_event, handler) => {
+      listener = handler as EventCallback<{ reason: "lagged"; skipped: number }>;
+      return Promise.resolve(() => {});
+    });
+
+    const onEvent = vi.fn();
+    const cleanup = subscribeRemoteBackendEventGap(onEvent);
+    const payload = { reason: "lagged" as const, skipped: 3 };
+
+    listener({ event: "remote-backend-event-gap", id: 1, payload });
+
+    expect(listen).toHaveBeenCalledWith(
+      "remote-backend-event-gap",
+      expect.any(Function),
+    );
+    expect(onEvent).toHaveBeenCalledWith(payload);
+    cleanup();
+  });
+
+  it("retries a transient listen failure while subscribers remain", async () => {
+    const error = new Error("temporarily unavailable");
+    let listener: EventCallback<AppServerEvent> = () => {};
+    const unlisten = vi.fn();
+
+    vi.mocked(listen)
+      .mockRejectedValueOnce(error)
+      .mockImplementationOnce((_event, handler) => {
+        listener = handler as EventCallback<AppServerEvent>;
+        return Promise.resolve(unlisten);
+      });
+
+    const onEvent = vi.fn();
+    const onError = vi.fn();
+    const cleanup = subscribeAppServerEvents(onEvent, { onError });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(onError).toHaveBeenCalledWith(error);
+    expect(listen).toHaveBeenCalledTimes(1);
+
+    await new Promise((resolve) => setTimeout(resolve, 275));
+    expect(listen).toHaveBeenCalledTimes(2);
+
+    const payload: AppServerEvent = {
+      workspace_id: "ws-1",
+      message: { method: "turn/completed" },
+    };
+    listener({ event: "app-server-event", id: 2, payload });
+    expect(onEvent).toHaveBeenCalledWith(payload);
+
+    cleanup();
+    await Promise.resolve();
+    expect(unlisten).toHaveBeenCalledTimes(1);
   });
 });

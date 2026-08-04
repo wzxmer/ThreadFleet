@@ -102,6 +102,7 @@ use workspace_settings::apply_workspace_settings_update;
 
 const DEFAULT_LISTEN_ADDR: &str = "127.0.0.1:4732";
 const MAX_IN_FLIGHT_RPC_PER_CONNECTION: usize = 32;
+const REMOTE_CLIENT_OUTBOUND_QUEUE_CAPACITY: usize = 2048;
 const DAEMON_NAME: &str = "codex-monitor-daemon";
 
 fn spawn_with_client(
