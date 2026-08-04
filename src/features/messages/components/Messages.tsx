@@ -1096,6 +1096,135 @@ export const Messages = memo(function Messages({
     turnExecutionSummaries,
     turnExecutionSummary,
   ]);
+  const activeToolGroups = useMemo(() => {
+    if (!isThinking) {
+      return [];
+    }
+
+    let latestUserMessageIndex = -1;
+    groupedItems.forEach((entry, index) => {
+      if (
+        entry.kind === "item" &&
+        entry.item.kind === "message" &&
+        entry.item.role === "user"
+      ) {
+        latestUserMessageIndex = index;
+      }
+    });
+
+    return groupedItems.filter(
+      (
+        entry,
+        index,
+      ): entry is Extract<MessageListEntry, { kind: "toolGroup" }> => {
+        if (entry.kind !== "toolGroup" || entry.group.toolCount === 0) {
+          return false;
+        }
+        if (entry.group.items.some((item) => item.turnId === activeTurnId)) {
+          return true;
+        }
+        return (
+          index > latestUserMessageIndex &&
+          entry.group.items.every(
+            (item) => !item.turnId || item.turnId === activeTurnId,
+          )
+        );
+      },
+    );
+  }, [activeTurnId, groupedItems, isThinking]);
+  const activeToolGroupIds = useMemo(
+    () => new Set(activeToolGroups.map(({ group }) => group.id)),
+    [activeToolGroups],
+  );
+  const activeToolGroupStats = useMemo(() => {
+    if (activeToolGroups.length === 0) {
+      return null;
+    }
+    let toolCount = 0;
+    let processMessageCount = 0;
+    let additions = 0;
+    let deletions = 0;
+    let hasLineChanges = false;
+    activeToolGroups.forEach(({ group }) => {
+      toolCount += group.toolCount;
+      processMessageCount += group.messageCount;
+      const lineChanges = lineChangeStatsByGroupId.get(group.id);
+      if (!lineChanges) {
+        return;
+      }
+      additions += lineChanges.additions;
+      deletions += lineChanges.deletions;
+      hasLineChanges = true;
+    });
+    return {
+      toolCount,
+      processMessageCount,
+      additions: hasLineChanges ? additions : null,
+      deletions: hasLineChanges ? deletions : null,
+    };
+  }, [activeToolGroups, lineChangeStatsByGroupId]);
+  const activeAssistantMeta = useMemo<AssistantMessageMeta | null>(() => {
+    if (!activeToolGroupStats) {
+      return null;
+    }
+    const summaries =
+      turnExecutionSummaries.length > 0
+        ? turnExecutionSummaries
+        : turnExecutionSummary
+          ? [turnExecutionSummary]
+          : [];
+    const activeSummary =
+      summaries.find(
+        (summary) =>
+          summary.turnId === activeTurnId ||
+          summary.turnChain.includes(activeTurnId ?? ""),
+      ) ?? summaries.find((summary) => summary.status === "active");
+    return {
+      name: resolveAssistantName(
+        extractAssistantIdentity(assistantInstructionContent),
+        activeSummary?.modelId ?? assistantFallbackModelId,
+        assistantModelOptions,
+      ),
+      ...activeToolGroupStats,
+    };
+  }, [
+    activeToolGroupStats,
+    activeTurnId,
+    assistantFallbackModelId,
+    assistantInstructionContent,
+    assistantModelOptions,
+    turnExecutionSummaries,
+    turnExecutionSummary,
+  ]);
+  const activeToolGroupsExpanded = activeToolGroups.some(
+    ({ group }) => !collapsedToolGroups.has(group.id),
+  );
+  const activeToolGroupBodyId = activeToolGroups.length
+    ? `active-tool-groups-${activeToolGroups.map(({ group }) => group.id).join("-")}`
+    : "";
+  const toggleActiveToolGroups = useCallback(() => {
+    const shouldExpand = activeToolGroups.every(({ group }) =>
+      collapsedToolGroups.has(group.id),
+    );
+    activeToolGroups.forEach(({ group }) => {
+      const isExpanded = !collapsedToolGroups.has(group.id);
+      if (isExpanded !== shouldExpand) {
+        toggleToolGroup(group.id);
+      }
+    });
+  }, [activeToolGroups, collapsedToolGroups, toggleToolGroup]);
+  const activeToolProcessDisclosure: AssistantProcessDisclosure | undefined =
+    activeAssistantMeta
+      ? {
+          toolCount: activeAssistantMeta.toolCount,
+          processMessageCount: activeAssistantMeta.processMessageCount,
+          additions: activeAssistantMeta.additions,
+          deletions: activeAssistantMeta.deletions,
+          isExpanded: activeToolGroupsExpanded,
+          bodyId: activeToolGroupBodyId,
+          onToggle: toggleActiveToolGroups,
+        }
+      : undefined;
   const renderLineChangeStats = useCallback(
     (lineChangeStats?: { additions: number; deletions: number }) => {
       if (!lineChangeStats) {
@@ -1358,6 +1487,34 @@ export const Messages = memo(function Messages({
     return renderItem(processEntry.item);
   };
 
+  const activeToolProcessContent =
+    activeToolProcessDisclosure?.isExpanded ? (
+      <div
+        id={activeToolGroupBodyId}
+        ref={(node) => {
+          activeToolGroups.forEach(({ group }) => {
+            registerSearchTarget(`tool-group-${group.id}`)(node);
+          });
+        }}
+        data-history-anchor={activeToolGroups[0]?.group.id}
+        className={`tool-group process-group process-group-inline messages-search-target${
+          activeToolGroups.some(
+            ({ group }) =>
+              activeSearchTargetId === `tool-group-${group.id}`,
+          )
+            ? " is-active-search-match"
+            : ""
+        }`}
+      >
+        <div className="tool-group-body">
+          {coalesceDenseProcessToolGroups(
+            activeToolGroups,
+            activeToolGroupBodyId,
+          ).map((processEntry) => renderProcessGroupEntry(processEntry))}
+        </div>
+      </div>
+    ) : undefined;
+
   const messageToolsNode = (
     <div
       className="messages-tool-controls"
@@ -1502,6 +1659,9 @@ export const Messages = memo(function Messages({
             }
             if (entry.kind === "toolGroup") {
               const { group } = entry;
+              if (activeToolGroupIds.has(group.id)) {
+                return null;
+              }
               const isCollapsed = collapsedToolGroups.has(group.id);
               const summaryParts = [];
               if (group.toolCount > 0) {
@@ -1675,6 +1835,9 @@ export const Messages = memo(function Messages({
               turnExecutionSummary ? t("messages.failedIn") : undefined
             }
             pollingFetchLabel={t("messages.pollingFetchCountdown")}
+            assistantMeta={activeAssistantMeta}
+            assistantProcessDisclosure={activeToolProcessDisclosure}
+            assistantProcessContent={activeToolProcessContent}
           />
           {!items.length &&
             !userInputNode &&

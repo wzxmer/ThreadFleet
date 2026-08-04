@@ -84,6 +84,9 @@ type WorkingIndicatorProps = {
   interruptedLabel?: string;
   failedLabel?: string;
   pollingFetchLabel?: string;
+  assistantMeta?: AssistantMessageMeta | null;
+  assistantProcessDisclosure?: AssistantProcessDisclosure;
+  assistantProcessContent?: ReactNode;
 };
 
 type MessageRowProps = MarkdownFileLinkProps & {
@@ -124,6 +127,14 @@ export type AssistantProcessDisclosure = {
   isExpanded: boolean;
   bodyId: string;
   onToggle: () => void;
+};
+
+type AgentProcessStatsProps = {
+  toolCount: number;
+  processMessageCount: number;
+  additions: number | null;
+  deletions: number | null;
+  processDisclosure?: AssistantProcessDisclosure;
 };
 
 type ProcessMessageRowProps = MarkdownFileLinkProps & {
@@ -445,6 +456,103 @@ function buildPlanExportFileName(itemId: string) {
     : `plan-${normalized}.md`;
 }
 
+function AgentProcessStats({
+  toolCount,
+  processMessageCount,
+  additions,
+  deletions,
+  processDisclosure,
+}: AgentProcessStatsProps) {
+  const { t } = useI18n();
+  if (
+    toolCount === 0 &&
+    processMessageCount === 0 &&
+    (additions ?? 0) === 0 &&
+    (deletions ?? 0) === 0
+  ) {
+    return null;
+  }
+
+  return (
+    <span className="message-agent-stats">
+      {processDisclosure ? (
+        <button
+          type="button"
+          className="message-agent-process-toggle"
+          data-button-elevation="none"
+          onClick={processDisclosure.onToggle}
+          aria-expanded={processDisclosure.isExpanded}
+          aria-controls={processDisclosure.bodyId}
+          aria-label={
+            processDisclosure.isExpanded
+              ? t("messages.collapseProcess")
+              : t("messages.expandProcess")
+          }
+          title={
+            processDisclosure.isExpanded
+              ? t("messages.collapseProcess")
+              : t("messages.expandProcess")
+          }
+        >
+          <span className="message-agent-process-chevron" aria-hidden>
+            {processDisclosure.isExpanded ? (
+              <ChevronDown size={13} />
+            ) : (
+              <ChevronRight size={13} />
+            )}
+          </span>
+          {toolCount > 0 ? (
+            <span className="message-agent-stat">
+              {formatCount(
+                toolCount,
+                t("messages.toolCallSingular"),
+                t("messages.toolCallPlural"),
+              )}
+            </span>
+          ) : null}
+          {processMessageCount > 0 ? (
+            <span className="message-agent-stat">
+              {formatCount(
+                processMessageCount,
+                t("messages.processMessageSingular"),
+                t("messages.processMessagePlural"),
+              )}
+            </span>
+          ) : null}
+        </button>
+      ) : null}
+      {!processDisclosure && toolCount > 0 ? (
+        <span className="message-agent-stat">
+          {formatCount(
+            toolCount,
+            t("messages.toolCallSingular"),
+            t("messages.toolCallPlural"),
+          )}
+        </span>
+      ) : null}
+      {!processDisclosure && processMessageCount > 0 ? (
+        <span className="message-agent-stat">
+          {formatCount(
+            processMessageCount,
+            t("messages.processMessageSingular"),
+            t("messages.processMessagePlural"),
+          )}
+        </span>
+      ) : null}
+      {(additions ?? 0) > 0 ? (
+        <span className="message-agent-stat message-agent-stat-add">
+          +{additions}
+        </span>
+      ) : null}
+      {(deletions ?? 0) > 0 ? (
+        <span className="message-agent-stat message-agent-stat-delete">
+          -{deletions}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 export const WorkingIndicator = memo(function WorkingIndicator({
   isThinking,
   activityState = "thinking",
@@ -459,6 +567,9 @@ export const WorkingIndicator = memo(function WorkingIndicator({
   interruptedLabel = "Interrupted in",
   failedLabel = "Failed in",
   pollingFetchLabel = "New message will be fetched in {seconds} seconds",
+  assistantMeta = null,
+  assistantProcessDisclosure,
+  assistantProcessContent,
 }: WorkingIndicatorProps) {
   const [elapsedMs, setElapsedMs] = useState(0);
   const localStartedAtRef = useRef<number | null>(null);
@@ -499,25 +610,89 @@ export const WorkingIndicator = memo(function WorkingIndicator({
     };
   }, [isThinking, pollingIntervalMs, showPollingFetchStatus]);
 
+  const processStartedAt = processingStartedAt ?? localStartedAtRef.current;
+  const processStartedAtTimestamp = (() => {
+    if (typeof processStartedAt !== "number") {
+      return null;
+    }
+    const date = new Date(processStartedAt);
+    if (!Number.isFinite(date.getTime())) {
+      return null;
+    }
+    return {
+      dateTime: formatMessageTimestamp(processStartedAt, true),
+      iso: date.toISOString(),
+    };
+  })();
+
   return (
     <>
       {isThinking && (
-        <div className="working">
-          <span className="working-agent-avatar" aria-hidden>
-            <ModelActivityCore state={activityState} size={40} />
+        <div
+          className={`working${
+            assistantProcessDisclosure ? " working-with-process" : ""
+          }`}
+        >
+          <span
+            className={
+              assistantProcessDisclosure
+                ? "message-agent-avatar working-agent-avatar"
+                : "working-agent-avatar"
+            }
+            aria-hidden
+          >
+            {assistantProcessDisclosure ? (
+              <ModelActivityCore state={activityState} size={22} />
+            ) : (
+              <ModelActivityCore state={activityState} size={40} />
+            )}
           </span>
           <div className="working-main">
-            <div className="working-meta">
-              <div className="working-timer">
-                <span className="working-timer-clock">
-                  {formatDurationMs(elapsedMs)}
+            {assistantProcessDisclosure ? (
+              <div className="message-agent-meta working-agent-meta">
+                <span className="message-agent-name" title={assistantMeta?.name}>
+                  {assistantMeta?.name ?? "Assistant"}
                 </span>
+                {processStartedAtTimestamp ? (
+                  <time
+                    className="message-agent-time"
+                    dateTime={processStartedAtTimestamp.iso}
+                  >
+                    {processStartedAtTimestamp.dateTime}
+                  </time>
+                ) : (
+                  <span className="message-agent-time working-timer">
+                    <span className="working-timer-clock">
+                      {formatDurationMs(elapsedMs)}
+                    </span>
+                  </span>
+                )}
+                <AgentProcessStats
+                  toolCount={assistantMeta?.toolCount ?? 0}
+                  processMessageCount={assistantMeta?.processMessageCount ?? 0}
+                  additions={assistantMeta?.additions ?? null}
+                  deletions={assistantMeta?.deletions ?? null}
+                  processDisclosure={assistantProcessDisclosure}
+                />
               </div>
-            </div>
+            ) : (
+              <div className="working-meta">
+                <div className="working-timer">
+                  <span className="working-timer-clock">
+                    {formatDurationMs(elapsedMs)}
+                  </span>
+                </div>
+              </div>
+            )}
             {reasoningLabel ? (
               <span className="working-text">{reasoningLabel}</span>
             ) : null}
           </div>
+          {assistantProcessDisclosure && assistantProcessContent ? (
+            <div className="working-agent-process-content">
+              {assistantProcessContent}
+            </div>
+          ) : null}
         </div>
       )}
       {!isThinking && lastDurationMs !== null && hasItems && (
@@ -771,113 +946,29 @@ export const MessageRow = memo(function MessageRow({
                 {messageTimestamp.dateTime}
               </time>
             ) : null}
-            {(() => {
-              const toolCount =
+            <AgentProcessStats
+              toolCount={
                 assistantProcessDisclosure?.toolCount ??
                 assistantMeta?.toolCount ??
-                0;
-              const processMessageCount =
+                0
+              }
+              processMessageCount={
                 assistantProcessDisclosure?.processMessageCount ??
                 assistantMeta?.processMessageCount ??
-                0;
-              const additions =
+                0
+              }
+              additions={
                 assistantProcessDisclosure?.additions ??
                 assistantMeta?.additions ??
-                null;
-              const deletions =
+                null
+              }
+              deletions={
                 assistantProcessDisclosure?.deletions ??
                 assistantMeta?.deletions ??
-                null;
-              if (
-                toolCount === 0 &&
-                processMessageCount === 0 &&
-                (additions ?? 0) === 0 &&
-                (deletions ?? 0) === 0
-              ) {
-                return null;
+                null
               }
-              return (
-                <span className="message-agent-stats">
-                  {assistantProcessDisclosure ? (
-                    <button
-                      type="button"
-                      className="message-agent-process-toggle"
-                      data-button-elevation="none"
-                      onClick={assistantProcessDisclosure.onToggle}
-                      aria-expanded={assistantProcessDisclosure.isExpanded}
-                      aria-controls={assistantProcessDisclosure.bodyId}
-                      aria-label={
-                        assistantProcessDisclosure.isExpanded
-                          ? t("messages.collapseProcess")
-                          : t("messages.expandProcess")
-                      }
-                      title={
-                        assistantProcessDisclosure.isExpanded
-                          ? t("messages.collapseProcess")
-                          : t("messages.expandProcess")
-                      }
-                    >
-                      <span
-                        className="message-agent-process-chevron"
-                        aria-hidden
-                      >
-                        {assistantProcessDisclosure.isExpanded ? (
-                          <ChevronDown size={13} />
-                        ) : (
-                          <ChevronRight size={13} />
-                        )}
-                      </span>
-                      {toolCount > 0 ? (
-                        <span className="message-agent-stat">
-                          {formatCount(
-                            toolCount,
-                            t("messages.toolCallSingular"),
-                            t("messages.toolCallPlural"),
-                          )}
-                        </span>
-                      ) : null}
-                      {processMessageCount > 0 ? (
-                        <span className="message-agent-stat">
-                          {formatCount(
-                            processMessageCount,
-                            t("messages.processMessageSingular"),
-                            t("messages.processMessagePlural"),
-                          )}
-                        </span>
-                      ) : null}
-                    </button>
-                  ) : null}
-                  {!assistantProcessDisclosure && toolCount > 0 ? (
-                    <span className="message-agent-stat">
-                      {formatCount(
-                        toolCount,
-                        t("messages.toolCallSingular"),
-                        t("messages.toolCallPlural"),
-                      )}
-                    </span>
-                  ) : null}
-                  {!assistantProcessDisclosure && processMessageCount > 0 ? (
-                    <span className="message-agent-stat">
-                      {formatCount(
-                        processMessageCount,
-                        t("messages.processMessageSingular"),
-                        t("messages.processMessagePlural"),
-                      )}
-                    </span>
-                  ) : null}
-                  {(additions ?? 0) > 0 ? (
-                    <span className="message-agent-stat message-agent-stat-add">
-                      +{additions}
-                    </span>
-                  ) : null}
-                  {(deletions ?? 0) > 0 ? (
-                    <span className="message-agent-stat message-agent-stat-delete">
-                      -{deletions}
-                    </span>
-                  ) : null}
-                </span>
-              );
-            })()}
+              processDisclosure={assistantProcessDisclosure}
+            />
           </div>
         ) : null}
         {assistantProcessContent}

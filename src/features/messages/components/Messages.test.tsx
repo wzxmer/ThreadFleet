@@ -3060,6 +3060,110 @@ describe("Messages", () => {
     });
   });
 
+  it("shows active tool calls in the working agent metadata", async () => {
+    const { container } = render(
+      <Messages
+        items={[
+          {
+            id: "user-live-tool",
+            kind: "message",
+            role: "user",
+            text: "检查状态",
+            turnId: "turn-live-tool",
+          },
+          {
+            id: "tool-live-tool",
+            kind: "tool",
+            toolType: "commandExecution",
+            title: "Command: npm run typecheck",
+            detail: "/repo",
+            status: "running",
+            turnId: "turn-live-tool",
+          },
+        ]}
+        threadId="thread-live-tool"
+        workspaceId="ws-1"
+        isThinking
+        activeTurnId="turn-live-tool"
+        openTargets={[]}
+        selectedOpenAppId=""
+        defaultToolGroupsCollapsed
+        assistantInstructionContent="# Identity: BT-7274"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(
+        container.querySelector(".working .message-agent-meta"),
+      ).toBeTruthy();
+    });
+
+    const metadata = container.querySelector<HTMLElement>(
+      ".working .message-agent-meta",
+    );
+    expect(metadata?.querySelector(".message-agent-name")?.textContent).toBe(
+      "BT-7274",
+    );
+    expect(metadata?.textContent).toContain("1 次工具调用");
+    expect(container.querySelector(".messages-inner > .tool-group")).toBeNull();
+    const toggle = within(metadata!).getByRole("button", {
+      name: "展开过程消息",
+    });
+    expect(toggle).toBeTruthy();
+
+    fireEvent.click(toggle);
+
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("npm run typecheck")).toBeTruthy();
+  });
+
+  it("shows the first unbound tool call in the working agent metadata", async () => {
+    const processingStartedAt = new Date(2026, 7, 5, 0, 53).getTime();
+    const { container } = render(
+      <Messages
+        items={[
+          {
+            id: "user-first-unbound-tool",
+            kind: "message",
+            role: "user",
+            text: "检查首个工具调用",
+          },
+          {
+            id: "tool-first-unbound-tool",
+            kind: "tool",
+            toolType: "commandExecution",
+            title: "Command: npm run typecheck",
+            detail: "/repo",
+            status: "running",
+          },
+        ]}
+        threadId="thread-first-unbound-tool"
+        workspaceId="ws-1"
+        isThinking
+        activeTurnId={null}
+        processingStartedAt={processingStartedAt}
+        openTargets={[]}
+        selectedOpenAppId=""
+        defaultToolGroupsCollapsed
+        assistantInstructionContent="# Identity: BT-7274"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(
+        container.querySelector(".working .message-agent-meta"),
+      ).toBeTruthy();
+    });
+
+    const metadata = container.querySelector<HTMLElement>(
+      ".working .message-agent-meta",
+    );
+    expect(metadata?.textContent).toContain("BT-7274");
+    expect(metadata?.textContent).toContain("2026-08-05 00:53");
+    expect(metadata?.textContent).toContain("1 次工具调用");
+    expect(container.querySelector(".messages-inner > .tool-group")).toBeNull();
+  });
+
   it("keeps future tool groups collapsed after collapse-all is selected", async () => {
     const firstItems: ConversationItem[] = [
       {

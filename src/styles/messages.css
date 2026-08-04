@@ -97,7 +97,7 @@
 
 .app:is(.layout-desktop, .layout-compact):not(.layout-phone)
   .messages-view
-  .working {
+  .working:not(.working-with-process) {
   background: var(--messages-process-bg);
   border-color: var(--messages-process-border);
   color: #a5b0b7;
@@ -1633,11 +1633,11 @@
 :root:not([data-theme])
   .app:is(.layout-desktop, .layout-compact):not(.layout-phone)
   .messages-view.messages-reading-native
-  .working,
+  .working:not(.working-with-process),
 :root[data-theme="light"]
   .app:is(.layout-desktop, .layout-compact):not(.layout-phone)
   .messages-view.messages-reading-native
-  .working {
+  .working:not(.working-with-process) {
   padding: 4px 6px;
   border: 1px solid
     color-mix(in srgb, var(--border-accent) 20%, var(--cm-light-panel-border));
@@ -1674,6 +1674,48 @@
   animation: none;
   font-size: 13px;
   line-height: 1.62;
+}
+
+.messages-reading-native .working-with-process {
+  grid-template-columns: 26px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.messages-reading-native .working-with-process .working-agent-avatar {
+  width: 26px;
+  height: 26px;
+  border: 1px solid color-mix(in srgb, var(--border-accent) 36%, transparent);
+  border-radius: 8px;
+  background: color-mix(
+    in srgb,
+    var(--border-accent) 10%,
+    var(--messages-solid-panel)
+  );
+}
+
+.messages-reading-native .working-with-process .working-main {
+  padding-top: 2px;
+}
+
+.messages-reading-native .working-with-process .working-agent-meta {
+  margin-bottom: 0;
+}
+
+.messages-reading-native .working-with-process .working-timer {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.messages-reading-native .working-with-process .working-agent-process-content {
+  grid-column: 1 / -1;
+  width: 100%;
+  min-width: 0;
 }
 
 .message-image-grid {

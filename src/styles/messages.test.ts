@@ -209,6 +209,17 @@ describe("message tool group interaction styles", () => {
     );
   });
 
+  it("puts active tool activity in the working agent metadata", () => {
+    expect(messagesSource).toContain("activeToolGroupIds");
+    expect(messageRowsSource).toContain(
+      'className="message-agent-meta working-agent-meta"',
+    );
+    expect(messagesCss).toMatch(
+      /\.messages-reading-native \.working-with-process\s*\{[^}]*grid-template-columns:\s*26px minmax\(0,\s*1fr\);[^}]*border:\s*0;[^}]*background:\s*transparent;/s,
+    );
+    expect(messagesCss).not.toContain(".tool-group-live");
+  });
+
   it("uses shared success and error tokens for line-change statistics", () => {
     expect(messagesCss).toMatch(
       /\.message-agent-stat-add\s*\{[^}]*color:\s*var\(--status-success\);/s,
@@ -334,7 +345,7 @@ describe("message tool group interaction styles", () => {
       /\.app:is\(\.layout-desktop, \.layout-compact\):not\(\.layout-phone\) \.messages-view\s*\{[^}]*--cm-scrollbar-track:\s*transparent;[^}]*--cm-scrollbar-thumb:\s*#46515a;[^}]*--cm-scrollbar-thumb-hover:\s*#65717a;/s,
     );
     expect(messagesCss).toMatch(
-      /\.app:is\(\.layout-desktop, \.layout-compact\):not\(\.layout-phone\)\s+\.messages-view\s+\.working\s*\{[^}]*background:\s*var\(--messages-process-bg\);[^}]*box-shadow:\s*none;/s,
+      /\.app:is\(\.layout-desktop, \.layout-compact\):not\(\.layout-phone\)\s+\.messages-view\s+\.working:not\(\.working-with-process\)\s*\{[^}]*background:\s*var\(--messages-process-bg\);[^}]*box-shadow:\s*none;/s,
     );
     expect(messagesCss).toMatch(
       /\.app:is\(\.layout-desktop, \.layout-compact\):not\(\.layout-phone\)\s+\.messages-view\s+\.messages-empty:has\(\.messages-loading-indicator\)\s*\{[^}]*background:\s*#15191e;[^}]*box-shadow:\s*none;/s,
