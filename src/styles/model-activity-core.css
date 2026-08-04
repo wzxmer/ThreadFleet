@@ -9,93 +9,45 @@
 }
 
 .model-activity-core__aura {
-  fill: rgba(var(--model-activity-color), 0.09);
-  filter: blur(5px);
+  fill: rgba(var(--model-activity-color), 0.08);
+  filter: blur(4px);
   transform-box: fill-box;
   transform-origin: center;
   animation: model-activity-breathe 3.8s ease-in-out infinite;
 }
 
-.model-activity-core__brain-outline,
-.model-activity-core__midline,
-.model-activity-core__link,
 .model-activity-core__track,
 .model-activity-core__sweep,
-.model-activity-core__ripple,
-.model-activity-core__scan-line {
+.model-activity-core__ripple {
   fill: none;
   stroke-linecap: round;
   stroke-linejoin: round;
   vector-effect: non-scaling-stroke;
 }
 
-.model-activity-core__brain-outline {
-  stroke: rgba(var(--model-activity-color), 0.74);
-  stroke-width: 2.45;
-  filter: drop-shadow(0 0 2.5px rgba(var(--model-activity-color), 0.76));
-}
-
-.model-activity-core__midline {
-  stroke: rgba(var(--model-activity-color), 0.28);
-  stroke-width: 1.3;
-}
-
-.model-activity-core__network {
-  transform-box: fill-box;
-  transform-origin: center;
-}
-
-.model-activity-core__link {
-  stroke: rgba(var(--model-activity-color), 0.45);
-  stroke-width: 1.25;
-  stroke-dasharray: 10 7;
-  filter: drop-shadow(0 0 2px rgba(var(--model-activity-color), 0.52));
-}
-
-.model-activity-core__node {
-  fill: rgba(241, 254, 255, 0.96);
-  stroke: rgba(var(--model-activity-color), 0.72);
-  stroke-width: 1.2;
-  filter: drop-shadow(0 0 3px rgba(var(--model-activity-color), 0.95));
-  transform-box: fill-box;
-  transform-origin: center;
-}
-
-.model-activity-core__scan {
-  opacity: 0;
-  transform-box: fill-box;
-  transform-origin: center;
-}
-
-.model-activity-core__scan-line {
-  stroke: rgba(var(--model-activity-color), 0.86);
-  stroke-width: 1.4;
-  filter: drop-shadow(0 0 4px rgba(var(--model-activity-color), 0.95));
-}
-
 .model-activity-core__track {
-  stroke: rgba(var(--model-activity-color), 0.13);
-  stroke-width: 0.95;
-  stroke-dasharray: 1.2 5.2;
+  stroke: rgba(var(--model-activity-color), 0.15);
+  stroke-width: 0.8;
+  stroke-dasharray: 1.2 4.8;
 }
 
 .model-activity-core__sweep {
-  stroke: rgba(var(--model-activity-color), 0.9);
-  stroke-width: 1.8;
-  stroke-dasharray: 35 147;
-  filter: drop-shadow(0 0 2.5px rgba(var(--model-activity-color), 0.78));
+  stroke: rgba(var(--model-activity-color), 0.92);
+  stroke-width: 1.45;
+  stroke-dasharray: 38 151;
+  filter: drop-shadow(0 0 1.8px rgba(var(--model-activity-color), 0.74));
 }
 
 .model-activity-core__track--secondary {
-  stroke-width: 0.75;
+  stroke-width: 0.62;
   stroke-dasharray: 1 6;
-  opacity: 0.64;
+  opacity: 0.6;
 }
 
 .model-activity-core__sweep--secondary {
-  stroke-width: 1.1;
+  stroke-width: 0.92;
   stroke-dasharray: 22 211;
-  opacity: 0.62;
+  opacity: 0.58;
 }
 
 .model-activity-core__orbit,
@@ -106,77 +58,65 @@
 }
 
 .model-activity-core__orbit {
-  /* Use the stable SVG viewport center: each orbit also owns an off-center spark. */
   transform-box: view-box;
   transform-origin: 50% 50%;
-  opacity: 0.74;
+  opacity: 0.72;
 }
 
 .model-activity-core__halo {
-  fill: rgba(var(--model-activity-color), 0.32);
-  filter: blur(2px);
+  fill: rgba(var(--model-activity-color), 0.28);
+  filter: blur(1.5px);
   animation: model-activity-core-pulse 2.9s ease-in-out infinite;
 }
 
 .model-activity-core__center {
   fill: rgba(var(--model-activity-color), 0.96);
-  filter: drop-shadow(0 0 5px rgba(var(--model-activity-color), 0.98));
+  filter: drop-shadow(0 0 3px rgba(var(--model-activity-color), 0.9));
 }
 
 .model-activity-core__highlight {
-  fill: rgba(241, 254, 255, 0.98);
+  fill: rgba(241, 254, 255, 0.96);
 }
 
 .model-activity-core__spark {
   fill: rgba(241, 254, 255, 0.96);
   opacity: 0;
-  filter: drop-shadow(0 0 4px rgba(var(--model-activity-color), 0.98));
+  filter: drop-shadow(0 0 3px rgba(var(--model-activity-color), 0.92));
 }
 
 .model-activity-core__ripple {
-  stroke: rgba(var(--model-activity-color), 0.84);
-  stroke-width: 1.2;
+  stroke: rgba(var(--model-activity-color), 0.8);
+  stroke-width: 1;
   opacity: 0;
 }
 
-.model-activity-core--compact .model-activity-core__brain-outline {
-  stroke-width: 2.65;
+.model-activity-core__thinking-dots {
+  opacity: 0;
 }
 
-.model-activity-core--compact .model-activity-core__midline {
-  display: none;
+.model-activity-core__thinking-dot {
+  fill: rgba(241, 254, 255, 0.96);
+  filter: drop-shadow(0 0 2.5px rgba(var(--model-activity-color), 0.9));
+  transform-box: fill-box;
+  transform-origin: center;
 }
 
 .model-activity-core--compact .model-activity-core__orbit--secondary,
-.model-activity-core--compact .model-activity-core__link--three,
-.model-activity-core--compact .model-activity-core__link--four,
-.model-activity-core--compact .model-activity-core__node--four,
-.model-activity-core--compact .model-activity-core__node--five,
 .model-activity-core--compact .model-activity-core__spark--secondary {
   display: none;
 }
 
-.model-activity-core--compact .model-activity-core__node {
-  stroke-width: 1.35;
-}
-
 .model-activity-core--compact .model-activity-core__aura {
-  fill: rgba(var(--model-activity-color), 0.13);
+  fill: rgba(var(--model-activity-color), 0.12);
 }
 
 .model-activity-core--compact .model-activity-core__sweep {
-  stroke-width: 2.35;
-  stroke-dasharray: 50 132;
-}
-
-.model-activity-core--compact .model-activity-core__sweep--secondary {
-  stroke-width: 1.55;
-  stroke-dasharray: 30 203;
-  opacity: 0.84;
+  stroke-width: 1.7;
+  stroke-dasharray: 38 151;
 }
 
 .model-activity-core--compact .model-activity-core__halo {
-  fill: rgba(var(--model-activity-color), 0.42);
+  fill: rgba(var(--model-activity-color), 0.38);
 }
 
 .model-activity-core--idle .model-activity-core__orbit--primary {
@@ -187,20 +127,6 @@
   animation: model-activity-orbit 4.6s linear infinite reverse;
 }
 
-.model-activity-core--idle .model-activity-core__link {
-  animation: model-activity-flow 2.4s linear infinite;
-}
-
-.model-activity-core--idle .model-activity-core__scan {
-  opacity: 0.36;
-  animation: model-activity-scan 2.9s ease-in-out infinite;
-}
-
-.model-activity-core--idle .model-activity-core__node--two,
-.model-activity-core--idle .model-activity-core__node--four {
-  animation: model-activity-node-pulse 3.4s ease-in-out infinite;
-}
-
 .model-activity-core--thinking .model-activity-core__orbit--primary {
   animation: model-activity-orbit 0.96s linear infinite;
 }
@@ -209,38 +135,28 @@
   animation: model-activity-orbit 1.42s linear infinite reverse;
 }
 
-.model-activity-core--thinking .model-activity-core__link {
-  animation: model-activity-flow 0.78s linear infinite;
-}
-
-.model-activity-core--thinking .model-activity-core__scan {
-  opacity: 0.82;
-  animation: model-activity-scan 0.78s ease-in-out infinite;
-}
-
-.model-activity-core--thinking .model-activity-core__network {
-  animation: model-activity-thinking-pulse 0.84s ease-in-out infinite;
-}
-
-.model-activity-core--thinking .model-activity-core__node {
-  animation: model-activity-node-pulse 0.72s ease-in-out infinite;
-}
-
-.model-activity-core--thinking .model-activity-core__node--two {
-  animation-delay: 0.12s;
-}
-
-.model-activity-core--thinking .model-activity-core__node--three {
-  animation-delay: 0.24s;
-}
-
-.model-activity-core--thinking .model-activity-core__spark--primary {
+.model-activity-core--thinking .model-activity-core__spark--primary,
+.model-activity-core--thinking .model-activity-core__thinking-dots {
   opacity: 0.92;
 }
 
-.model-activity-core--thinking.model-activity-core--compact
-  .model-activity-core__spark--secondary {
-  opacity: 0.42;
+.model-activity-core--thinking .model-activity-core__center,
+.model-activity-core--thinking .model-activity-core__highlight,
+.model-activity-core--executing .model-activity-core__center,
+.model-activity-core--executing .model-activity-core__highlight {
+  opacity: 0;
+}
+
+.model-activity-core--thinking .model-activity-core__thinking-dot {
+  animation: model-activity-thinking-dot 0.84s ease-in-out infinite;
+}
+
+.model-activity-core--thinking .model-activity-core__thinking-dot--two {
+  animation-delay: 0.12s;
+}
+
+.model-activity-core--thinking .model-activity-core__thinking-dot--three {
+  animation-delay: 0.24s;
 }
 
 .model-activity-core--executing .model-activity-core__orbit--primary {
@@ -251,61 +167,42 @@
   animation: model-activity-orbit 1.08s linear infinite reverse;
 }
 
-.model-activity-core--executing .model-activity-core__link {
-  stroke-width: 1.45;
-  animation: model-activity-flow 0.42s linear infinite;
-}
-
-.model-activity-core--executing .model-activity-core__scan {
-  opacity: 0.96;
-  animation: model-activity-scan 0.52s ease-in-out infinite;
-}
-
 .model-activity-core--executing .model-activity-core__sweep {
-  stroke-width: 2.45;
+  stroke-width: 1.95;
 }
 
-.model-activity-core--executing .model-activity-core__spark {
+.model-activity-core--executing .model-activity-core__spark,
+.model-activity-core--executing .model-activity-core__thinking-dots {
   opacity: 0.96;
 }
 
-.model-activity-core--executing .model-activity-core__network {
-  animation: model-activity-thinking-pulse 0.52s ease-in-out infinite;
+.model-activity-core--executing .model-activity-core__thinking-dot {
+  animation: model-activity-thinking-dot 0.52s ease-in-out infinite;
 }
 
-.model-activity-core--executing .model-activity-core__node {
-  animation: model-activity-node-pulse 0.48s ease-in-out infinite;
-}
-
-.model-activity-core--executing .model-activity-core__node--two {
+.model-activity-core--executing .model-activity-core__thinking-dot--two {
   animation-delay: 0.08s;
 }
 
-.model-activity-core--executing .model-activity-core__node--three {
+.model-activity-core--executing .model-activity-core__thinking-dot--three {
   animation-delay: 0.16s;
-}
-
-.model-activity-core--executing.model-activity-core--compact .model-activity-core__sweep {
-  stroke-width: 2.9;
-}
-
-.model-activity-core--executing.model-activity-core--compact
-  .model-activity-core__sweep--secondary {
-  stroke-width: 1.95;
 }
 
 .model-activity-core--executing .model-activity-core__ripple {
   animation: model-activity-ripple 1.08s cubic-bezier(0.2, 0.65, 0.28, 1) infinite;
 }
 
-.model-activity-core--executing.model-activity-core--compact
-  .model-activity-core__ripple {
-  stroke-width: 1.65;
-  animation-duration: 0.86s;
-}
-
 .model-activity-core--executing .model-activity-core__ripple--two {
   animation-delay: 0.54s;
+}
+
+.model-activity-core--executing.model-activity-core--compact .model-activity-core__sweep {
+  stroke-width: 2.1;
+}
+
+.model-activity-core--executing.model-activity-core--compact .model-activity-core__ripple {
+  stroke-width: 1.35;
+  animation-duration: 0.86s;
 }
 
 .model-activity-core--waiting .model-activity-core__orbit--primary {
@@ -316,24 +213,8 @@
   animation: model-activity-orbit 5.4s linear infinite reverse;
 }
 
-.model-activity-core--waiting .model-activity-core__link {
-  stroke-dasharray: 5 12;
+.model-activity-core--waiting .model-activity-core__sweep {
   opacity: 0.72;
-}
-
-.model-activity-core--waiting .model-activity-core__node {
-  animation: model-activity-node-pulse 4.2s ease-in-out infinite;
-}
-
-.model-activity-core--waiting .model-activity-core__scan {
-  opacity: 0.42;
-  animation: model-activity-scan 3.7s ease-in-out infinite;
-}
-
-.model-activity-core--completed .model-activity-core__link {
-  stroke-dasharray: none;
-  opacity: 0.92;
-  animation: model-activity-flow 2.8s linear infinite;
 }
 
 .model-activity-core--completed .model-activity-core__orbit--primary {
@@ -344,11 +225,9 @@
   animation: model-activity-orbit 3.7s linear infinite reverse;
 }
 
-.model-activity-core--completed .model-activity-core__node,
-.model-activity-core--completed .model-activity-core__center {
-  animation:
-    model-activity-success-pop 0.72s cubic-bezier(0.15, 0.8, 0.2, 1) 1,
-    model-activity-node-pulse 2.2s ease-in-out 0.72s infinite;
+.model-activity-core--completed .model-activity-core__center,
+.model-activity-core--completed .model-activity-core__highlight {
+  animation: model-activity-success-pop 0.72s cubic-bezier(0.15, 0.8, 0.2, 1) 1;
 }
 
 .model-activity-core--completed .model-activity-core__ripple--one {
@@ -359,23 +238,14 @@
   animation: model-activity-error-jolt 0.56s steps(2, end) 1;
 }
 
-.model-activity-core--failed .model-activity-core__brain-outline,
-.model-activity-core--failed .model-activity-core__link {
-  animation: model-activity-error-flicker 1.6s steps(2, end) infinite;
-}
-
 .model-activity-core--failed .model-activity-core__orbit--primary {
   animation: model-activity-orbit 3.1s linear infinite;
 }
 
+.model-activity-core--failed .model-activity-core__sweep,
 .model-activity-core--failed .model-activity-core__center,
-.model-activity-core--failed .model-activity-core__node {
-  animation: model-activity-node-pulse 1.8s ease-in-out infinite;
-}
-
-.model-activity-core--failed .model-activity-core__node--two,
-.model-activity-core--failed .model-activity-core__node--five {
-  opacity: 0.38;
+.model-activity-core--failed .model-activity-core__highlight {
+  animation: model-activity-error-flicker 1.6s steps(2, end) infinite;
 }
 
 .model-activity-core--failed .model-activity-core__sweep {
@@ -415,61 +285,16 @@
   }
 }
 
-@keyframes model-activity-node-pulse {
+@keyframes model-activity-thinking-dot {
   0%,
   100% {
-    opacity: 0.68;
-    transform: scale(0.9);
-  }
-
-  50% {
-    opacity: 1;
-    transform: scale(1.14);
-  }
-}
-
-@keyframes model-activity-flow {
-  to {
-    stroke-dashoffset: -34;
-  }
-}
-
-@keyframes model-activity-scan {
-  0% {
-    opacity: 0;
-    transform: translateY(-12px);
-  }
-
-  18%,
-  76% {
-    opacity: 0.85;
-  }
-
-  100% {
-    opacity: 0;
-    transform: translateY(12px);
-  }
-}
-
-@keyframes model-activity-network-hum {
-  0%,
-  100% {
-    transform: scale(0.98);
-  }
-
-  50% {
-    transform: scale(1.02);
-  }
-}
-
-@keyframes model-activity-thinking-pulse {
-  0%,
-  100% {
-    transform: scale(0.92);
+    opacity: 0.42;
+    transform: translateY(1px) scale(0.84);
   }
 
   48% {
-    transform: scale(1.06);
+    opacity: 1;
+    transform: translateY(-1px) scale(1.16);
   }
 }
 

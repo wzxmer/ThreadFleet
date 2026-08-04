@@ -33,6 +33,9 @@ describe("ModelActivityCore", () => {
       true,
     );
     expect(cores[0]?.querySelector(".model-activity-core__spark")).not.toBeNull();
+    expect(cores[0]?.querySelector(".model-activity-core__orbit--primary")).not.toBeNull();
+    expect(cores[0]?.querySelector(".model-activity-core__thinking-dots")).not.toBeNull();
+    expect(cores[0]?.querySelectorAll("path")).toHaveLength(0);
     states.forEach((state) => {
       expect(
         container.querySelector(`.model-activity-core[data-state="${state}"]`),
@@ -42,7 +45,7 @@ describe("ModelActivityCore", () => {
     requestFrame.mockRestore();
   });
 
-  it("keeps larger preview cores out of compact amplification", () => {
+  it("keeps larger preview cores out of compact ring reduction", () => {
     const { container } = render(<ModelActivityCore state="thinking" size={28} />);
 
     expect(
