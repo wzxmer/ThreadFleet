@@ -198,10 +198,19 @@ describe("sidebar interaction styles", () => {
       /\.sidebar-usage-panel\s*\{[^}]*border:\s*1px solid var\(--sidebar-object-border\);[^}]*background:\s*var\(--sidebar-object-bg-strong\);/s,
     );
     expect(sidebarCss).toMatch(
-      /\.sidebar-usage-selection-stack \.ds-rounded-select\s*\{[^}]*display:\s*block;[^}]*width:\s*100%;[^}]*min-width:\s*0;/s,
+      /\.sidebar-usage-selection-stack \.ds-rounded-select\s*\{[^}]*display:\s*block;[^}]*flex:\s*0 0 120px;[^}]*width:\s*120px;[^}]*min-width:\s*120px;[^}]*max-width:\s*120px;/s,
     );
     expect(sidebarCss).toMatch(
-      /\.sidebar-usage-selection-stack \.sidebar-usage-select\s*\{[^}]*display:\s*flex;[^}]*width:\s*100%;[^}]*min-width:\s*0;[^}]*max-width:\s*none;/s,
+      /\.sidebar-usage-selection-stack \.sidebar-usage-select\s*\{[^}]*display:\s*flex;[^}]*width:\s*100%;[^}]*min-width:\s*0;[^}]*max-width:\s*none;[^}]*border:\s*1px solid var\(--sidebar-object-border-strong\);[^}]*background:\s*var\(--sidebar-object-control\);/s,
+    );
+    expect(sidebarCss).toMatch(
+      /\.sidebar-usage-select-value\s*\{[^}]*display:\s*flex;[^}]*width:\s*100%;[^}]*height:\s*30px;[^}]*overflow:\s*hidden;[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap;/s,
+    );
+    expect(sidebarCss).toMatch(
+      /\.sidebar-usage-selection-stack\s*\{[^}]*grid-template-columns:\s*repeat\(2, 120px\);/s,
+    );
+    expect(sidebarCss).toMatch(
+      /\.sidebar-usage-select-popover\s*\{[^}]*left:\s*auto;[^}]*right:\s*0;[^}]*width:\s*100%;[^}]*min-width:\s*0;[^}]*max-width:\s*100%;/s,
     );
     expect(sidebarCss).not.toContain(".sidebar-theme-toggle");
     expect(sidebarCss).not.toContain(".sidebar-bottom-actions");

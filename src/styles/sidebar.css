@@ -2327,7 +2327,7 @@
 
 .sidebar-usage-selection-stack {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(2, 120px);
   gap: 8px;
   padding-bottom: 4px;
   border-bottom: 1px solid var(--sidebar-object-border);
@@ -2356,9 +2356,9 @@
 }
 
 .sidebar-usage-select {
-  width: min(148px, 58%);
-  min-width: 0;
-  max-width: 148px;
+  width: 120px;
+  min-width: 120px;
+  max-width: 120px;
   height: 30px;
   padding: 3px 24px 3px 8px;
   border-radius: 8px;
@@ -2372,21 +2372,46 @@
   cursor: pointer;
 }
 
-.sidebar-usage-selection-stack .ds-rounded-select {
-  display: block;
+.sidebar-usage-select-value {
+  display: flex;
+  align-items: center;
   width: 100%;
   min-width: 0;
+  height: 30px;
+  padding: 3px 8px;
+  color: var(--sidebar-object-text);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-usage-selection-stack .ds-rounded-select {
+  display: block;
+  flex: 0 0 120px;
+  width: 120px;
+  min-width: 120px;
+  max-width: 120px;
 }
 
 .sidebar-usage-selection-stack .sidebar-usage-select {
   display: flex;
+  align-items: center;
   width: 100%;
   min-width: 0;
   max-width: none;
+  border: 1px solid var(--sidebar-object-border-strong);
+  background: var(--sidebar-object-control);
+  color: var(--sidebar-object-text);
+  padding: 3px 24px 3px 8px;
 }
 
 .sidebar-usage-select:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--sidebar-object-border) 72%, var(--sidebar-object-text));
+  border-color: color-mix(in srgb, var(--sidebar-object-border-strong) 72%, var(--sidebar-object-text));
   background: color-mix(in srgb, var(--sidebar-object-control) 88%, var(--sidebar-object-text) 12%);
 }
 
@@ -2396,6 +2421,11 @@
 }
 
 .sidebar-usage-select-popover {
+  left: auto;
+  right: 0;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   z-index: 60;
 }
 

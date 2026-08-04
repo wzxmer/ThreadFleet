@@ -99,6 +99,31 @@ function ThirdPartyUsageSummary({
   const selectedGroup =
     selectedProvider?.groups.find((group) => group.id === effectiveUsageSelection?.groupId) ??
     selectedProvider?.groups[0];
+  const providerOptions = [
+    {
+      value: "__follow_execution__",
+      label: t("sidebar.usageFollowExecution"),
+    },
+    ...providers.map((provider) => ({ value: provider.id, label: provider.name })),
+  ];
+  const providerValue = usageSelection
+    ? selectedProvider?.id ?? ""
+    : providerOptions.find((option) => option.value === "__follow_execution__")?.value ??
+      providerOptions[0]?.value ??
+      "";
+  const providerLabel =
+    providerOptions.find((option) => option.value === providerValue)?.label ??
+    providerOptions[0]?.label ??
+    "";
+  const groupOptions = (selectedProvider?.groups ?? []).map((group) => ({
+    value: group.id,
+    label: group.name,
+  }));
+  const groupValue = selectedGroup?.id ?? groupOptions[0]?.value ?? "";
+  const groupLabel =
+    groupOptions.find((option) => option.value === groupValue)?.label ??
+    groupOptions[0]?.label ??
+    "";
 
   const selectUsage = (selection: CredentialSelection | null) => {
     onSelectUsageCredential(selection);
@@ -110,56 +135,55 @@ function ThirdPartyUsageSummary({
         <div className="sidebar-usage-selection-stack">
           <div className="sidebar-usage-stat">
             <span>{t("sidebar.usageProvider")}</span>
-            <RoundedSelect
-              className="sidebar-usage-select"
-              popoverClassName="sidebar-usage-select-popover"
-              style={{ width: "100%" }}
-              value={usageSelection ? selectedProvider?.id ?? "" : "__follow_execution__"}
-              ariaLabel={t("sidebar.usageProvider")}
-              options={[
-                {
-                  value: "__follow_execution__",
-                  label: t("sidebar.usageFollowExecution"),
-                },
-                ...providers.map((provider) => ({ value: provider.id, label: provider.name })),
-              ]}
-              onChange={(providerId) => {
-                if (providerId === "__follow_execution__") {
-                  selectUsage(null);
-                  return;
-                }
-                const provider = providers.find((item) => item.id === providerId);
-                selectUsage(provider ? providerSelection(provider) : null);
-              }}
-            />
-          </div>
-          {selectedProvider ? (
-            <div className="sidebar-usage-stat">
-              <span>{t("sidebar.usageGroup")}</span>
+            {providerOptions.length > 1 ? (
               <RoundedSelect
                 className="sidebar-usage-select"
                 popoverClassName="sidebar-usage-select-popover"
                 style={{ width: "100%" }}
-                value={selectedGroup?.id ?? ""}
-                ariaLabel={t("sidebar.usageGroup")}
-                options={(selectedProvider.groups ?? []).map((group) => ({
-                  value: group.id,
-                  label: group.name,
-                }))}
-                onChange={(groupId) => {
-                  const group = selectedProvider.groups.find((item) => item.id === groupId);
-                  const credential = group?.credentials[0];
-                  selectUsage(
-                    group && credential
-                      ? {
-                          providerId: selectedProvider.id,
-                          groupId: group.id,
-                          credentialId: credential.id,
-                        }
-                      : null,
-                  );
+                value={providerValue}
+                ariaLabel={t("sidebar.usageProvider")}
+                options={providerOptions}
+                onChange={(providerId) => {
+                  if (providerId === "__follow_execution__") {
+                    selectUsage(null);
+                    return;
+                  }
+                  const provider = providers.find((item) => item.id === providerId);
+                  selectUsage(provider ? providerSelection(provider) : null);
                 }}
               />
+            ) : (
+              <span className="sidebar-usage-select-value">{providerLabel}</span>
+            )}
+          </div>
+          {selectedProvider ? (
+            <div className="sidebar-usage-stat">
+              <span>{t("sidebar.usageGroup")}</span>
+              {groupOptions.length > 1 ? (
+                <RoundedSelect
+                  className="sidebar-usage-select"
+                  popoverClassName="sidebar-usage-select-popover"
+                  style={{ width: "100%" }}
+                  value={groupValue}
+                  ariaLabel={t("sidebar.usageGroup")}
+                  options={groupOptions}
+                  onChange={(groupId) => {
+                    const group = selectedProvider.groups.find((item) => item.id === groupId);
+                    const credential = group?.credentials[0];
+                    selectUsage(
+                      group && credential
+                        ? {
+                            providerId: selectedProvider.id,
+                            groupId: group.id,
+                            credentialId: credential.id,
+                          }
+                        : null,
+                    );
+                  }}
+                />
+              ) : (
+                <span className="sidebar-usage-select-value">{groupLabel}</span>
+              )}
             </div>
           ) : null}
         </div>
