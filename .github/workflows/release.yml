@@ -234,10 +234,26 @@ jobs:
             "src-tauri/target/${{ matrix.target }}/release/bundle/macos/ThreadFleet.app" \
             release-artifacts/ThreadFleet_${VERSION}_${{ matrix.arch }}.zip
 
-          hdiutil create -volname "ThreadFleet" \
-            -srcfolder release-artifacts/dmg-root \
-            -ov -format UDZO \
-            release-artifacts/ThreadFleet_${VERSION}_${{ matrix.arch }}.dmg
+          DMG_PATH="release-artifacts/ThreadFleet_${VERSION}_${{ matrix.arch }}.dmg"
+          for attempt in 1 2 3; do
+            hdiutil detach -force "/Volumes/ThreadFleet" >/dev/null 2>&1 || true
+            rm -f "$DMG_PATH"
+            if hdiutil create -volname "ThreadFleet" \
+              -srcfolder release-artifacts/dmg-root \
+              -ov -format UDZO \
+              "$DMG_PATH"; then
+              break
+            fi
+
+            if [ "$attempt" -eq 3 ]; then
+              echo "hdiutil create failed after ${attempt} attempts" >&2
+              exit 1
+            fi
+
+            hdiutil detach -force "/Volumes/ThreadFleet" >/dev/null 2>&1 || true
+            sync
+            sleep 15
+          done
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
