@@ -996,6 +996,96 @@ describe("Messages", () => {
     });
   });
 
+  it("preserves the local-history anchor when a new user message arrives during expansion", () => {
+    const initialItems: ConversationItem[] = Array.from({ length: 4 }, (_, index) => ({
+      id: `local-history-${index}`,
+      kind: "message" as const,
+      role: index % 2 === 0 ? "user" as const : "assistant" as const,
+      text: `Local history ${index}`,
+    }));
+    const renderMessages = (items: ConversationItem[]) => (
+      <Messages
+        items={items}
+        threadId="thread-local-history-send"
+        workspaceId="ws-history"
+        isThinking={false}
+        openTargets={[]}
+        selectedOpenAppId=""
+        chatHistoryScrollbackItems={2}
+      />
+    );
+    const { container, rerender } = render(renderMessages(initialItems));
+    const scroller = container.querySelector<HTMLDivElement>(
+      ".messages.messages-full",
+    );
+    if (!scroller) {
+      throw new Error("message scroller missing");
+    }
+
+    let scrollHeight = 800;
+    Object.defineProperties(scroller, {
+      scrollTop: { configurable: true, writable: true, value: 0 },
+      scrollHeight: { configurable: true, get: () => scrollHeight },
+      clientHeight: { configurable: true, value: 400 },
+    });
+    const rect = (top: number, bottom: number): DOMRect =>
+      ({
+        x: 0,
+        y: top,
+        width: 0,
+        height: bottom - top,
+        top,
+        right: 0,
+        bottom,
+        left: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    const getBoundingClientRectSpy = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: HTMLElement) {
+        if (this === scroller) {
+          return rect(0, 400);
+        }
+        const anchorKey = this.dataset.historyAnchor;
+        if (anchorKey === "local-history-2") {
+          return rect(
+            container.querySelector('[data-history-anchor="local-history-0"]')
+              ? 300
+              : 100,
+            container.querySelector('[data-history-anchor="local-history-0"]')
+              ? 400
+              : 200,
+          );
+        }
+        if (anchorKey === "local-history-3") {
+          return rect(200, 300);
+        }
+        return rect(0, 100);
+      });
+    scroller.scrollTop = 25;
+    fireEvent.scroll(scroller);
+    scroller.scrollTop = 0;
+
+    act(() => {
+      fireEvent.click(screen.getByRole("button", { name: /上方还有 2 条/ }));
+      scrollHeight = 1100;
+      rerender(
+        renderMessages([
+          ...initialItems,
+          {
+            id: "local-history-new-user",
+            kind: "message",
+            role: "user",
+            text: "New user message",
+          },
+        ]),
+      );
+    });
+
+    expect(scroller.scrollTop).toBe(200);
+    getBoundingClientRectSpy.mockRestore();
+  });
+
   it("reveals hidden history when session search finds it", async () => {
     const scrollIntoViewMock = vi.fn();
     HTMLElement.prototype.scrollIntoView = scrollIntoViewMock;
@@ -3455,6 +3545,183 @@ describe("Messages", () => {
     const processGroup = container.querySelector(".process-group");
     expect(processGroup?.querySelector(".process-message-inline")).toBeTruthy();
     expect(processGroup?.querySelector(".message-agent-meta")).toBeNull();
+  });
+
+  it("collapses a terminal commentary-only turn with late tool calls", async () => {
+    const items: ConversationItem[] = [
+      {
+        id: "user-terminal-commentary",
+        kind: "message",
+        role: "user",
+        text: "Continue the same turn.",
+        turnId: "turn-terminal-commentary",
+      },
+      {
+        id: "tool-terminal-commentary-before",
+        kind: "tool",
+        toolType: "commandExecution",
+        title: "Command: git status",
+        detail: "/repo",
+        status: "completed",
+        output: "",
+        turnId: "turn-terminal-commentary",
+      },
+      {
+        id: "assistant-terminal-commentary",
+        kind: "message",
+        role: "assistant",
+        phase: "commentary",
+        text: "Terminal commentary result.",
+        turnId: "turn-terminal-commentary",
+      },
+      {
+        id: "tool-terminal-commentary-after",
+        kind: "tool",
+        toolType: "commandExecution",
+        title: "Command: npm run typecheck",
+        detail: "/repo",
+        status: "completed",
+        output: "",
+        turnId: "turn-terminal-commentary",
+      },
+    ];
+
+    render(
+      <Messages
+        items={items}
+        threadId="thread-1"
+        workspaceId="ws-1"
+        isThinking={false}
+        openTargets={[]}
+        selectedOpenAppId=""
+      />,
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "展开过程消息" }),
+      ).toBeTruthy();
+    });
+    expect(screen.queryByText("git status")).toBeNull();
+    expect(screen.queryByText("npm run typecheck")).toBeNull();
+    expect(screen.getByText("Terminal commentary result.")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "展开过程消息" }));
+    expect(screen.getByText("git status")).toBeTruthy();
+    expect(screen.getByText("npm run typecheck")).toBeTruthy();
+  });
+
+  it("keeps a completed commentary-only turn collapsed while another turn is active", async () => {
+    const items: ConversationItem[] = [
+      {
+        id: "user-completed-commentary",
+        kind: "message",
+        role: "user",
+        text: "Finish the first turn.",
+        turnId: "turn-completed-commentary",
+      },
+      {
+        id: "tool-completed-commentary",
+        kind: "tool",
+        toolType: "commandExecution",
+        title: "Command: inspect completed turn",
+        detail: "/repo",
+        status: "completed",
+        output: "",
+        turnId: "turn-completed-commentary",
+      },
+      {
+        id: "assistant-completed-commentary",
+        kind: "message",
+        role: "assistant",
+        phase: "commentary",
+        text: "First turn result.",
+        turnId: "turn-completed-commentary",
+      },
+      {
+        id: "user-active-turn",
+        kind: "message",
+        role: "user",
+        text: "Start the next turn.",
+        turnId: "turn-active",
+      },
+    ];
+
+    render(
+      <Messages
+        items={items}
+        threadId="thread-1"
+        workspaceId="ws-1"
+        isThinking
+        activeTurnId="turn-active"
+        openTargets={[]}
+        selectedOpenAppId=""
+      />,
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "展开过程消息" }),
+      ).toBeTruthy();
+    });
+    expect(screen.queryByText("inspect completed turn")).toBeNull();
+    expect(screen.getByText("First turn result.")).toBeTruthy();
+  });
+
+  it("keeps a completed commentary-only turn collapsed while the next turn is pending start", async () => {
+    const items: ConversationItem[] = [
+      {
+        id: "user-completed-before-pending",
+        kind: "message",
+        role: "user",
+        text: "Finish before pending start.",
+        turnId: "turn-completed-before-pending",
+      },
+      {
+        id: "tool-completed-before-pending",
+        kind: "tool",
+        toolType: "commandExecution",
+        title: "Command: inspect before pending start",
+        detail: "/repo",
+        status: "completed",
+        output: "",
+        turnId: "turn-completed-before-pending",
+      },
+      {
+        id: "assistant-completed-before-pending",
+        kind: "message",
+        role: "assistant",
+        phase: "commentary",
+        text: "Result before pending start.",
+        turnId: "turn-completed-before-pending",
+      },
+      {
+        id: "user-pending-start",
+        kind: "message",
+        role: "user",
+        text: "Start pending turn.",
+      },
+    ];
+
+    render(
+      <Messages
+        items={items}
+        threadId="thread-1"
+        workspaceId="ws-1"
+        isThinking
+        activeTurnId={null}
+        openTargets={[]}
+        selectedOpenAppId=""
+      />,
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "展开过程消息" }),
+      ).toBeTruthy();
+    });
+    expect(screen.queryByText("inspect before pending start")).toBeNull();
+    expect(screen.getByText("Result before pending start.")).toBeTruthy();
   });
 
   it("keeps historical assistant messages visible when phase markers are absent", async () => {

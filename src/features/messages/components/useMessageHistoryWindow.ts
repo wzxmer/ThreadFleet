@@ -25,6 +25,12 @@ type HistoryWindowState = {
 type ScrollRestore = {
   previousScrollHeight: number;
   previousScrollTop: number;
+  anchor: HistoryAnchor | null;
+};
+
+type HistoryAnchor = {
+  key: string;
+  top: number;
 };
 
 function normalizeBatchSize(value: number | null | undefined) {
@@ -50,16 +56,61 @@ function normalizeRange(
   return { start, end };
 }
 
+function findFirstVisibleHistoryAnchor(
+  container: HTMLDivElement,
+  selector: string,
+) {
+  const anchors = Array.from(
+    container.querySelectorAll<HTMLElement>(selector),
+  );
+  const containerRect = container.getBoundingClientRect();
+  if (containerRect.height <= 0) {
+    return null;
+  }
+  return (
+    anchors.find((anchor) => {
+      const rect = anchor.getBoundingClientRect();
+      return rect.bottom > containerRect.top && rect.top < containerRect.bottom;
+    }) ?? anchors[0] ?? null
+  );
+}
+
+function captureHistoryAnchor(
+  container: HTMLDivElement,
+  selector: string | undefined,
+): HistoryAnchor | null {
+  if (!selector) {
+    return null;
+  }
+  const anchor = findFirstVisibleHistoryAnchor(container, selector);
+  const key = anchor?.dataset.historyAnchor;
+  return anchor && key
+    ? { key, top: anchor.getBoundingClientRect().top }
+    : null;
+}
+
+function findHistoryAnchorByKey(
+  container: HTMLDivElement,
+  selector: string,
+  key: string,
+) {
+  return Array.from(container.querySelectorAll<HTMLElement>(selector)).find(
+    (anchor) => anchor.dataset.historyAnchor === key,
+  );
+}
+
 export function useMessageHistoryWindow<T>({
   items,
   threadId,
   batchSize: batchSizeValue,
   containerRef,
+  historyAnchorSelector,
 }: {
   items: T[];
   threadId: string | null;
   batchSize?: number | null;
   containerRef: RefObject<HTMLDivElement | null>;
+  historyAnchorSelector?: string;
 }) {
   const batchSize = normalizeBatchSize(batchSizeValue);
   const [windowState, setWindowState] = useState<HistoryWindowState>(() => ({
@@ -125,8 +176,24 @@ export function useMessageHistoryWindow<T>({
     const container = containerRef.current;
     const restore = pendingScrollRestoreRef.current;
     if (container && restore) {
-      container.scrollTop =
-        container.scrollHeight - restore.previousScrollHeight + restore.previousScrollTop;
+      if (restore.anchor && historyAnchorSelector) {
+        const currentAnchor = findHistoryAnchorByKey(
+          container,
+          historyAnchorSelector,
+          restore.anchor.key,
+        );
+        if (currentAnchor) {
+          container.scrollTop =
+            restore.previousScrollTop +
+            currentAnchor.getBoundingClientRect().top -
+              restore.anchor.top;
+        }
+      } else {
+        container.scrollTop =
+          container.scrollHeight -
+          restore.previousScrollHeight +
+          restore.previousScrollTop;
+      }
       pendingScrollRestoreRef.current = null;
     }
     if (container && pendingScrollLatestRef.current) {
@@ -134,7 +201,12 @@ export function useMessageHistoryWindow<T>({
       pendingScrollLatestRef.current = false;
     }
     windowUpdatePendingRef.current = false;
-  }, [containerRef, effectiveRange.end, effectiveRange.start]);
+  }, [
+    containerRef,
+    effectiveRange.end,
+    effectiveRange.start,
+    historyAnchorSelector,
+  ]);
 
   const loadEarlier = useCallback(() => {
     if (effectiveRange.start <= 0 || windowUpdatePendingRef.current) {
@@ -145,6 +217,7 @@ export function useMessageHistoryWindow<T>({
       pendingScrollRestoreRef.current = {
         previousScrollHeight: container.scrollHeight,
         previousScrollTop: container.scrollTop,
+        anchor: captureHistoryAnchor(container, historyAnchorSelector),
       };
     }
     windowUpdatePendingRef.current = true;
@@ -157,7 +230,14 @@ export function useMessageHistoryWindow<T>({
       totalItems: items.length,
       batchSize,
     });
-  }, [batchSize, containerRef, effectiveRange, items.length, threadId]);
+  }, [
+    batchSize,
+    containerRef,
+    effectiveRange,
+    historyAnchorSelector,
+    items.length,
+    threadId,
+  ]);
 
   const loadLater = useCallback(() => {
     if (effectiveRange.end >= items.length || windowUpdatePendingRef.current) {

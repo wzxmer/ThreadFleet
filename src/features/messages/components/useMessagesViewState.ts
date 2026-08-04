@@ -97,6 +97,7 @@ export function useMessagesViewState({
     threadId,
     batchSize: chatHistoryScrollbackItems,
     containerRef,
+    historyAnchorSelector: "[data-history-anchor]",
   });
 
   const scrollKey = `${scrollKeyForItems(displayItems)}-${activeUserInputRequestId ?? "no-input"}`;
@@ -448,7 +449,7 @@ export function useMessagesViewState({
       return false;
     };
 
-    const flushTurn = () => {
+    const flushTurn = (hasFollowingTurnBoundary = false) => {
       if (turnEntries.length === 0) {
         return;
       }
@@ -470,10 +471,25 @@ export function useMessagesViewState({
           }
         }
       }
+      const fallbackAssistantEntry =
+        fallbackAssistantIndex >= 0
+          ? turnEntries[fallbackAssistantIndex]
+          : null;
+      const isKnownInactiveTurn =
+        activeTurnId !== null && turnId !== activeTurnId;
+      const canUseTerminalCommentaryFallback =
+        (!isThinking || isKnownInactiveTurn || hasFollowingTurnBoundary) &&
+        turnId !== null &&
+        finalAssistantIndex < 0 &&
+        fallbackAssistantEntry?.kind === "item" &&
+        fallbackAssistantEntry.item.kind === "message" &&
+        fallbackAssistantEntry.item.phase === "commentary";
       finalAssistantIndex =
         activeTurnId && turnId === activeTurnId
           ? fallbackAssistantIndex
-          : finalAssistantIndex;
+          : canUseTerminalCommentaryFallback
+            ? fallbackAssistantIndex
+            : finalAssistantIndex;
       if (finalAssistantIndex < 0 || turnEntries.length <= 1) {
         result.push(...turnEntries);
         turnEntries = [];
@@ -587,14 +603,14 @@ export function useMessagesViewState({
         ((entryId && turnId && entryId !== turnId) ||
           startsUnscopedAssistantAfterCompletedTurn)
       ) {
-        flushTurn();
+        flushTurn(true);
       }
       if (
         entry.kind === "item" &&
         ((isUserMessage && !isSameTurnUserMessage) ||
           entry.item.kind === "subagentCheckpoint")
       ) {
-        flushTurn();
+        flushTurn(true);
         result.push(entry);
         return;
       }
@@ -603,7 +619,7 @@ export function useMessagesViewState({
     });
     flushTurn();
     return result;
-  }, [activeTurnId, baseGroupedItems]);
+  }, [activeTurnId, baseGroupedItems, isThinking]);
 
   const revealGroupedItem = useCallback(
     (itemId: string) => {
@@ -648,6 +664,7 @@ export function useMessagesViewState({
   const finalAssistantCollapseTarget = useMemo(() => {
     let finalAssistantIndex = -1;
     let finalAssistantId: string | null = null;
+    let finalAssistantTurnId: string | null = null;
 
     groupedItems.forEach((entry, index) => {
       if (
@@ -657,16 +674,39 @@ export function useMessagesViewState({
       ) {
         finalAssistantIndex = index;
         finalAssistantId = entry.item.id;
+        finalAssistantTurnId = entry.item.turnId ?? null;
       }
     });
 
     if (finalAssistantIndex <= 0 || !finalAssistantId) {
       return {
         finalAssistantId: null,
+        finalAssistantTurnId: null,
+        hasFollowingTurnBoundary: false,
         groupIds: [] as string[],
         itemIds: [] as string[],
       };
     }
+
+    const hasFollowingTurnBoundary = groupedItems
+      .slice(finalAssistantIndex + 1)
+      .some((entry) => {
+        if (entry.kind !== "item") {
+          return false;
+        }
+        if (entry.item.kind === "subagentCheckpoint") {
+          return true;
+        }
+        if (entry.item.kind !== "message" || entry.item.role !== "user") {
+          return false;
+        }
+        const boundaryTurnId = entry.item.turnId ?? null;
+        return (
+          finalAssistantTurnId === null ||
+          boundaryTurnId === null ||
+          boundaryTurnId !== finalAssistantTurnId
+        );
+      });
 
     const groupIds = groupedItems
       .slice(0, finalAssistantIndex)
@@ -693,7 +733,13 @@ export function useMessagesViewState({
               : [],
       );
 
-    return { finalAssistantId, groupIds, itemIds };
+    return {
+      finalAssistantId,
+      finalAssistantTurnId,
+      hasFollowingTurnBoundary,
+      groupIds,
+      itemIds,
+    };
   }, [groupedItems]);
 
   const collapseAllToolGroups = useCallback(() => {
@@ -765,12 +811,23 @@ export function useMessagesViewState({
   }, [defaultToolGroupsCollapsed, groupedItems, isToolGroupsAutoCollapsed]);
 
   useEffect(() => {
-    const { finalAssistantId, groupIds, itemIds } =
-      finalAssistantCollapseTarget;
+    const {
+      finalAssistantId,
+      finalAssistantTurnId,
+      hasFollowingTurnBoundary,
+      groupIds,
+      itemIds,
+    } = finalAssistantCollapseTarget;
+    const isCurrentThinkingTurn =
+      isThinking &&
+      !hasFollowingTurnBoundary &&
+      (activeTurnId === null ||
+        finalAssistantTurnId === null ||
+        finalAssistantTurnId === activeTurnId);
     if (
       !finalAssistantId ||
       (groupIds.length === 0 && itemIds.length === 0) ||
-      isThinking ||
+      isCurrentThinkingTurn ||
       userDisabledAutoCollapseRef.current
     ) {
       return;
@@ -827,6 +884,7 @@ export function useMessagesViewState({
       return changed ? next : prev;
     });
   }, [
+    activeTurnId,
     finalAssistantCollapseTarget,
     isThinking,
     threadId,
