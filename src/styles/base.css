@@ -69,6 +69,7 @@ body {
   overflow: hidden;
   position: relative;
   --main-topbar-height: 48px;
+  --window-caption-height: 40px;
   --app-rail-width: 52px;
   /* Shared ThreadFleet chrome language */
   --cm-surface-row: color-mix(in srgb, var(--surface-card) 44%, transparent);
@@ -262,14 +263,14 @@ body {
   z-index: 6;
   display: inline-flex;
   align-items: stretch;
-  height: var(--main-topbar-height, 44px);
+  height: var(--window-caption-height, 40px);
   -webkit-app-region: no-drag;
   min-width: var(--window-caption-width, 138px);
 }
 
 .window-caption-control {
   width: 46px;
-  height: var(--main-topbar-height, 44px);
+  height: var(--window-caption-height, 40px);
   border: none;
   border-radius: 0;
   padding: 0;

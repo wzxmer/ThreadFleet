@@ -35,6 +35,9 @@ describe("app root resize background", () => {
   });
 
   it("keeps Windows caption controls visible on active chrome", () => {
+    const captionControlsRule = baseCss.match(
+      /\.window-caption-controls\s*\{([\s\S]*?)\n\}/,
+    );
     const captionRule = baseCss.match(
       /\.window-caption-control\s*\{([\s\S]*?)\n\}/,
     );
@@ -43,6 +46,12 @@ describe("app root resize background", () => {
     );
     const iconRule = baseCss.match(/\.window-caption-control svg\s*\{([\s\S]*?)\n\}/);
 
+    expect(captionControlsRule?.[1]).toContain(
+      "height: var(--window-caption-height, 40px)",
+    );
+    expect(captionRule?.[1]).toContain(
+      "height: var(--window-caption-height, 40px)",
+    );
     expect(captionRule?.[1]).toContain("color: var(--cm-caption-text)");
     expect(captionRule?.[1]).toContain("opacity: 0.96");
     expect(captionHoverRule?.[1]).toContain("color: var(--cm-text-strong)");

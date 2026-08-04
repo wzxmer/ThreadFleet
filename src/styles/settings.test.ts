@@ -5,6 +5,16 @@ import { describe, expect, it } from "vitest";
 describe("settings toggle row styles", () => {
   const settingsCss = readFileSync(new URL("./settings.css", import.meta.url), "utf8");
 
+  it("keeps the surface title clear of the desktop sidebar reveal control", () => {
+    const titlebarRule = settingsCss.match(
+      /\.app\.layout-desktop\.sidebar-collapsed \.settings-surface \.settings-titlebar\s*\{([\s\S]*?)\n\}/,
+    );
+
+    expect(titlebarRule?.[1]).toContain("padding-left: max(");
+    expect(titlebarRule?.[1]).toContain("var(--titlebar-toggle-size, 32px)");
+    expect(titlebarRule?.[1]).toContain("var(--titlebar-toggle-side-gap, 14px)");
+  });
+
   it("keeps long localized copy from pushing the toggle outside narrow windows", () => {
     expect(settingsCss).toMatch(
       /\.settings-toggle-row > div:first-child\s*\{[^}]*min-width:\s*0;/s,

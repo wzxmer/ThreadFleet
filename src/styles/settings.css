@@ -37,6 +37,17 @@
   padding: 0 var(--main-panel-padding, 24px);
 }
 
+.app.layout-desktop.sidebar-collapsed .settings-surface .settings-titlebar {
+  padding-left: max(
+    var(--main-panel-padding, 24px),
+    calc(
+      10px
+      + var(--titlebar-toggle-size, 32px)
+      + var(--titlebar-toggle-side-gap, 14px)
+    )
+  );
+}
+
 .settings-surface .settings-body {
   grid-template-columns: 240px minmax(0, 1fr);
 }
