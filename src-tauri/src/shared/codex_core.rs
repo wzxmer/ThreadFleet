@@ -2537,7 +2537,7 @@ pub(crate) async fn get_provider_status_core(
     workspace_id: String,
 ) -> Result<Value, String> {
     let codex_home = resolve_codex_home_for_workspace_core(workspaces, &workspace_id).await?;
-    let active_profile = provider_profiles_core::effective_execution_profile(settings);
+    let active_profile = provider_profiles_core::effective_usage_profile(settings);
     let active_profile_base_url = active_profile
         .as_ref()
         .and_then(|profile| profile.base_url.as_deref());
@@ -2714,7 +2714,7 @@ base_url = "{base_url}"
     }
 
     #[test]
-    fn third_party_usage_credentials_prefer_active_profile() {
+    fn third_party_usage_credentials_use_local_config_without_usage_override() {
         let mut settings = AppSettings::default();
         settings.codex_key_profiles = vec![CodexKeyProfile {
             id: "profile".to_string(),
@@ -2749,10 +2749,10 @@ base_url = "{base_url}"
         assert_eq!(
             credentials,
             Some((
-                "https://api.deepseek.com/v1".to_string(),
-                "sk-profile".to_string(),
+                "https://fcodex.top/v1".to_string(),
+                "sk-default".to_string(),
                 "auto".to_string(),
-                Some("access-profile".to_string()),
+                None,
                 None,
             ))
         );
@@ -2789,6 +2789,8 @@ base_url = "{base_url}"
                         new_api_access_token: None,
                         new_api_session_cookie: None,
                         key_env_var: "OPENAI_API_KEY".to_string(),
+                        last_model_refresh_at_ms: None,
+                        cached_models: None,
                         function_tool_capability: None,
                     }],
                 }],
@@ -2820,6 +2822,8 @@ base_url = "{base_url}"
                         new_api_access_token: Some("usage-access-token".to_string()),
                         new_api_session_cookie: None,
                         key_env_var: "OPENAI_API_KEY".to_string(),
+                        last_model_refresh_at_ms: None,
+                        cached_models: None,
                         function_tool_capability: None,
                     }],
                 }],

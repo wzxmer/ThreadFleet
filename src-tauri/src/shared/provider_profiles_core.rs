@@ -232,6 +232,8 @@ fn profile_to_provider(profile: &CodexKeyProfile) -> CodexProvider {
                 new_api_access_token: profile.new_api_access_token.clone(),
                 new_api_session_cookie: profile.new_api_session_cookie.clone(),
                 key_env_var: profile.key_env_var.clone(),
+                last_model_refresh_at_ms: profile.last_model_refresh_at_ms,
+                cached_models: Some(profile.cached_models.clone()),
                 function_tool_capability: None,
             }],
         }],
@@ -243,27 +245,35 @@ pub(crate) fn provider_to_profiles(provider: &CodexProvider) -> Vec<CodexKeyProf
         .groups
         .iter()
         .flat_map(|group| {
-            group.credentials.iter().map(|credential| CodexKeyProfile {
-                id: legacy_profile_id(&provider.id, &group.id, &credential.id),
-                name: credential.name.clone(),
-                provider_kind: provider.provider_kind.clone(),
-                usage_protocol: provider.usage_protocol.clone(),
-                new_api_access_token: credential.new_api_access_token.clone(),
-                new_api_session_cookie: credential.new_api_session_cookie.clone(),
-                key_env_var: credential.key_env_var.clone(),
-                key: credential.key.clone(),
-                base_url_env_var: provider.base_url_env_var.clone(),
-                base_url: provider.base_url.clone(),
-                model: provider.model.clone(),
-                context_window: provider.context_window,
-                max_output_tokens: provider.max_output_tokens,
-                use_gateway: provider_uses_gateway(provider),
-                transport_mode: provider.transport_mode.clone(),
-                supports_thinking: provider.supports_thinking,
-                supports_reasoning_effort: provider.supports_reasoning_effort,
-                last_model_refresh_at_ms: provider.last_model_refresh_at_ms,
-                cached_models: provider.cached_models.clone(),
-                group_name: Some(group.name.clone()),
+            group.credentials.iter().map(|credential| {
+                let cached_models = credential
+                    .cached_models
+                    .clone()
+                    .unwrap_or_else(|| provider.cached_models.clone());
+                CodexKeyProfile {
+                    id: legacy_profile_id(&provider.id, &group.id, &credential.id),
+                    name: credential.name.clone(),
+                    provider_kind: provider.provider_kind.clone(),
+                    usage_protocol: provider.usage_protocol.clone(),
+                    new_api_access_token: credential.new_api_access_token.clone(),
+                    new_api_session_cookie: credential.new_api_session_cookie.clone(),
+                    key_env_var: credential.key_env_var.clone(),
+                    key: credential.key.clone(),
+                    base_url_env_var: provider.base_url_env_var.clone(),
+                    base_url: provider.base_url.clone(),
+                    model: provider.model.clone(),
+                    context_window: provider.context_window,
+                    max_output_tokens: provider.max_output_tokens,
+                    use_gateway: provider_uses_gateway(provider),
+                    transport_mode: provider.transport_mode.clone(),
+                    supports_thinking: provider.supports_thinking,
+                    supports_reasoning_effort: provider.supports_reasoning_effort,
+                    last_model_refresh_at_ms: credential
+                        .last_model_refresh_at_ms
+                        .or(provider.last_model_refresh_at_ms),
+                    cached_models,
+                    group_name: Some(group.name.clone()),
+                }
             })
         })
         .collect()
@@ -372,8 +382,13 @@ pub(crate) fn profile_for_selection(
         transport_mode: provider.transport_mode.clone(),
         supports_thinking: provider.supports_thinking,
         supports_reasoning_effort: provider.supports_reasoning_effort,
-        last_model_refresh_at_ms: provider.last_model_refresh_at_ms,
-        cached_models: provider.cached_models.clone(),
+        last_model_refresh_at_ms: credential
+            .last_model_refresh_at_ms
+            .or(provider.last_model_refresh_at_ms),
+        cached_models: credential
+            .cached_models
+            .clone()
+            .unwrap_or_else(|| provider.cached_models.clone()),
         group_name: Some(group.name.clone()),
     })
 }
@@ -397,7 +412,6 @@ pub(crate) fn effective_execution_profile(settings: &AppSettings) -> Option<Code
 
 pub(crate) fn effective_usage_profile(settings: &AppSettings) -> Option<CodexKeyProfile> {
     profile_for_selection(settings, settings.usage_credential_selection.as_ref())
-        .or_else(|| effective_execution_profile(settings))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1808,14 +1822,14 @@ mod tests {
     use super::{
         active_codex_key_runtime, build_new_api_url, build_provider_models_url,
         build_provider_usage_url, cache_provider_session_usage, cached_provider_session_usage,
-        merge_profile_codex_args, merge_provider_model_payloads, merge_provider_usage_snapshots,
-        migrate_provider_settings, normalize_new_api_account_payload,
-        normalize_new_api_usage_payload, normalize_provider_api_base_url,
-        normalize_sub2_usage_payload, profile_for_selection, profile_uses_gateway,
-        summarize_new_api_logs,
+        effective_usage_profile, merge_profile_codex_args, merge_provider_model_payloads,
+        merge_provider_usage_snapshots, migrate_provider_settings,
+        normalize_new_api_account_payload, normalize_new_api_usage_payload,
+        normalize_provider_api_base_url, normalize_sub2_usage_payload, profile_for_selection,
+        profile_uses_gateway, summarize_new_api_logs,
     };
     use crate::codex::args::parse_codex_args;
-    use crate::types::{AppSettings, CodexKeyProfile, CredentialSelection};
+    use crate::types::{AppSettings, CodexKeyProfile, CodexProviderModel, CredentialSelection};
 
     #[test]
     fn legacy_profiles_migrate_to_provider_group_credentials_idempotently() {
@@ -1838,8 +1852,14 @@ mod tests {
             transport_mode: "auto".to_string(),
             supports_thinking: true,
             supports_reasoning_effort: true,
-            last_model_refresh_at_ms: None,
-            cached_models: Vec::new(),
+            last_model_refresh_at_ms: Some(123),
+            cached_models: vec![CodexProviderModel {
+                id: "legacy-model".to_string(),
+                name: Some("Legacy model".to_string()),
+                context_window: Some(128_000),
+                supported_reasoning_efforts: None,
+                default_reasoning_effort: None,
+            }],
             group_name: Some("Team".to_string()),
         }];
         settings.active_codex_key_profile_id = Some("legacy".to_string());
@@ -1847,6 +1867,12 @@ mod tests {
         assert!(migrate_provider_settings(&mut settings));
         assert_eq!(settings.codex_providers.len(), 1);
         assert_eq!(settings.codex_providers[0].groups[0].name, "Team");
+        let credential = &settings.codex_providers[0].groups[0].credentials[0];
+        assert_eq!(credential.last_model_refresh_at_ms, Some(123));
+        assert_eq!(
+            credential.cached_models.as_ref().map(|models| models.len()),
+            Some(1)
+        );
         assert_eq!(
             settings
                 .execution_credential_selection
@@ -1865,6 +1891,99 @@ mod tests {
             profile.base_url.as_deref(),
             Some("https://provider.example/v1")
         );
+    }
+
+    #[test]
+    fn usage_profile_does_not_fall_back_to_execution_profile() {
+        let mut settings = AppSettings::default();
+        settings.codex_key_profiles = vec![CodexKeyProfile {
+            id: "execution".to_string(),
+            name: "Execution provider".to_string(),
+            provider_kind: "custom".to_string(),
+            usage_protocol: "auto".to_string(),
+            new_api_access_token: None,
+            new_api_session_cookie: None,
+            key_env_var: "OPENAI_API_KEY".to_string(),
+            key: "secret".to_string(),
+            base_url_env_var: "OPENAI_BASE_URL".to_string(),
+            base_url: Some("https://execution.example/v1".to_string()),
+            model: None,
+            context_window: None,
+            max_output_tokens: None,
+            use_gateway: false,
+            transport_mode: "auto".to_string(),
+            supports_thinking: false,
+            supports_reasoning_effort: false,
+            last_model_refresh_at_ms: None,
+            cached_models: Vec::new(),
+            group_name: None,
+        }];
+        settings.active_codex_key_profile_id = Some("execution".to_string());
+
+        assert!(effective_usage_profile(&settings).is_none());
+    }
+
+    #[test]
+    fn credential_model_cache_survives_settings_round_trip_and_projection() {
+        let mut settings: AppSettings = serde_json::from_value(serde_json::json!({
+            "codexProviders": [{
+                "id": "provider-a",
+                "name": "Provider A",
+                "lastModelRefreshAtMs": 111,
+                "cachedModels": [{
+                    "id": "provider-model",
+                    "name": "Provider model",
+                    "contextWindow": 64000
+                }],
+                "groups": [{
+                    "id": "group-a",
+                    "name": "Group A",
+                    "credentials": [{
+                        "id": "key-a",
+                        "name": "Key A",
+                        "key": "secret",
+                        "lastModelRefreshAtMs": 456,
+                        "cachedModels": [{
+                            "id": "credential-model",
+                            "name": "Credential model",
+                            "contextWindow": 128000
+                        }]
+                    }]
+                }]
+            }],
+            "executionCredentialSelection": {
+                "providerId": "provider-a",
+                "groupId": "group-a",
+                "credentialId": "key-a"
+            }
+        }))
+        .expect("deserialize settings");
+
+        migrate_provider_settings(&mut settings);
+
+        let profile = settings
+            .codex_key_profiles
+            .first()
+            .expect("projected credential profile");
+        assert_eq!(profile.last_model_refresh_at_ms, Some(456));
+        assert_eq!(
+            profile
+                .cached_models
+                .iter()
+                .map(|model| model.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["credential-model"]
+        );
+        let selected_profile =
+            profile_for_selection(&settings, settings.execution_credential_selection.as_ref())
+                .expect("selected credential profile");
+        assert_eq!(selected_profile.last_model_refresh_at_ms, Some(456));
+        assert_eq!(selected_profile.cached_models[0].id, "credential-model");
+
+        let serialized = serde_json::to_value(&settings).expect("serialize settings");
+        let credential = &serialized["codexProviders"][0]["groups"][0]["credentials"][0];
+        assert_eq!(credential["lastModelRefreshAtMs"], 456);
+        assert_eq!(credential["cachedModels"][0]["id"], "credential-model");
     }
 
     #[test]

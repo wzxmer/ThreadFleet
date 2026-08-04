@@ -619,6 +619,8 @@ base_url = "https://old.example/v1"
                     new_api_access_token: None,
                     new_api_session_cookie: None,
                     key_env_var: "NEW_API_KEY".to_string(),
+                    last_model_refresh_at_ms: None,
+                    cached_models: None,
                     function_tool_capability: None,
                 }],
             }],

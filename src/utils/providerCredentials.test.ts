@@ -82,7 +82,7 @@ describe("provider credential projection", () => {
     ).toBeNull();
   });
 
-  it("uses the execution credential for usage until the user selects an override", () => {
+  it("uses local Codex configuration until the user selects an override", () => {
     const executionSelection = {
       providerId: "provider-a",
       groupId: "group-a",
@@ -101,7 +101,7 @@ describe("provider credential projection", () => {
         executionCredentialSelection: executionSelection,
         usageCredentialSelection: null,
       }),
-    ).toEqual(executionSelection);
+    ).toBeNull();
     expect(
       effectiveUsageCredentialSelection({
         codexProviders: [provider],
@@ -152,12 +152,7 @@ describe("provider credential projection", () => {
     expect(next.activeCodexKeyProfileId).toBe(credentialSelectionId(usageSelection));
   });
 
-  it("keeps the execution credential when only the usage group changes", () => {
-    const usageSelection = {
-      providerId: "provider-a",
-      groupId: "group-a",
-      credentialId: "key-b",
-    };
+  it("switches execution back to the local Codex configuration", () => {
     const executionSelection = {
       providerId: "provider-a",
       groupId: "group-a",
@@ -170,17 +165,63 @@ describe("provider credential projection", () => {
         codexKeyProfiles: [],
         activeCodexKeyProfileId: credentialSelectionId(executionSelection),
         executionCredentialSelection: executionSelection,
+        usageCredentialSelection: executionSelection,
+      },
+      null,
+    );
+
+    expect(next.usageCredentialSelection).toBeNull();
+    expect(next.executionCredentialSelection).toBeNull();
+    expect(next.activeCodexKeyProfileId).toBeNull();
+  });
+
+  it("synchronizes execution when the usage group changes", () => {
+    const providerWithTwoGroups: CodexProvider = {
+      ...provider,
+      groups: [
+        ...provider.groups,
+        {
+          id: "group-b",
+          name: "Group B",
+          credentials: [
+            {
+              id: "key-c",
+              name: "Key C",
+              key: "secret-c",
+              keyEnvVar: "OPENAI_API_KEY",
+            },
+          ],
+        },
+      ],
+    };
+    const usageSelection = {
+      providerId: "provider-a",
+      groupId: "group-b",
+      credentialId: "key-c",
+    };
+    const executionSelection = {
+      providerId: "provider-a",
+      groupId: "group-a",
+      credentialId: "key-a",
+    };
+
+    const next = synchronizeUsageProviderSelection(
+      {
+        codexProviders: [providerWithTwoGroups],
+        codexKeyProfiles: [],
+        activeCodexKeyProfileId: credentialSelectionId(executionSelection),
+        executionCredentialSelection: executionSelection,
         usageCredentialSelection: null,
       },
       usageSelection,
     );
 
     expect(next.usageCredentialSelection).toEqual(usageSelection);
-    expect(next.executionCredentialSelection).toEqual(executionSelection);
-    expect(next.activeCodexKeyProfileId).toBe(credentialSelectionId(executionSelection));
+    expect(next.executionCredentialSelection).toEqual(usageSelection);
+    expect(next.activeCodexKeyProfileId).toBe(credentialSelectionId(usageSelection));
   });
 
-  it("falls back to the execution credential when the usage override was deleted", () => {
+  it("falls back to local Codex configuration when the usage override was deleted", () => {
     const executionSelection = {
       providerId: "provider-a",
       groupId: "group-a",
@@ -197,7 +238,7 @@ describe("provider credential projection", () => {
           credentialId: "deleted-key",
         },
       }),
-    ).toEqual(executionSelection);
+    ).toBeNull();
   });
 
   it("keeps function-tool capability results isolated by API key", () => {

@@ -60,10 +60,7 @@ export function effectiveUsageCredentialSelection(
   if (credentialForSelection(providers, usageSelection)) {
     return usageSelection ?? null;
   }
-  const executionSelection = settings.executionCredentialSelection;
-  return credentialForSelection(providers, executionSelection)
-    ? executionSelection ?? null
-    : null;
+  return null;
 }
 
 type ProviderSelectionSettings = Pick<
@@ -83,6 +80,8 @@ export function synchronizeUsageProviderSelection<T extends ProviderSelectionSet
     return {
       ...settings,
       usageCredentialSelection: null,
+      executionCredentialSelection: null,
+      activeCodexKeyProfileId: null,
     };
   }
 
@@ -95,22 +94,11 @@ export function synchronizeUsageProviderSelection<T extends ProviderSelectionSet
     };
   }
 
-  const currentExecution = credentialForSelection(
-    providers,
-    settings.executionCredentialSelection,
-  );
-  const executionSelection =
-    currentExecution?.provider.id === selectedCredential.provider.id
-      ? settings.executionCredentialSelection ?? null
-      : usageSelection;
-
   return {
     ...settings,
     usageCredentialSelection: usageSelection,
-    executionCredentialSelection: executionSelection,
-    activeCodexKeyProfileId: executionSelection
-      ? credentialSelectionId(executionSelection)
-      : null,
+    executionCredentialSelection: usageSelection,
+    activeCodexKeyProfileId: credentialSelectionId(usageSelection),
   };
 }
 

@@ -78,6 +78,7 @@ type ThirdPartyUsageSummaryProps = {
   tokens: number;
   costUsd: number | null;
   providerUsage: ThirdPartyKeyUsageSnapshot | null;
+  showDetails?: boolean;
   providers?: CodexProvider[];
   usageSelection?: CredentialSelection | null;
   effectiveUsageSelection?: CredentialSelection | null;
@@ -88,6 +89,7 @@ function ThirdPartyUsageSummary({
   tokens,
   costUsd,
   providerUsage,
+  showDetails = true,
   providers = [],
   usageSelection,
   effectiveUsageSelection,
@@ -101,14 +103,14 @@ function ThirdPartyUsageSummary({
     selectedProvider?.groups[0];
   const providerOptions = [
     {
-      value: "__follow_execution__",
-      label: t("sidebar.usageFollowExecution"),
+      value: "__local_codex_config__",
+      label: t("sidebar.usageLocalCodexConfig"),
     },
     ...providers.map((provider) => ({ value: provider.id, label: provider.name })),
   ];
   const providerValue = usageSelection
     ? selectedProvider?.id ?? ""
-    : providerOptions.find((option) => option.value === "__follow_execution__")?.value ??
+    : providerOptions.find((option) => option.value === "__local_codex_config__")?.value ??
       providerOptions[0]?.value ??
       "";
   const providerLabel =
@@ -144,7 +146,7 @@ function ThirdPartyUsageSummary({
                 ariaLabel={t("sidebar.usageProvider")}
                 options={providerOptions}
                 onChange={(providerId) => {
-                  if (providerId === "__follow_execution__") {
+                  if (providerId === "__local_codex_config__") {
                     selectUsage(null);
                     return;
                   }
@@ -188,7 +190,7 @@ function ThirdPartyUsageSummary({
           ) : null}
         </div>
       ) : null}
-      {providerUsage ? (
+      {showDetails ? providerUsage ? (
         <>
           <div className="sidebar-usage-stat">
             <span>
@@ -238,7 +240,7 @@ function ThirdPartyUsageSummary({
             <strong>{formatUsdValue(costUsd)}</strong>
           </div>
         </>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -270,6 +272,18 @@ export function SidebarBottomRail({
     <div className="sidebar-bottom-rail">
       {showUsage && (
         <div className="sidebar-usage-panel">
+          {providers.length > 0 && thirdPartyUsageTokens === null ? (
+            <ThirdPartyUsageSummary
+              tokens={0}
+              costUsd={null}
+              providerUsage={null}
+              showDetails={false}
+              providers={providers}
+              usageSelection={usageCredentialSelection}
+              effectiveUsageSelection={effectiveUsageCredentialSelection}
+              onSelectUsageCredential={onSelectUsageCredential}
+            />
+          ) : null}
           {thirdPartyUsageTokens === null && creditsLabel && (
             <div className="sidebar-usage-credits">{creditsLabel}</div>
           )}

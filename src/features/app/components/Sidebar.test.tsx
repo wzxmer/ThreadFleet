@@ -531,7 +531,7 @@ describe("Sidebar", () => {
     });
   });
 
-  it("switches usage group and can follow the execution credential", () => {
+  it("switches usage group and can return to local Codex configuration", () => {
     const onSelectUsageCredential = vi.fn();
     render(
       <Sidebar
@@ -619,9 +619,39 @@ describe("Sidebar", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "服务商" }));
-    fireEvent.click(screen.getByRole("option", { name: "跟随执行服务商" }));
+    fireEvent.click(screen.getByRole("option", { name: "本机 Codex 配置" }));
     expect(onSelectUsageCredential).toHaveBeenLastCalledWith(null);
     expect(screen.queryByLabelText("API 密钥")).toBeNull();
+  });
+
+  it("keeps the local Codex configuration selector visible for official usage", () => {
+    render(
+      <Sidebar
+        {...baseProps}
+        useTokenUsageStats={false}
+        codexProviders={[
+          {
+            id: "provider-a",
+            name: "Provider A",
+            baseUrlEnvVar: "OPENAI_BASE_URL",
+            baseUrl: "https://a.example/v1",
+            groups: [
+              {
+                id: "group-a",
+                name: "Group A",
+                credentials: [
+                  { id: "key-a", name: "Key A", key: "a", keyEnvVar: "OPENAI_API_KEY" },
+                ],
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "服务商" }));
+    expect(screen.getByRole("option", { name: "本机 Codex 配置" })).toBeTruthy();
+    expect(screen.getByText("本次")).toBeTruthy();
   });
 
   it("does not duplicate the account entry in the object sidebar bottom rail", () => {

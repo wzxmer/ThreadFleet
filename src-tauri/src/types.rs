@@ -874,6 +874,10 @@ pub(crate) struct CodexCredential {
     pub(crate) new_api_session_cookie: Option<String>,
     #[serde(default = "default_codex_key_env_var")]
     pub(crate) key_env_var: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) last_model_refresh_at_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) cached_models: Option<Vec<CodexProviderModel>>,
     #[serde(default)]
     pub(crate) function_tool_capability: Option<CodexFunctionToolCapability>,
 }

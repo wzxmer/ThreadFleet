@@ -26,6 +26,50 @@ const appSettings = {
   ],
 } as unknown as AppSettings;
 
+const usageSelection = {
+  providerId: "provider-a",
+  groupId: "group-a",
+  credentialId: "key-a",
+};
+
+const selectedUsageSettings = {
+  ...appSettings,
+  activeCodexKeyProfileId: "provider-a:group-a:key-a",
+  executionCredentialSelection: usageSelection,
+  usageCredentialSelection: usageSelection,
+  codexProviders: [
+    {
+      id: "provider-a",
+      name: "Provider A",
+      providerKind: "custom",
+      baseUrl: "https://provider.example/v1",
+      groups: [
+        {
+          id: "group-a",
+          name: "Group A",
+          credentials: [
+            {
+              id: "key-a",
+              name: "Key A",
+              key: "initial-key",
+              keyEnvVar: "OPENAI_API_KEY",
+            },
+          ],
+        },
+      ],
+    },
+  ],
+  codexKeyProfiles: [
+    {
+      id: "provider-a:group-a:key-a",
+      name: "Key A",
+      providerKind: "custom",
+      baseUrl: "https://provider.example/v1",
+      key: "initial-key",
+    },
+  ],
+} as unknown as AppSettings;
+
 describe("useSidebarProviderUsage", () => {
   beforeEach(() => {
     getProviderStatusMock.mockReset();
@@ -131,7 +175,43 @@ describe("useSidebarProviderUsage", () => {
     );
   });
 
-  it("refreshes usage when the active profile is edited without changing its id", async () => {
+  it("refreshes usage when the selected usage credential is edited", async () => {
+    const { rerender } = renderHook(
+      ({ settings }) =>
+        useSidebarProviderUsage({
+          appSettings: settings,
+          activeWorkspaceId: "active-workspace",
+          homeAccountWorkspaceId: "home-workspace",
+        }),
+      { initialProps: { settings: selectedUsageSettings } },
+    );
+
+    await waitFor(() => {
+      expect(getWorkspaceThirdPartyKeyUsageMock).toHaveBeenCalledTimes(1);
+    });
+
+    rerender({
+      settings: {
+        ...selectedUsageSettings,
+        codexProviders: selectedUsageSettings.codexProviders!.map((provider) => ({
+          ...provider,
+          groups: provider.groups.map((group) => ({
+            ...group,
+            credentials: group.credentials.map((credential) => ({
+              ...credential,
+              key: "updated-key",
+            })),
+          })),
+        })),
+      },
+    });
+
+    await waitFor(() => {
+      expect(getWorkspaceThirdPartyKeyUsageMock).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it("keeps local usage independent from execution profile edits", async () => {
     const { rerender } = renderHook(
       ({ settings }) =>
         useSidebarProviderUsage({
@@ -156,10 +236,27 @@ describe("useSidebarProviderUsage", () => {
       },
     });
 
+    await Promise.resolve();
+    expect(getProviderStatusMock).toHaveBeenCalledTimes(1);
+    expect(getWorkspaceThirdPartyKeyUsageMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("identifies a local third-party source before its usage snapshot resolves", async () => {
+    getWorkspaceThirdPartyKeyUsageMock.mockImplementation(() => new Promise(() => {}));
+
+    const { result } = renderHook(() =>
+      useSidebarProviderUsage({
+        appSettings,
+        activeWorkspaceId: "active-workspace",
+        homeAccountWorkspaceId: "home-workspace",
+      }),
+    );
+
     await waitFor(() => {
-      expect(getWorkspaceThirdPartyKeyUsageMock).toHaveBeenCalledTimes(2);
+      expect(result.current.codexProviderStatus?.isThirdParty).toBe(true);
     });
-    expect(getProviderStatusMock).toHaveBeenCalledTimes(2);
+    expect(result.current.thirdPartyProviderUsage).toBeNull();
+    expect(result.current.hasThirdPartyUsageSource).toBe(true);
   });
 
   it("does not refresh usage when unrelated display settings change", async () => {

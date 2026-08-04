@@ -57,16 +57,6 @@ export function useSidebarProviderUsage({
   statusDelayMs = 0,
 }: UseSidebarProviderUsageArgs): SidebarProviderUsage {
   const workspaceId = activeWorkspaceId ?? homeAccountWorkspaceId;
-  const activeExecutionProfileId = appSettings.executionCredentialSelection
-    ? credentialSelectionId(appSettings.executionCredentialSelection)
-    : appSettings.activeCodexKeyProfileId;
-  const activeProfile = useMemo(
-    () =>
-      appSettings.codexKeyProfiles.find(
-        (profile) => profile.id === activeExecutionProfileId,
-      ) ?? null,
-    [activeExecutionProfileId, appSettings.codexKeyProfiles],
-  );
   const usageSelection = effectiveUsageCredentialSelection(appSettings);
   const usageCredential = useMemo(
     () => credentialForSelection(appSettings.codexProviders ?? [], usageSelection),
@@ -75,18 +65,13 @@ export function useSidebarProviderUsage({
   const usageProvider = usageCredential?.provider ?? null;
   const usageProfile = useMemo(
     () =>
-      usageCredential
+      usageCredential || !usageSelection
         ? null
         : appSettings.codexKeyProfiles.find(
             (profile) =>
-              profile.id ===
-              (usageSelection
-                ? credentialSelectionId(usageSelection)
-                : activeExecutionProfileId),
-          ) ?? activeProfile,
+              profile.id === credentialSelectionId(usageSelection),
+          ) ?? null,
     [
-      activeExecutionProfileId,
-      activeProfile,
       appSettings.codexKeyProfiles,
       usageCredential,
       usageSelection,
@@ -106,20 +91,21 @@ export function useSidebarProviderUsage({
             newApiAccessToken: usageCredential.credential.newApiAccessToken ?? null,
             newApiSessionCookie: usageCredential.credential.newApiSessionCookie ?? null,
           })
-        : profileUsageSignature(usageProfile),
+        : usageProfile
+          ? profileUsageSignature(usageProfile)
+          : "__local_codex_config__",
     [usageCredential, usageProfile],
-  );
-  const activeProfileSignature = useMemo(
-    () => profileUsageSignature(activeProfile),
-    [activeProfile],
   );
   const requestKey = workspaceId
     ? JSON.stringify([
         workspaceId,
         appSettings.codexHome ?? "",
-        activeExecutionProfileId ?? "__default__",
-        activeProfileSignature,
-        resolveCodexProviderBaseUrl(activeProfile?.providerKind, activeProfile?.baseUrl) ?? "",
+        usageSelection ? credentialSelectionId(usageSelection) : "__local_codex_config__",
+        usageProfileSignature,
+        resolveCodexProviderBaseUrl(
+          usageProvider?.providerKind ?? usageProfile?.providerKind,
+          usageProvider?.baseUrl ?? usageProfile?.baseUrl,
+        ) ?? "",
       ])
     : null;
   const [statusState, setStatusState] = useState<ProviderStatusState | null>(null);
@@ -180,18 +166,19 @@ export function useSidebarProviderUsage({
       ? statusState.status
       : statusCacheRef.current.get(requestKey) ?? null
     : null;
+  const shouldLoadThirdPartyUsage =
+    !usageSelection ||
+    (usageProvider
+      ? usageProvider.providerKind !== "openai"
+      : usageProfile
+        ? usageProfile.providerKind !== "openai"
+        : false);
   const thirdPartyProviderUsage = useThirdPartyKeyUsage({
-    enabled:
-      Boolean(workspaceId) &&
-      (usageProvider
-        ? usageProvider.providerKind !== "openai"
-        : usageProfile
-          ? usageProfile.providerKind !== "openai"
-          : codexProviderStatus?.isConfigured === true && codexProviderStatus.isThirdParty),
+    enabled: Boolean(workspaceId) && shouldLoadThirdPartyUsage,
     workspaceId,
     profileId: usageSelection
       ? credentialSelectionId(usageSelection)
-      : activeExecutionProfileId,
+      : "__local_codex_config__",
     profileRevision: usageProfileSignature,
   });
 

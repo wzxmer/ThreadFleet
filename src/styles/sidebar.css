@@ -2327,7 +2327,8 @@
 
 .sidebar-usage-selection-stack {
   display: grid;
-  grid-template-columns: repeat(2, 120px);
+  width: 100%;
+  grid-template-columns: repeat(2, minmax(min(74px, calc((100% - 8px) / 2)), 1fr));
   gap: 8px;
   padding-bottom: 4px;
   border-bottom: 1px solid var(--sidebar-object-border);
@@ -2336,6 +2337,7 @@
 .sidebar-usage-selection-stack .sidebar-usage-stat {
   display: grid;
   min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
   gap: 4px;
 }
@@ -2392,10 +2394,10 @@
 
 .sidebar-usage-selection-stack .ds-rounded-select {
   display: block;
-  flex: 0 0 120px;
-  width: 120px;
-  min-width: 120px;
-  max-width: 120px;
+  flex: 1 1 0;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
 }
 
 .sidebar-usage-selection-stack .sidebar-usage-select {
