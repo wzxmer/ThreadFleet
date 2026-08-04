@@ -1,6 +1,8 @@
 import { useCallback, useLayoutEffect, useRef } from "react";
 import type { ManagedSessionPreviewItem } from "@/types";
 import { useI18n } from "@/features/i18n/I18nProvider";
+import { Markdown } from "@/features/messages/components/Markdown";
+import { normalizeMessageImageSrc } from "@/features/messages/utils/messageRenderUtils";
 import { useMessageHistoryWindow } from "@/features/messages/components/useMessageHistoryWindow";
 
 const SESSION_CONTENT_BATCH_SIZE = 40;
@@ -12,6 +14,7 @@ type Props = {
   error: string | null;
   incomplete: boolean;
   fallback: string | null;
+  workspacePath?: string | null;
   hasMore?: boolean;
   loadingMore?: boolean;
   onLoadEarlier?: () => Promise<void>;
@@ -19,7 +22,7 @@ type Props = {
 
 const HISTORY_SCROLL_THRESHOLD_PX = 24;
 
-export function SessionManagerConversation({ sessionKey, items, loading, error, incomplete, fallback, hasMore = false, loadingMore = false, onLoadEarlier }: Props) {
+export function SessionManagerConversation({ sessionKey, items, loading, error, incomplete, fallback, workspacePath = null, hasMore = false, loadingMore = false, onLoadEarlier }: Props) {
   const { t } = useI18n();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const initialScrollSessionRef = useRef<string | null>(null);
@@ -141,7 +144,22 @@ export function SessionManagerConversation({ sessionKey, items, loading, error, 
             {historyWindow.visibleItems.map((item, index) => (
               <article key={`${historyWindow.hiddenBeforeCount + index}-${item.role}`} className={`session-manager-preview-item is-${item.role}`}>
                 <span>{item.role === "user" ? t("sessionManager.previewUser") : t("sessionManager.previewAssistant")}</span>
-                <p>{item.text}</p>
+                {item.images && item.images.length > 0 && (
+                  <div className="session-manager-preview-images">
+                    {item.images.map((image, imageIndex) => {
+                      const src = normalizeMessageImageSrc(image);
+                      if (!src) return null;
+                      return <img key={`${image}-${imageIndex}`} src={src} alt={t("files.imagePreview")} loading="lazy" />;
+                    })}
+                  </div>
+                )}
+                {item.text && (
+                  <Markdown
+                    value={item.text}
+                    className="session-manager-preview-markdown markdown"
+                    workspacePath={workspacePath}
+                  />
+                )}
               </article>
             ))}
           </div>

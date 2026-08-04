@@ -464,6 +464,7 @@ export type ManagedSessionPreviewRequest = {
 export type ManagedSessionPreviewItem = {
   role: "user" | "assistant";
   text: string;
+  images?: string[];
 };
 
 export type ManagedSessionPreviewResponse = {

@@ -374,4 +374,14 @@ describe("sidebar interaction styles", () => {
     expect(messageRule?.[1]).toContain("white-space: pre-wrap");
     expect(messageRule?.[1]).not.toContain("-webkit-line-clamp");
   });
+
+  it("keeps selected-session preview cards at their content height", () => {
+    const sidebarCss = readFileSync(new URL("./sidebar.css", import.meta.url), "utf8");
+    const contentRule = sidebarCss.match(
+      /\.session-manager-preview-content\s*\{([\s\S]*?)\n\}/,
+    );
+
+    expect(contentRule?.[1]).toContain("align-content: start");
+    expect(contentRule?.[1]).toContain("grid-auto-rows: max-content");
+  });
 });

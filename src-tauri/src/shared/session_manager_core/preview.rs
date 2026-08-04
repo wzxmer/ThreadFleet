@@ -18,6 +18,19 @@ pub(crate) struct SessionConversationPreview {
     pub(crate) incomplete: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PreviewRecordKind {
+    EventUser,
+    ResponseUser,
+    Other,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ExtractedPreviewItem {
+    item: ManagedSessionPreviewItem,
+    kind: PreviewRecordKind,
+}
+
 pub(crate) fn read_session_conversation_page(
     path: &Path,
     cursor: Option<u64>,
@@ -64,11 +77,8 @@ pub(crate) fn read_session_conversation_page(
                 continue;
             }
         };
-        if let Some(item) = extract_preview_item(&value) {
-            if items.back().is_some_and(|(_, previous)| previous == &item) {
-                continue;
-            }
-            items.push_back((current_line_start, item));
+        if let Some(extracted) = extract_preview_item(&value) {
+            append_preview_item(&mut items, current_line_start, extracted);
             while items.len() > limit {
                 items.pop_front();
             }
@@ -77,7 +87,7 @@ pub(crate) fn read_session_conversation_page(
 
     let next_cursor = items
         .front()
-        .map(|(offset, _)| *offset)
+        .map(|(offset, _, _)| *offset)
         .filter(|offset| *offset > 0)
         .or_else(|| (page_start > 0).then_some(content_start));
 
@@ -87,7 +97,7 @@ pub(crate) fn read_session_conversation_page(
         } else {
             None
         },
-        items: items.into_iter().map(|(_, item)| item).collect(),
+        items: items.into_iter().map(|(_, item, _)| item).collect(),
         next_cursor,
         incomplete,
     })
@@ -97,7 +107,7 @@ pub(crate) fn read_session_conversation(path: &Path) -> Result<SessionConversati
     let file = File::open(path).map_err(|error| error.to_string())?;
     let reader = BufReader::new(file);
     let mut opening_message = None;
-    let mut items = Vec::new();
+    let mut items: Vec<(ManagedSessionPreviewItem, PreviewRecordKind)> = Vec::new();
     let mut incomplete = false;
 
     for line in reader.lines() {
@@ -115,20 +125,19 @@ pub(crate) fn read_session_conversation(path: &Path) -> Result<SessionConversati
                 continue;
             }
         };
-        let Some(item) = extract_preview_item(&value) else {
+        let Some(extracted) = extract_preview_item(&value) else {
             continue;
         };
+        let item = extracted.item;
         if opening_message.is_none() && item.role == ManagedSessionPreviewRole::User {
             opening_message = Some(item.text.clone());
         }
-        if items.last() != Some(&item) {
-            items.push(item);
-        }
+        append_full_preview_item(&mut items, item, extracted.kind);
     }
 
     Ok(SessionConversationPreview {
         opening_message,
-        items,
+        items: items.into_iter().map(|(item, _)| item).collect(),
         next_cursor: None,
         incomplete,
     })
@@ -145,30 +154,56 @@ pub(crate) fn read_session_opening_message(path: &Path) -> Result<Option<String>
         let Ok(value) = serde_json::from_str::<Value>(&line) else {
             continue;
         };
-        if let Some(item) = extract_preview_item(&value) {
-            if item.role == ManagedSessionPreviewRole::User {
-                return Ok(Some(item.text));
+        if let Some(extracted) = extract_preview_item(&value) {
+            if extracted.item.role == ManagedSessionPreviewRole::User {
+                return Ok(Some(extracted.item.text));
             }
         }
     }
     Ok(None)
 }
 
-fn extract_preview_item(value: &Value) -> Option<ManagedSessionPreviewItem> {
+fn extract_preview_item(value: &Value) -> Option<ExtractedPreviewItem> {
     let record_type = value.get("type").and_then(Value::as_str)?;
     let payload = value.get("payload")?;
     match record_type {
         "event_msg" => match payload.get("type").and_then(Value::as_str) {
-            Some("user_message") => preview_item(
-                ManagedSessionPreviewRole::User,
-                payload.get("message").and_then(Value::as_str),
-            ),
+            Some("user_message") => {
+                let raw_text = payload.get("message").and_then(Value::as_str);
+                let text = raw_text.map(strip_inline_image_markers);
+                let mut images = payload
+                    .get("local_images")
+                    .and_then(Value::as_array)
+                    .map(|images| {
+                        images
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .map(str::to_string)
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                if let Some(raw_text) = raw_text {
+                    for path in extract_inline_image_paths(raw_text) {
+                        if !images.iter().any(|existing| existing == &path) {
+                            images.push(path);
+                        }
+                    }
+                }
+                preview_item(
+                    ManagedSessionPreviewRole::User,
+                    text.as_deref(),
+                    images,
+                    PreviewRecordKind::EventUser,
+                )
+            }
             Some("agent_message")
                 if payload.get("phase").and_then(Value::as_str) == Some("final_answer") =>
             {
                 preview_item(
                     ManagedSessionPreviewRole::Assistant,
                     payload.get("message").and_then(Value::as_str),
+                    Vec::new(),
+                    PreviewRecordKind::Other,
                 )
             }
             _ => None,
@@ -199,10 +234,156 @@ fn extract_preview_item(value: &Value) -> Option<ManagedSessionPreviewItem> {
             if role == ManagedSessionPreviewRole::User && is_internal_user_context(&text) {
                 return None;
             }
-            preview_item(role, Some(&text))
+            let images = if role == ManagedSessionPreviewRole::User {
+                extract_inline_image_paths(&text)
+            } else {
+                Vec::new()
+            };
+            let text = if role == ManagedSessionPreviewRole::User {
+                strip_inline_image_markers(&text)
+            } else {
+                text
+            };
+            preview_item(
+                role,
+                Some(&text),
+                images,
+                if role == ManagedSessionPreviewRole::User {
+                    PreviewRecordKind::ResponseUser
+                } else {
+                    PreviewRecordKind::Other
+                },
+            )
         }
         _ => None,
     }
+}
+
+fn append_preview_item(
+    items: &mut VecDeque<(u64, ManagedSessionPreviewItem, PreviewRecordKind)>,
+    offset: u64,
+    extracted: ExtractedPreviewItem,
+) {
+    if let Some((_, previous, previous_kind)) = items.back() {
+        if previous == &extracted.item {
+            return;
+        }
+        if is_response_echo(previous, *previous_kind, &extracted.item, extracted.kind) {
+            if extracted.kind == PreviewRecordKind::EventUser {
+                items.pop_back();
+            } else {
+                return;
+            }
+        }
+    }
+    items.push_back((offset, extracted.item, extracted.kind));
+}
+
+fn append_full_preview_item(
+    items: &mut Vec<(ManagedSessionPreviewItem, PreviewRecordKind)>,
+    item: ManagedSessionPreviewItem,
+    kind: PreviewRecordKind,
+) {
+    if let Some((previous, previous_kind)) = items.last() {
+        if previous == &item {
+            return;
+        }
+        // Rollout records normally put the response echo immediately before the
+        // canonical event record. Replace that echo with the richer event item.
+        if is_response_echo(previous, *previous_kind, &item, kind)
+            && kind == PreviewRecordKind::EventUser
+        {
+            items.pop();
+        } else if is_response_echo(previous, *previous_kind, &item, kind)
+            && kind == PreviewRecordKind::ResponseUser
+        {
+            return;
+        }
+    }
+    items.push((item, kind));
+}
+
+fn is_response_echo(
+    previous: &ManagedSessionPreviewItem,
+    previous_kind: PreviewRecordKind,
+    current: &ManagedSessionPreviewItem,
+    current_kind: PreviewRecordKind,
+) -> bool {
+    previous.role == ManagedSessionPreviewRole::User
+        && current.role == ManagedSessionPreviewRole::User
+        && matches!(
+            (previous_kind, current_kind),
+            (
+                PreviewRecordKind::ResponseUser,
+                PreviewRecordKind::EventUser
+            ) | (
+                PreviewRecordKind::EventUser,
+                PreviewRecordKind::ResponseUser
+            )
+        )
+        && normalize_preview_text(&previous.text) == normalize_preview_text(&current.text)
+}
+
+fn normalize_preview_text(text: &str) -> String {
+    strip_inline_image_markers(text)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn strip_inline_image_markers(text: &str) -> String {
+    let mut output = String::with_capacity(text.len());
+    let mut remaining = text;
+    loop {
+        let Some(start) = remaining.find("<image") else {
+            output.push_str(remaining);
+            break;
+        };
+        output.push_str(&remaining[..start]);
+        let marker = &remaining[start..];
+        if let Some(end) = marker.find("</image>") {
+            remaining = &marker[end + "</image>".len()..];
+        } else if let Some(end) = marker.find('>') {
+            remaining = &marker[end + 1..];
+        } else {
+            break;
+        }
+    }
+    output.trim().to_string()
+}
+
+fn extract_inline_image_paths(text: &str) -> Vec<String> {
+    let mut paths = Vec::new();
+    let mut remaining = text;
+    while let Some(start) = remaining.find("<image") {
+        let marker = &remaining[start..];
+        let Some(end) = marker.find('>') else {
+            break;
+        };
+        let header = &marker[..end];
+        let Some(path_start) = header.find("path=") else {
+            remaining = &marker[end + 1..];
+            continue;
+        };
+        let value = header[path_start + "path=".len()..].trim_start();
+        let Some(quote) = value
+            .chars()
+            .next()
+            .filter(|quote| *quote == '\'' || *quote == '"')
+        else {
+            remaining = &marker[end + 1..];
+            continue;
+        };
+        let value = &value[quote.len_utf8()..];
+        if let Some(close) = value.find(quote) {
+            let path = value[..close].trim();
+            if !path.is_empty() && !paths.iter().any(|existing| existing == path) {
+                paths.push(path.to_string());
+            }
+        }
+        remaining = &marker[end + 1..];
+    }
+    paths
 }
 
 fn is_internal_user_context(text: &str) -> bool {
@@ -217,14 +398,20 @@ fn is_internal_user_context(text: &str) -> bool {
 fn preview_item(
     role: ManagedSessionPreviewRole,
     text: Option<&str>,
-) -> Option<ManagedSessionPreviewItem> {
+    images: Vec<String>,
+    kind: PreviewRecordKind,
+) -> Option<ExtractedPreviewItem> {
     let text = text?.trim();
     if text.is_empty() {
         return None;
     }
-    Some(ManagedSessionPreviewItem {
-        role,
-        text: text.to_string(),
+    Some(ExtractedPreviewItem {
+        item: ManagedSessionPreviewItem {
+            role,
+            text: text.to_string(),
+            images,
+        },
+        kind,
     })
 }
 
@@ -284,6 +471,78 @@ mod tests {
             .iter()
             .any(|item| item.text.contains("tool noise")));
         assert!(preview.next_cursor.is_some());
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn replaces_response_user_echo_with_event_user_message_and_keeps_images() {
+        let path = std::env::temp_dir().join(format!(
+            "session-preview-user-image-{}.jsonl",
+            Uuid::new_v4()
+        ));
+        let image_path = r#"C:\Users\Lenovo\.codex\codex-monitor\attachments\image.png"#;
+        let records = [
+            json!({
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": format!("request\n<image name=[Image #1] path=\"{image_path}\">\n\n</image>")},
+                        {"type": "input_image", "image_url": "data:image/png;base64,AAA"}
+                    ]
+                }
+            }),
+            json!({
+                "type": "event_msg",
+                "payload": {
+                    "type": "user_message",
+                    "message": "request",
+                    "local_images": [image_path]
+                }
+            }),
+        ];
+        fs::write(
+            &path,
+            records
+                .iter()
+                .map(Value::to_string)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+        .unwrap();
+
+        let preview = read_session_conversation_page(&path, None, 10).unwrap();
+
+        assert_eq!(preview.items.len(), 1);
+        assert_eq!(preview.items[0].text, "request");
+        assert_eq!(preview.items[0].images, vec![image_path]);
+        assert_eq!(preview.opening_message.as_deref(), Some("request"));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn strips_inline_image_markers_when_only_response_user_record_exists() {
+        let path = std::env::temp_dir().join(format!(
+            "session-preview-response-image-{}.jsonl",
+            Uuid::new_v4()
+        ));
+        let image_path = r#"D:\attachments\image.png"#;
+        let record = json!({
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": format!("request\n<image path=\"{image_path}\"></image>")}]
+            }
+        });
+        fs::write(&path, format!("{}\n", record)).unwrap();
+
+        let preview = read_session_conversation(&path).unwrap();
+
+        assert_eq!(preview.items.len(), 1);
+        assert_eq!(preview.items[0].text, "request");
+        assert_eq!(preview.items[0].images, vec![image_path]);
         let _ = fs::remove_file(path);
     }
 

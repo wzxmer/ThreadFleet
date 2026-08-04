@@ -55,9 +55,18 @@ function prependPreviewItems(
   older: ManagedSessionPreviewItem[],
   current: ManagedSessionPreviewItem[],
 ) {
-  return [...older, ...current].filter((item, index, items) => (
-    index === 0 || item.role !== items[index - 1]?.role || item.text !== items[index - 1]?.text
-  ));
+  return [...older, ...current].reduce<ManagedSessionPreviewItem[]>((items, item) => {
+    const previous = items[items.length - 1];
+    if (!previous || previous.role !== item.role || previous.text !== item.text) {
+      items.push(item);
+      return items;
+    }
+    const images = [...(previous.images ?? []), ...(item.images ?? [])].filter(
+      (image, index, all) => all.indexOf(image) === index,
+    );
+    items[items.length - 1] = images.length > 0 ? { ...previous, images } : previous;
+    return items;
+  }, []);
 }
 
 export function SessionManagerProvider({ active, onActiveChange, onResumeSession, onDeriveSession, onDeriveSessions, currentWorkspace = null, children }: Props) {

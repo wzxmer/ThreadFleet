@@ -274,6 +274,8 @@ pub(crate) enum ManagedSessionPreviewRole {
 pub(crate) struct ManagedSessionPreviewItem {
     pub(crate) role: ManagedSessionPreviewRole,
     pub(crate) text: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) images: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]

@@ -3,6 +3,10 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SessionManagerConversation } from "./SessionManagerConversation";
 
+vi.mock("@tauri-apps/api/core", () => ({
+  convertFileSrc: (path: string) => `asset://localhost/${encodeURIComponent(path)}`,
+}));
+
 afterEach(() => {
   vi.restoreAllMocks();
 });
@@ -131,5 +135,27 @@ describe("SessionManagerConversation", () => {
     scrollHeight = 920;
     (resizeCallback as ResizeObserverCallback | null)?.([], {} as ResizeObserver);
     expect(conversation.scrollTop).toBe(100);
+  });
+
+  it("renders markdown text and attached session images", () => {
+    const { container } = render(
+      <SessionManagerConversation
+        sessionKey="source:thread"
+        items={[{
+          role: "user",
+          text: "**request**",
+          images: ["C:\\attachments\\image.png"],
+        }]}
+        loading={false}
+        error={null}
+        incomplete={false}
+        fallback={null}
+      />,
+    );
+
+    expect(container.querySelector(".session-manager-preview-markdown strong")?.textContent).toBe("request");
+    expect(container.querySelector(".session-manager-preview-images img")?.getAttribute("src")).toBe(
+      "asset://localhost/C%3A%5Cattachments%5Cimage.png",
+    );
   });
 });

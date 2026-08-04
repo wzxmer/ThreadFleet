@@ -38,7 +38,7 @@ export function SessionManagerWorkspace() {
       <div className={`session-manager-detail${focusedSession ? " is-session" : " is-overview"}`}>
         {!focusedSession ? <SessionManagerOverview stats={manager.stats} sources={manager.sources} /> : <>
           <div className="session-manager-conversation-preview">
-            <SessionManagerConversation sessionKey={focusedSession.key} items={sessionPreview?.items ?? []} loading={sessionPreviewLoading} loadingMore={sessionPreviewLoadingMore} error={sessionPreviewError} incomplete={sessionPreview?.incomplete ?? false} fallback={focusedSession.preview} hasMore={sessionPreview?.nextCursor != null} onLoadEarlier={loadEarlierSessionPreview} />
+            <SessionManagerConversation sessionKey={focusedSession.key} items={sessionPreview?.items ?? []} loading={sessionPreviewLoading} loadingMore={sessionPreviewLoadingMore} error={sessionPreviewError} incomplete={sessionPreview?.incomplete ?? false} fallback={focusedSession.preview} workspacePath={focusedSession.cwd} hasMore={sessionPreview?.nextCursor != null} onLoadEarlier={loadEarlierSessionPreview} />
           </div>
           <aside className="session-manager-detail-inspector" aria-label={t("sessionManager.sessionMetadata")}>
             <h2>{t("sessionManager.sessionMetadata")}</h2>
