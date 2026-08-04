@@ -419,6 +419,23 @@ export function SettingsProvidersSection({
     }
   };
 
+  const enableProvider = async (provider: CodexProvider) => {
+    if (saveState === "saving" || executionProviderId === provider.id) return;
+    const nextSelection = providerSelection(provider);
+    if (!nextSelection) return;
+    setSaveState("saving");
+    try {
+      await onUpdateAppSettings({
+        ...appSettings,
+        activeCodexKeyProfileId: credentialSelectionId(nextSelection),
+        executionCredentialSelection: nextSelection,
+      });
+      setSaveState("idle");
+    } catch {
+      setSaveState("error");
+    }
+  };
+
   const updateGroup = (groupId: string, update: (group: CodexCredentialGroup) => CodexCredentialGroup) => {
     setDraft((current) => ({
       ...current,
@@ -821,15 +838,29 @@ export function SettingsProvidersSection({
                       </span>
                     </span>
                   </button>
-                  <button
-                    type="button"
-                    className="ghost icon-button settings-provider-list-delete"
-                    aria-label={`${t("common.delete")} ${provider.name}`}
-                    title={t("common.delete")}
-                    onClick={() => void deleteProvider(provider.id)}
-                  >
-                    <Trash2 size={14} aria-hidden="true" />
-                  </button>
+                  <div className="settings-provider-list-actions">
+                    <button
+                      type="button"
+                      className="ghost settings-provider-list-enable"
+                      data-button-elevation="none"
+                      disabled={enabled || saveState === "saving"}
+                      aria-label={`${t("settings.codex.enableProvider")} ${provider.name}`}
+                      title={`${t("settings.codex.enableProvider")} ${provider.name}`}
+                      onClick={() => void enableProvider(provider)}
+                    >
+                      <Check size={14} aria-hidden="true" />
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost settings-provider-list-delete"
+                      data-button-elevation="none"
+                      aria-label={`${t("common.delete")} ${provider.name}`}
+                      title={t("common.delete")}
+                      onClick={() => void deleteProvider(provider.id)}
+                    >
+                      <Trash2 size={14} aria-hidden="true" />
+                    </button>
+                  </div>
                 </div>
               );
             })}

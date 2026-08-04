@@ -571,7 +571,7 @@
 }
 
 .settings-provider-list-row .settings-provider-list-item {
-  padding-right: 34px;
+  padding-right: 64px;
 }
 
 .settings-provider-list-item:hover {
@@ -617,12 +617,32 @@
   font-size: 10px;
 }
 
-.settings-provider-list-delete {
+.settings-provider-list-actions {
   position: absolute;
   top: 7px;
   right: 5px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.settings-provider-list-enable {
+  display: inline-flex;
   width: 26px;
   height: 26px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: var(--accent-primary);
+}
+
+.settings-provider-list-delete {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
   color: var(--text-subtle);
 }
 

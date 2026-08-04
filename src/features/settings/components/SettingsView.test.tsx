@@ -2597,8 +2597,10 @@ describe("SettingsView Codex defaults", () => {
   });
 
   it("shows only the execution provider as enabled when usage state differs", async () => {
+    const onUpdateAppSettings = vi.fn().mockResolvedValue(undefined);
     renderCodexSection({
       initialSection: "providers",
+      onUpdateAppSettings,
       appSettings: {
         codexProviders: [
           {
@@ -2631,6 +2633,21 @@ describe("SettingsView Codex defaults", () => {
               },
             ],
           },
+          {
+            id: "provider-c",
+            name: "Provider C",
+            baseUrlEnvVar: "OPENAI_BASE_URL",
+            baseUrl: "https://c.example.test/v1",
+            groups: [
+              {
+                id: "group-c",
+                name: "Group C",
+                credentials: [
+                  { id: "key-c", name: "Key C", key: "c", keyEnvVar: "OPENAI_API_KEY" },
+                ],
+              },
+            ],
+          },
         ],
         executionCredentialSelection: {
           providerId: "provider-a",
@@ -2651,6 +2668,39 @@ describe("SettingsView Codex defaults", () => {
         screen.getByRole("button", { name: /Provider A.*https:\/\/a\.example\.test\/v1/ })
           .textContent,
       ).toContain("已启用");
+    });
+
+    const enabledProvider = screen.getByRole("button", {
+      name: "启用 Provider A",
+    }) as HTMLButtonElement;
+    expect(enabledProvider.disabled).toBe(true);
+    expect(enabledProvider.textContent).toBe("");
+    const enableProviderB = screen.getByRole("button", {
+      name: "启用 Provider B",
+    }) as HTMLButtonElement;
+    const enableProviderC = screen.getByRole("button", {
+      name: "启用 Provider C",
+    }) as HTMLButtonElement;
+    expect(enableProviderB.disabled).toBe(false);
+    expect(enableProviderC.disabled).toBe(false);
+    expect(enableProviderB.textContent).toBe("");
+    expect(enableProviderC.textContent).toBe("");
+
+    fireEvent.click(enableProviderC);
+
+    await waitFor(() => expect(onUpdateAppSettings).toHaveBeenCalled());
+    const calls = onUpdateAppSettings.mock.calls;
+    const nextSettings = calls[calls.length - 1]?.[0] as AppSettings;
+    expect(nextSettings.executionCredentialSelection).toEqual({
+      providerId: "provider-c",
+      groupId: "group-c",
+      credentialId: "key-c",
+    });
+    expect(nextSettings.activeCodexKeyProfileId).toBe("provider-c:group-c:key-c");
+    expect(nextSettings.usageCredentialSelection).toEqual({
+      providerId: "provider-b",
+      groupId: "group-b",
+      credentialId: "key-b",
     });
   });
 
