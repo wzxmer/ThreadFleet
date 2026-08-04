@@ -20,6 +20,7 @@ import {
   getConfigModel,
   getExperimentalFeatureList,
   getWindowsInstallerMigrationCapability,
+  getThirdPartyKeyUsage,
   getProviderModels,
   isMobileRuntime,
   getModelList,
@@ -28,6 +29,7 @@ import {
   applyWindowsInstallerRepair,
   rollbackWindowsInstallerRepair,
   windowsInstallerKind,
+  providerSessionLogin,
 } from "@services/tauri";
 import { DEFAULT_COMMIT_MESSAGE_PROMPT } from "@utils/commitMessagePrompt";
 import { SettingsView } from "./SettingsView";
@@ -53,6 +55,7 @@ vi.mock("@services/tauri", async () => {
     getConfigModel: vi.fn(),
     getExperimentalFeatureList: vi.fn(),
     getWindowsInstallerMigrationCapability: vi.fn(),
+    getThirdPartyKeyUsage: vi.fn(),
     getProviderModels: vi.fn(),
     getAgentsSettings: vi.fn(),
     getCodexStatus: vi.fn(),
@@ -62,6 +65,7 @@ vi.mock("@services/tauri", async () => {
     applyWindowsInstallerRepair: vi.fn(),
     rollbackWindowsInstallerRepair: vi.fn(),
     windowsInstallerKind: vi.fn(),
+    providerSessionLogin: vi.fn(),
   };
 });
 
@@ -73,6 +77,7 @@ const getExperimentalFeatureListMock = vi.mocked(getExperimentalFeatureList);
 const getWindowsInstallerMigrationCapabilityMock = vi.mocked(
   getWindowsInstallerMigrationCapability,
 );
+const getThirdPartyKeyUsageMock = vi.mocked(getThirdPartyKeyUsage);
 const getProviderModelsMock = vi.mocked(getProviderModels);
 const getAgentsSettingsMock = vi.mocked(getAgentsSettings);
 const getCodexStatusMock = vi.mocked(getCodexStatus);
@@ -82,6 +87,7 @@ const previewWindowsInstallerRepairMock = vi.mocked(previewWindowsInstallerRepai
 const applyWindowsInstallerRepairMock = vi.mocked(applyWindowsInstallerRepair);
 const rollbackWindowsInstallerRepairMock = vi.mocked(rollbackWindowsInstallerRepair);
 const windowsInstallerKindMock = vi.mocked(windowsInstallerKind);
+const providerSessionLoginMock = vi.mocked(providerSessionLogin);
 const openUrlMock = vi.mocked(openUrl);
 connectWorkspaceMock.mockResolvedValue(undefined);
 getAppBuildTypeMock.mockResolvedValue("release");
@@ -2099,6 +2105,62 @@ describe("SettingsView Codex defaults", () => {
           }),
       ],
     });
+  });
+
+  it("does not save a Cookie when login verification returns token quota only", async () => {
+    const onUpdateAppSettings = vi.fn().mockResolvedValue(undefined);
+    providerSessionLoginMock.mockResolvedValueOnce("session=unverified");
+    getThirdPartyKeyUsageMock.mockResolvedValue({
+      source: "new-api",
+      balanceUsd: null,
+      balanceScope: "token",
+      todayCostUsd: 0,
+      totalCostUsd: null,
+      spendPeriod: "today",
+      averageLatencyMs: null,
+      isUnlimited: true,
+      isPartial: false,
+    });
+    renderCodexSection({
+      initialSection: "providers",
+      onUpdateAppSettings,
+      appSettings: {
+        codexProviders: [
+          {
+            id: "provider-new-api",
+            name: "New API",
+            providerKind: "custom",
+            usageProtocol: "new-api",
+            baseUrlEnvVar: "OPENAI_BASE_URL",
+            baseUrl: "https://provider.example/v1",
+            groups: [
+              {
+                id: "group-new-api",
+                name: "0.1",
+                credentials: [
+                  {
+                    id: "credential-new-api",
+                    name: "0.1",
+                    key: "sk-test",
+                    keyEnvVar: "OPENAI_API_KEY",
+                    newApiSessionCookie: null,
+                  },
+                ],
+              },
+            ],
+            cachedModels: [],
+          },
+        ],
+      },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "登录获取 Cookie" }));
+
+    await waitFor(() => {
+      expect(providerSessionLoginMock).toHaveBeenCalled();
+      expect(screen.getByText(/已获取登录 Cookie，但未读取到账户余额/)).toBeTruthy();
+    });
+    expect(onUpdateAppSettings).not.toHaveBeenCalled();
   });
 
   it("selects the compatibility gateway transport for opencode", () => {

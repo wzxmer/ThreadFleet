@@ -1,3 +1,4 @@
+use chrono::DateTime;
 use futures_util::{future, StreamExt};
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
@@ -50,13 +51,77 @@ fn provider_cookie_fingerprint(cookie: &str) -> String {
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
+fn session_account_cache_snapshot(snapshot: &Value) -> Option<Value> {
+    let object = snapshot.as_object()?;
+    let source = object.get("source").and_then(Value::as_str);
+    let balance = object
+        .get("balanceUsd")
+        .filter(|value| !value.is_null())
+        .cloned();
+    let is_unlimited = object
+        .get("isUnlimited")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    if balance.is_none() && !is_unlimited {
+        return None;
+    }
+    if object
+        .get("balanceScope")
+        .and_then(Value::as_str)
+        .is_some_and(|scope| scope == "token")
+    {
+        return None;
+    }
+
+    let mut cached = object.clone();
+    let had_today_cost = object.contains_key("todayCostUsd");
+    let had_average_latency = object.contains_key("averageLatencyMs");
+    if source != Some("page") {
+        cached.insert(
+            "balanceScope".to_string(),
+            Value::String("account".to_string()),
+        );
+        // A New API token's spend belongs to the API key, not to the account
+        // Cookie. Never carry it across credentials through the session cache.
+        if had_today_cost {
+            cached.insert("todayCostUsd".to_string(), Value::Null);
+        } else {
+            cached.remove("todayCostUsd");
+        }
+        cached.insert("totalCostUsd".to_string(), Value::Null);
+        cached.insert("spendPeriod".to_string(), Value::Null);
+        if had_average_latency {
+            cached.insert("averageLatencyMs".to_string(), Value::Null);
+        } else {
+            cached.remove("averageLatencyMs");
+        }
+    } else {
+        // Page scans are account-scoped. Preserve their cumulative cost as a
+        // fallback, but do not let a page-derived daily value shadow Key data.
+        if had_today_cost {
+            cached.insert("todayCostUsd".to_string(), Value::Null);
+        } else {
+            cached.remove("todayCostUsd");
+        }
+        if had_average_latency {
+            cached.insert("averageLatencyMs".to_string(), Value::Null);
+        } else {
+            cached.remove("averageLatencyMs");
+        }
+    }
+    Some(Value::Object(cached))
+}
+
 pub(crate) async fn cache_provider_session_usage(
     base_url: &str,
     session_cookie: &str,
     snapshot: Value,
 ) {
     let cookie = session_cookie.trim();
-    if cookie.is_empty() || snapshot.is_null() {
+    let Some(snapshot) = session_account_cache_snapshot(&snapshot) else {
+        return;
+    };
+    if cookie.is_empty() {
         return;
     }
     let Ok(cache_key) = provider_usage_cache_key(base_url) else {
@@ -881,6 +946,82 @@ struct NewApiLogSummary {
     complete: bool,
 }
 
+fn normalize_new_api_timestamp(value: f64) -> Option<i64> {
+    if !value.is_finite() || value <= 0.0 {
+        return None;
+    }
+    let magnitude = value.abs();
+    let seconds = if magnitude >= 1_000_000_000_000_000_000.0 {
+        value / 1_000_000_000.0
+    } else if magnitude >= 1_000_000_000_000_000.0 {
+        value / 1_000_000.0
+    } else if magnitude >= 1_000_000_000_000.0 {
+        value / 1_000.0
+    } else {
+        value
+    };
+    Some(seconds.round() as i64)
+}
+
+fn parse_new_api_timestamp(value: Option<&Value>) -> Option<i64> {
+    let value = value?;
+    if let Some(text) = value.as_str() {
+        let trimmed = text.trim();
+        if let Ok(timestamp) = DateTime::parse_from_rfc3339(trimmed) {
+            return Some(timestamp.timestamp());
+        }
+    }
+    parse_usage_number(Some(value)).and_then(normalize_new_api_timestamp)
+}
+
+fn new_api_log_timestamp(log: &Value) -> Option<i64> {
+    ["created_at", "createdAt", "timestamp", "created_at_ms"]
+        .iter()
+        .find_map(|field| parse_new_api_timestamp(log.get(*field)))
+}
+
+fn is_new_api_consumption_log(log: &Value) -> bool {
+    let raw_type = log.get("type").or_else(|| log.get("log_type"));
+    if let Some(type_value) = raw_type {
+        if parse_usage_number(Some(type_value)).is_some_and(|value| value as i64 == 2) {
+            return true;
+        }
+        return type_value
+            .as_str()
+            .map(|value| {
+                matches!(
+                    value.trim().to_ascii_lowercase().as_str(),
+                    "consume" | "consumption" | "completion" | "request"
+                )
+            })
+            .unwrap_or(false);
+    }
+    false
+}
+
+fn new_api_log_entries(payload: Option<&Value>) -> Option<&[Value]> {
+    let payload = payload?;
+    if let Some(entries) = payload.as_array() {
+        return Some(entries.as_slice());
+    }
+    if let Some(entries) = payload.get("data").and_then(Value::as_array) {
+        return Some(entries.as_slice());
+    }
+    for field in ["logs", "items", "records"] {
+        if let Some(value) = payload.get(field) {
+            if let Some(entries) = value.as_array() {
+                return Some(entries.as_slice());
+            }
+            if let Some(entries) = new_api_log_entries(Some(value)) {
+                return Some(entries);
+            }
+        }
+    }
+    payload
+        .get("data")
+        .and_then(|data| new_api_log_entries(Some(data)))
+}
+
 fn summarize_new_api_logs(
     payload: Option<&Value>,
     day_start_unix: Option<i64>,
@@ -893,10 +1034,7 @@ fn summarize_new_api_logs(
             complete: false,
         };
     };
-    let Some(logs) = payload
-        .and_then(|payload| payload.get("data"))
-        .and_then(Value::as_array)
-    else {
+    let Some(logs) = new_api_log_entries(payload) else {
         return NewApiLogSummary {
             today_cost_usd: None,
             average_latency_ms: None,
@@ -904,13 +1042,23 @@ fn summarize_new_api_logs(
         };
     };
 
-    let oldest_timestamp = logs
-        .iter()
-        .filter_map(|log| parse_usage_number(log.get("created_at")))
-        .map(|timestamp| timestamp as i64)
-        .min();
-    let complete = logs.len() < NEW_API_LOG_LIMIT
-        || oldest_timestamp.is_some_and(|timestamp| timestamp < day_start_unix);
+    let mut oldest_timestamp = None;
+    let mut has_unparseable_timestamp = false;
+    for log in logs {
+        match new_api_log_timestamp(log) {
+            Some(timestamp) => {
+                oldest_timestamp =
+                    Some(oldest_timestamp.map_or(timestamp, |oldest: i64| oldest.min(timestamp)));
+            }
+            None if is_new_api_consumption_log(log) => {
+                has_unparseable_timestamp = true;
+            }
+            None => {}
+        }
+    }
+    let complete = !has_unparseable_timestamp
+        && (logs.len() < NEW_API_LOG_LIMIT
+            || oldest_timestamp.is_some_and(|timestamp| timestamp < day_start_unix));
     if !complete {
         return NewApiLogSummary {
             today_cost_usd: None,
@@ -923,13 +1071,16 @@ fn summarize_new_api_logs(
     let mut total_latency_ms = 0.0;
     let mut latency_count = 0_u64;
     for log in logs {
-        let log_type = parse_usage_number(log.get("type")).unwrap_or_default() as i64;
-        let created_at = parse_usage_number(log.get("created_at")).unwrap_or_default() as i64;
-        if log_type != 2 || created_at < day_start_unix {
+        let Some(created_at) = new_api_log_timestamp(log) else {
+            continue;
+        };
+        if !is_new_api_consumption_log(log) || created_at < day_start_unix {
             continue;
         }
         today_quota += parse_usage_number(log.get("quota")).unwrap_or_default();
-        if let Some(use_time_seconds) = parse_usage_number(log.get("use_time")) {
+        if let Some(use_time_seconds) =
+            parse_usage_number(log.get("use_time").or_else(|| log.get("useTime")))
+        {
             total_latency_ms += use_time_seconds.max(0.0) * 1_000.0;
             latency_count += 1;
         }
@@ -981,6 +1132,26 @@ fn normalize_new_api_usage_payload(
         log_summary.average_latency_ms,
         is_unlimited && account_balance_usd.is_none(),
         !log_summary.complete,
+    ))
+}
+
+fn normalize_new_api_account_payload(
+    account_payload: &Value,
+    quota_per_unit: f64,
+) -> Option<Value> {
+    let account_balance_usd = account_payload
+        .get("data")
+        .and_then(|data| parse_usage_number(data.get("quota")))
+        .map(|value| value / quota_per_unit)?;
+    Some(normalized_usage_snapshot(
+        "new-api",
+        Some(account_balance_usd),
+        "account",
+        None,
+        None,
+        None,
+        false,
+        true,
     ))
 }
 
@@ -1098,14 +1269,32 @@ async fn fetch_new_api_usage_once(
         account_payload,
     )
     .await;
-    let usage_payload = usage_result?;
-    normalize_new_api_usage_payload(
+    let usage_payload = match usage_result {
+        Ok(payload) => payload,
+        Err(error) => {
+            if let Some(account_snapshot) = account_payload
+                .as_ref()
+                .and_then(|payload| normalize_new_api_account_payload(payload, quota_per_unit))
+            {
+                return Ok(account_snapshot);
+            }
+            return Err(error);
+        }
+    };
+    let normalized = normalize_new_api_usage_payload(
         &usage_payload,
         logs_result.as_ref().ok(),
         account_payload.as_ref(),
         day_start_unix,
         quota_per_unit,
-    )
+    );
+    match normalized {
+        Ok(snapshot) => Ok(snapshot),
+        Err(error) => account_payload
+            .as_ref()
+            .and_then(|payload| normalize_new_api_account_payload(payload, quota_per_unit))
+            .ok_or(error),
+    }
 }
 
 async fn fetch_new_api_usage(
@@ -1620,9 +1809,10 @@ mod tests {
         active_codex_key_runtime, build_new_api_url, build_provider_models_url,
         build_provider_usage_url, cache_provider_session_usage, cached_provider_session_usage,
         merge_profile_codex_args, merge_provider_model_payloads, merge_provider_usage_snapshots,
-        migrate_provider_settings, normalize_new_api_usage_payload,
-        normalize_provider_api_base_url, normalize_sub2_usage_payload, profile_for_selection,
-        profile_uses_gateway, summarize_new_api_logs,
+        migrate_provider_settings, normalize_new_api_account_payload,
+        normalize_new_api_usage_payload, normalize_provider_api_base_url,
+        normalize_sub2_usage_payload, profile_for_selection, profile_uses_gateway,
+        summarize_new_api_logs,
     };
     use crate::codex::args::parse_codex_args;
     use crate::types::{AppSettings, CodexKeyProfile, CredentialSelection};
@@ -2153,6 +2343,91 @@ mod tests {
                 "isPartial": true,
             })
         );
+    }
+
+    #[test]
+    fn new_api_cookie_account_snapshot_survives_usage_endpoint_failure() {
+        let account = serde_json::json!({
+            "data": {
+                "quota": 3_750_000
+            }
+        });
+
+        assert_eq!(
+            normalize_new_api_account_payload(&account, 500_000.0),
+            Some(serde_json::json!({
+                "source": "new-api",
+                "balanceUsd": 7.5,
+                "balanceScope": "account",
+                "todayCostUsd": null,
+                "totalCostUsd": null,
+                "spendPeriod": null,
+                "averageLatencyMs": null,
+                "isUnlimited": false,
+                "isPartial": true,
+            }))
+        );
+    }
+
+    #[test]
+    fn new_api_logs_accept_rfc3339_created_at_and_string_type() {
+        let usage = serde_json::json!({
+            "data": {
+                "total_available": 1_250_000,
+                "total_used": 250_000,
+                "unlimited_quota": false
+            }
+        });
+        let logs = serde_json::json!({
+            "data": [
+                {
+                    "type": "2",
+                    "created_at": "1970-01-01T00:03:20Z",
+                    "quota": 50_000,
+                    "use_time": 2
+                }
+            ]
+        });
+
+        let snapshot =
+            normalize_new_api_usage_payload(&usage, Some(&logs), None, Some(100), 500_000.0)
+                .expect("normalized usage");
+
+        assert_eq!(snapshot["todayCostUsd"], serde_json::json!(0.1));
+        assert_eq!(snapshot["averageLatencyMs"], serde_json::json!(2000.0));
+        assert_eq!(snapshot["isPartial"], serde_json::json!(false));
+    }
+
+    #[test]
+    fn session_usage_cache_keeps_account_fields_only() {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            cache_provider_session_usage(
+                "https://cache-spend.example/v1",
+                "sid=account-cookie",
+                serde_json::json!({
+                    "source": "new-api",
+                    "balanceUsd": 7.5,
+                    "balanceScope": "account",
+                    "todayCostUsd": 0.42,
+                    "totalCostUsd": 1.2,
+                    "averageLatencyMs": 850.0,
+                    "isUnlimited": false,
+                    "isPartial": false,
+                }),
+            )
+            .await;
+
+            let cached = cached_provider_session_usage(
+                "https://cache-spend.example/v1",
+                Some("sid=account-cookie"),
+            )
+            .await
+            .expect("cached account snapshot");
+            assert_eq!(cached["balanceUsd"], serde_json::json!(7.5));
+            assert_eq!(cached["balanceScope"], serde_json::json!("account"));
+            assert_eq!(cached["todayCostUsd"], serde_json::Value::Null);
+            assert_eq!(cached["averageLatencyMs"], serde_json::Value::Null);
+        });
     }
 
     #[test]

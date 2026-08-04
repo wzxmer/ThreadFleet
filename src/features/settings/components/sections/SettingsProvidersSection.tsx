@@ -527,6 +527,20 @@ export function SettingsProvidersSection({
         resolvedBaseUrl,
         draft.usageProtocol ?? "auto",
       );
+      const verifiedUsage = await getThirdPartyKeyUsage(
+        resolvedBaseUrl,
+        credential.key,
+        draft.usageProtocol ?? "auto",
+        credential.newApiAccessToken,
+        sessionCookie,
+      );
+      if (
+        !verifiedUsage ||
+        verifiedUsage.balanceScope !== "account" ||
+        verifiedUsage.balanceUsd === null
+      ) {
+        throw new Error(t("settings.codex.sessionCookieUsageUnavailable"));
+      }
       const nextProviders = providers.map((provider) =>
         provider.id !== persistedProvider.id
           ? provider
