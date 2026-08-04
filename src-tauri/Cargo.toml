@@ -74,3 +74,6 @@ windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Securit
 
 [target."cfg(target_os = \"ios\")".dependencies]
 objc2 = "0.6"
+
+[profile.dev]
+debug = 1
