@@ -2032,7 +2032,7 @@ describe("SettingsView Codex defaults", () => {
     expect(nextSettings.codexProviders?.[nextSettings.codexProviders.length - 1]?.name).toBe("Draft provider");
   });
 
-  it("saves and enables a provider with an explicit execution selection", () => {
+  it("saves and enables a provider for both execution and usage", () => {
     const onUpdateAppSettings = vi.fn().mockResolvedValue(undefined);
     renderCodexSection({ initialSection: "providers", onUpdateAppSettings });
 
@@ -2048,14 +2048,60 @@ describe("SettingsView Codex defaults", () => {
     const provider = nextSettings.codexProviders?.[nextSettings.codexProviders.length - 1];
     const group = provider?.groups[0];
     const credential = group?.credentials[0];
-    expect(nextSettings.executionCredentialSelection).toEqual({
+    const expectedSelection = {
       providerId: provider?.id,
       groupId: group?.id,
       credentialId: credential?.id,
-    });
+    };
+    expect(nextSettings.executionCredentialSelection).toEqual(expectedSelection);
+    expect(nextSettings.usageCredentialSelection).toEqual(expectedSelection);
     expect(nextSettings.activeCodexKeyProfileId).toBe(
       nextSettings.codexKeyProfiles[nextSettings.codexKeyProfiles.length - 1]?.id,
     );
+  });
+
+  it("returns both execution and usage to the local Codex configuration", async () => {
+    const onUpdateAppSettings = vi.fn().mockResolvedValue(undefined);
+    const selection = {
+      providerId: "provider-a",
+      groupId: "group-a",
+      credentialId: "key-a",
+    };
+    renderCodexSection({
+      initialSection: "providers",
+      onUpdateAppSettings,
+      appSettings: {
+        activeCodexKeyProfileId: "provider-a:group-a:key-a",
+        executionCredentialSelection: selection,
+        usageCredentialSelection: selection,
+        codexProviders: [
+          {
+            id: "provider-a",
+            name: "Provider A",
+            baseUrlEnvVar: "OPENAI_BASE_URL",
+            baseUrl: "https://a.example.test/v1",
+            groups: [
+              {
+                id: "group-a",
+                name: "Group A",
+                credentials: [
+                  { id: "key-a", name: "Key A", key: "a", keyEnvVar: "OPENAI_API_KEY" },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /使用 Codex 默认配置/ }));
+
+    await waitFor(() => expect(onUpdateAppSettings).toHaveBeenCalled());
+    const calls = onUpdateAppSettings.mock.calls;
+    const nextSettings = calls[calls.length - 1]?.[0] as AppSettings;
+    expect(nextSettings.activeCodexKeyProfileId).toBeNull();
+    expect(nextSettings.executionCredentialSelection).toBeNull();
+    expect(nextSettings.usageCredentialSelection).toBeNull();
   });
 
   it("fills the recommended base URL when selecting a known provider", () => {
@@ -2596,7 +2642,7 @@ describe("SettingsView Codex defaults", () => {
     });
   });
 
-  it("shows only the execution provider as enabled when usage state differs", async () => {
+  it("synchronizes usage when enabling a provider from a divergent state", async () => {
     const onUpdateAppSettings = vi.fn().mockResolvedValue(undefined);
     renderCodexSection({
       initialSection: "providers",
@@ -2698,9 +2744,9 @@ describe("SettingsView Codex defaults", () => {
     });
     expect(nextSettings.activeCodexKeyProfileId).toBe("provider-c:group-c:key-c");
     expect(nextSettings.usageCredentialSelection).toEqual({
-      providerId: "provider-b",
-      groupId: "group-b",
-      credentialId: "key-b",
+      providerId: "provider-c",
+      groupId: "group-c",
+      credentialId: "key-c",
     });
   });
 

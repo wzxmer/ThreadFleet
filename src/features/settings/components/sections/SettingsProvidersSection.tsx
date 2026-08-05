@@ -40,6 +40,7 @@ import {
   providerSelection,
   providersFromSettings,
   providersToLegacyProfiles,
+  synchronizeUsageProviderSelection,
 } from "@/utils/providerCredentials";
 import type { ProviderSessionDiagnostics } from "@settings/utils/providerSessionDiagnostics";
 
@@ -363,7 +364,7 @@ export function SettingsProvidersSection({
       : null;
     setSaveState("saving");
     try {
-      await onUpdateAppSettings({
+      const nextSettings: AppSettings = {
         ...appSettings,
         codexProviders: nextProviders,
         codexKeyProfiles: providersToLegacyProfiles(nextProviders),
@@ -372,13 +373,12 @@ export function SettingsProvidersSection({
           : null,
         executionCredentialSelection: preservedExecutionSelection,
         usageCredentialSelection: preservedUsageSelection,
-        ...(activate && nextSelection
-          ? {
-              executionCredentialSelection: nextSelection,
-              activeCodexKeyProfileId: credentialSelectionId(nextSelection),
-            }
-          : {}),
-      });
+      };
+      await onUpdateAppSettings(
+        activate && nextSelection
+          ? synchronizeUsageProviderSelection(nextSettings, nextSelection)
+          : nextSettings,
+      );
       setProviders(nextProviders);
       setSelectedProviderId(normalized.id);
       setDraft(cloneProvider(normalized));
@@ -425,11 +425,9 @@ export function SettingsProvidersSection({
     if (!nextSelection) return;
     setSaveState("saving");
     try {
-      await onUpdateAppSettings({
-        ...appSettings,
-        activeCodexKeyProfileId: credentialSelectionId(nextSelection),
-        executionCredentialSelection: nextSelection,
-      });
+      await onUpdateAppSettings(
+        synchronizeUsageProviderSelection(appSettings, nextSelection),
+      );
       setSaveState("idle");
     } catch {
       setSaveState("error");
@@ -806,11 +804,9 @@ export function SettingsProvidersSection({
               className={`settings-provider-list-item ${executionProviderId ? "" : "is-selected"}`}
               aria-pressed={!executionProviderId}
               onClick={() =>
-                void onUpdateAppSettings({
-                  ...appSettings,
-                  activeCodexKeyProfileId: null,
-                  executionCredentialSelection: null,
-                })
+                void onUpdateAppSettings(
+                  synchronizeUsageProviderSelection(appSettings, null),
+                )
               }
             >
               <span className="settings-provider-list-copy">
