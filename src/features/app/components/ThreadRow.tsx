@@ -115,7 +115,7 @@ export function ThreadRow({
   const statusLabel =
     statusClass === "reviewing"
       ? t("threads.statusReviewing")
-      : hasPendingUserInput
+      : statusClass === "waiting"
         ? t("threads.statusWaiting")
         : statusClass === "processing"
           ? t("threads.statusRunning")

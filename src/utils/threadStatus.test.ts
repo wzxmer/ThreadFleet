@@ -9,7 +9,12 @@ describe("threadStatus", () => {
         { isProcessing: true, hasUnread: false, isReviewing: false },
         true,
       ),
-    ).toBe("unread");
+    ).toBe("waiting");
+  });
+
+  it("keeps unread and idle threads distinct from active states", () => {
+    expect(getThreadStatusClass({ hasUnread: true }, false)).toBe("unread");
+    expect(getThreadStatusClass(undefined, false)).toBe("ready");
   });
 
   it("maps thread status to workspace home labels and classes", () => {

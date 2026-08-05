@@ -157,6 +157,32 @@ describe("sidebar interaction styles", () => {
     );
   });
 
+  it("uses distinct semantic colors for thread runtime states in both themes", () => {
+    const sidebarCss = readFileSync(new URL("./sidebar.css", import.meta.url), "utf8");
+
+    expect(sidebarCss).toMatch(
+      /\.sidebar\s*\{[^}]*--thread-status-running:\s*#ff9a56;[^}]*--thread-status-reviewing:\s*#c8a9ff;[^}]*--thread-status-waiting:\s*#ffc766;[^}]*--thread-status-unread:\s*#69b4ff;[^}]*--thread-status-idle:\s*#4ce0ae;/s,
+    );
+    expect(sidebarCss).toMatch(
+      /:root:not\(\[data-theme\]\) \.sidebar,\s*:root\[data-theme="light"\] \.sidebar\s*\{[^}]*--thread-status-running:\s*#e9782d;[^}]*--thread-status-reviewing:\s*#8b63e6;[^}]*--thread-status-waiting:\s*#d98600;[^}]*--thread-status-unread:\s*#2385da;[^}]*--thread-status-idle:\s*#2ac895;/s,
+    );
+    expect(sidebarCss).toMatch(
+      /\.thread-status\.processing\s*\{[^}]*background:\s*var\(--thread-status-running\);/s,
+    );
+    expect(sidebarCss).toMatch(
+      /\.thread-status\.reviewing\s*\{[^}]*background:\s*var\(--thread-status-reviewing\);/s,
+    );
+    expect(sidebarCss).toMatch(
+      /\.thread-status\.waiting\s*\{[^}]*background:\s*var\(--thread-status-waiting\);/s,
+    );
+    expect(sidebarCss).toMatch(
+      /\.thread-status\.unread\s*\{[^}]*background:\s*var\(--thread-status-unread\);/s,
+    );
+    expect(sidebarCss).toMatch(
+      /\.thread-status\.ready\s*\{[^}]*background:\s*var\(--thread-status-idle\);[^}]*box-shadow:\s*0 0 0 3px color-mix\(in srgb, var\(--thread-status-idle\) 10%, transparent\);/s,
+    );
+  });
+
   it("keeps the conversation list on the sidebar theme surface without changing the tablet rail", () => {
     const sidebarCss = readFileSync(new URL("./sidebar.css", import.meta.url), "utf8");
     const sidebarBodyRule = sidebarCss.match(/\.sidebar-body\s*\{([\s\S]*?)\n\}/);

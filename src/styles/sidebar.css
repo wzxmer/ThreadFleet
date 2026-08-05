@@ -12,6 +12,11 @@
   --sidebar-object-text: #eff3f5;
   --sidebar-object-muted: #aab5bc;
   --sidebar-object-faint: #7d8992;
+  --thread-status-running: #ff9a56;
+  --thread-status-reviewing: #c8a9ff;
+  --thread-status-waiting: #ffc766;
+  --thread-status-unread: #69b4ff;
+  --thread-status-idle: #4ce0ae;
   padding: var(--sidebar-top-padding, 14px) var(--sidebar-padding) 10px;
   background: var(--sidebar-object-bg);
   backdrop-filter: none;
@@ -44,6 +49,11 @@
   --sidebar-object-text: var(--cm-light-text-strong);
   --sidebar-object-muted: rgba(32, 40, 51, 0.82);
   --sidebar-object-faint: rgba(32, 40, 51, 0.64);
+  --thread-status-running: #e9782d;
+  --thread-status-reviewing: #8b63e6;
+  --thread-status-waiting: #d98600;
+  --thread-status-unread: #2385da;
+  --thread-status-idle: #2ac895;
 }
 
 .sidebar-drag-strip {
@@ -1642,25 +1652,30 @@
 }
 
 .thread-status.processing {
-  background: var(--status-success);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--status-success) 12%, transparent);
+  background: var(--thread-status-running);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--thread-status-running) 14%, transparent);
   animation: pulse 1.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
 .thread-status.reviewing {
-  background: var(--status-warning);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--status-warning) 12%, transparent);
+  background: var(--thread-status-reviewing);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--thread-status-reviewing) 14%, transparent);
   animation: pulse 1.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
+.thread-status.waiting {
+  background: var(--thread-status-waiting);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--thread-status-waiting) 14%, transparent);
+}
+
 .thread-status.unread {
-  background: #4da3ff;
-  box-shadow: 0 0 0 4px rgba(77, 163, 255, 0.12);
+  background: var(--thread-status-unread);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--thread-status-unread) 12%, transparent);
 }
 
 .thread-status.ready {
-  background: #3fe47e;
-  box-shadow: 0 0 0 4px rgba(63, 228, 126, 0.08);
+  background: var(--thread-status-idle);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--thread-status-idle) 10%, transparent);
 }
 
 .thread-row:hover {
@@ -1831,27 +1846,33 @@
 }
 
 .thread-state-chip.processing {
-  color: var(--status-success);
+  color: var(--thread-status-running);
   background: transparent;
   border-color: transparent;
 }
 
 .thread-state-chip.reviewing {
-  color: var(--status-warning);
+  color: var(--thread-status-reviewing);
+  background: transparent;
+  border-color: transparent;
+}
+
+.thread-state-chip.waiting {
+  color: var(--thread-status-waiting);
   background: transparent;
   border-color: transparent;
 }
 
 .thread-state-chip.unread {
-  color: #8ac0ff;
-  background: rgba(77, 163, 255, 0.12);
-  border-color: rgba(77, 163, 255, 0.22);
+  color: var(--thread-status-unread);
+  background: transparent;
+  border-color: transparent;
 }
 
 .thread-state-chip.ready {
-  color: #7be9a4;
-  background: rgba(63, 228, 126, 0.12);
-  border-color: rgba(63, 228, 126, 0.2);
+  color: var(--thread-status-idle);
+  background: transparent;
+  border-color: transparent;
 }
 
 .thread-time {

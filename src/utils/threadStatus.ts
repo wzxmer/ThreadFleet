@@ -6,14 +6,19 @@ export type ThreadStatusFlags = {
 
 export type ThreadStatusById = Record<string, ThreadStatusFlags>;
 
-export type ThreadStatusClass = "processing" | "reviewing" | "unread" | "ready";
+export type ThreadStatusClass =
+  | "processing"
+  | "reviewing"
+  | "waiting"
+  | "unread"
+  | "ready";
 
 export function getThreadStatusClass(
   status: ThreadStatusFlags | undefined,
   hasPendingUserInput: boolean,
 ): ThreadStatusClass {
   if (hasPendingUserInput) {
-    return "unread";
+    return "waiting";
   }
   if (status?.isReviewing) {
     return "reviewing";

@@ -241,7 +241,7 @@ describe("ThreadList", () => {
     expect(container.querySelector(".thread-workspace-label")).toBeNull();
   });
 
-  it("shows blue unread-style status when a thread is waiting for user input", () => {
+  it("shows a dedicated waiting status when a thread needs user input", () => {
     const { container } = render(
       <ThreadList
         {...baseProps}
@@ -256,8 +256,9 @@ describe("ThreadList", () => {
     const row = container.querySelector(".thread-row");
     expect(row).toBeTruthy();
     expect(row?.querySelector(".thread-name")?.textContent).toBe("Alpha");
-    expect(row?.querySelector(".thread-status")?.className).toContain("unread");
+    expect(row?.querySelector(".thread-status")?.className).toContain("waiting");
     expect(row?.querySelector(".thread-status")?.className).not.toContain("processing");
+    expect(row?.querySelector(".thread-state-chip")?.textContent).toBe("等待中");
   });
 
   it("keeps the execution state before the fixed pin and time lane", () => {
