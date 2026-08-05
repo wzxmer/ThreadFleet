@@ -340,6 +340,73 @@ describe("useThreadMessaging telemetry", () => {
     );
   });
 
+  it("executes one composer submission id only once", async () => {
+    vi.mocked(computerControlPreflightService).mockResolvedValue({
+      schemaVersion: 1,
+      decisionId: "cmcc-submission",
+      taskKind: "direct",
+      primaryBackend: "direct",
+      availability: "ready",
+      enforcement: "advisory",
+      reasonCodes: [],
+      executionHost: "local",
+      snapshotAgeMs: 0,
+    });
+    const onDebug = vi.fn();
+    const { result } = renderHook(() =>
+      useThreadMessaging({
+        activeWorkspace: workspace,
+        activeThreadId: "thread-1",
+        accessMode: "current",
+        workflowRuntimeMode: "off",
+        steerEnabled: false,
+        customPrompts: [],
+        threadStatusById: {},
+        activeTurnIdByThread: {},
+        rateLimitsByWorkspace: {},
+        pendingInterruptsRef: { current: new Set<string>() },
+        dispatch: vi.fn(),
+        getCustomName: vi.fn(() => undefined),
+        markProcessing: vi.fn(),
+        markReviewing: vi.fn(),
+        setActiveTurnId: vi.fn(),
+        recordThreadActivity: vi.fn(),
+        safeMessageActivity: vi.fn(),
+        onDebug,
+        pushThreadErrorMessage: vi.fn(),
+        ensureThreadForActiveWorkspace: vi.fn(async () => "thread-1"),
+        ensureThreadForWorkspace: vi.fn(async () => "thread-1"),
+        refreshThread: vi.fn(async () => null),
+        forkThreadForWorkspace: vi.fn(async () => null),
+        updateThreadParent: vi.fn(),
+      }),
+    );
+    const submission = {
+      id: "submission-1",
+      source: "keyboard-ctrl-enter" as const,
+      draftGeneration: 3,
+    };
+
+    await act(async () => {
+      await Promise.all([
+        result.current.sendUserMessage("Steer once", [], [], { submission }),
+        result.current.sendUserMessage("Steer once", [], [], { submission }),
+      ]);
+    });
+
+    expect(sendUserMessageService).toHaveBeenCalledTimes(1);
+    expect(onDebug).toHaveBeenCalledWith(
+      expect.objectContaining({
+        label: "turn/start",
+        payload: expect.objectContaining({
+          submissionId: "submission-1",
+          submissionSource: "keyboard-ctrl-enter",
+          draftGeneration: 3,
+        }),
+      }),
+    );
+  });
+
   it("runs shadow preflight without applying workflow context", async () => {
     const { result } = renderHook(() =>
       useThreadMessaging({

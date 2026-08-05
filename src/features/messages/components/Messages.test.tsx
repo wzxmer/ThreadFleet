@@ -1453,6 +1453,98 @@ describe("Messages", () => {
     selection?.removeAllRanges();
   });
 
+  it("collapses adjacent identical turn failures and expands them on demand", () => {
+    const errorText =
+      "Turn failed: exceeded retry limit, last status: 429 Too Many Requests";
+    const items: ConversationItem[] = [
+      {
+        id: "error-1",
+        kind: "message",
+        role: "assistant",
+        text: errorText,
+        turnId: "turn-1",
+        createdAt: 1,
+      },
+      {
+        id: "error-2",
+        kind: "message",
+        role: "assistant",
+        text: errorText,
+        turnId: "turn-2",
+        createdAt: 2,
+      },
+      {
+        id: "error-3",
+        kind: "message",
+        role: "assistant",
+        text: errorText,
+        turnId: "turn-3",
+        createdAt: 3,
+      },
+    ];
+
+    render(
+      <Messages
+        items={items}
+        threadId="thread-repeated-errors"
+        workspaceId="ws-1"
+        isThinking={false}
+        openTargets={[]}
+        selectedOpenAppId=""
+      />,
+    );
+
+    expect(screen.getAllByText(errorText)).toHaveLength(1);
+    fireEvent.click(
+      screen.getByRole("button", { name: "展开 3 条重复错误" }),
+    );
+    expect(screen.getAllByText(errorText)).toHaveLength(3);
+    expect(
+      screen.getByRole("button", { name: "收起 3 条重复错误" }),
+    ).toBeTruthy();
+  });
+
+  it("does not fold identical failures across a user-message boundary", () => {
+    const errorText = "Turn failed: Service unavailable";
+    render(
+      <Messages
+        items={[
+          {
+            id: "error-before-user",
+            kind: "message",
+            role: "assistant",
+            text: errorText,
+            turnId: "turn-before-user",
+          },
+          {
+            id: "user-boundary",
+            kind: "message",
+            role: "user",
+            text: "Retry now",
+            turnId: "turn-after-user",
+          },
+          {
+            id: "error-after-user",
+            kind: "message",
+            role: "assistant",
+            text: errorText,
+            turnId: "turn-after-user",
+          },
+        ]}
+        threadId="thread-separated-errors"
+        workspaceId="ws-1"
+        isThinking={false}
+        openTargets={[]}
+        selectedOpenAppId=""
+      />,
+    );
+
+    expect(screen.getAllByText(errorText)).toHaveLength(2);
+    expect(
+      screen.queryByRole("button", { name: /重复错误/ }),
+    ).toBeNull();
+  });
+
   it("edits a user message in place and resends it", async () => {
     const onResendUserMessage = vi.fn(async () => ({
       status: "sent" as const,
@@ -5118,6 +5210,41 @@ describe("Messages", () => {
 
     requestAnimationFrameSpy.mockRestore();
     vi.unstubAllGlobals();
+  });
+
+  it("jumps directly to the current latest content without a competing smooth scroll", () => {
+    const { container } = render(
+      <Messages
+        items={[
+          {
+            id: "msg-latest",
+            kind: "message",
+            role: "assistant",
+            text: "Latest",
+          },
+        ]}
+        threadId="thread-latest-jump"
+        workspaceId="ws-1"
+        isThinking={false}
+        openTargets={[]}
+        selectedOpenAppId=""
+      />,
+    );
+    const scrollNode = container.querySelector(
+      ".messages.messages-full",
+    ) as HTMLDivElement;
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 400 },
+      scrollHeight: { configurable: true, value: 1000 },
+      scrollTop: { configurable: true, writable: true, value: 100 },
+      scrollTo: { configurable: true, value: vi.fn() },
+    });
+
+    fireEvent.scroll(scrollNode);
+    fireEvent.click(screen.getByRole("button", { name: "回到最新会话内容" }));
+
+    expect(scrollNode.scrollTop).toBe(1000);
+    expect(scrollNode.scrollTo).not.toHaveBeenCalled();
   });
 
   it("shows a plan-ready follow-up prompt after a completed plan tool item", () => {

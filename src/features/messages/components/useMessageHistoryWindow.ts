@@ -304,6 +304,21 @@ export function useMessageHistoryWindow<T>({
 
   const showLatest = useCallback(() => {
     const latestRange = buildLatestRange(items.length, batchSize);
+    const isLatestRangeVisible =
+      effectiveRange.start === latestRange.start &&
+      effectiveRange.end === latestRange.end;
+    pendingScrollRestoreRef.current = null;
+
+    if (isLatestRangeVisible) {
+      const container = containerRef.current;
+      if (container) {
+        container.scrollTop = container.scrollHeight;
+      }
+      pendingScrollLatestRef.current = false;
+      windowUpdatePendingRef.current = false;
+      return;
+    }
+
     pendingScrollLatestRef.current = true;
     windowUpdatePendingRef.current = true;
     setWindowState({
@@ -312,7 +327,7 @@ export function useMessageHistoryWindow<T>({
       totalItems: items.length,
       batchSize,
     });
-  }, [batchSize, items.length, threadId]);
+  }, [batchSize, containerRef, effectiveRange, items.length, threadId]);
 
   return {
     visibleItems: items.slice(effectiveRange.start, effectiveRange.end),

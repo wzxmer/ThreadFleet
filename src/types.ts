@@ -619,6 +619,17 @@ export type ComposerSendShortcut =
   | "enter-and-ctrl-enter";
 export type ComposerTriggerMode = "default" | "swap-slash-at";
 export type ComposerSendIntent = "default" | "queue" | "steer";
+export type ComposerSubmissionSource =
+  | "keyboard-enter"
+  | "keyboard-ctrl-enter"
+  | "keyboard-shift-enter"
+  | "button"
+  | "queue-steer";
+export type ComposerSubmission = {
+  id: string;
+  source: ComposerSubmissionSource;
+  draftGeneration: number;
+};
 export type SendMessageResult = {
   status: "sent" | "blocked" | "steer_failed";
 };

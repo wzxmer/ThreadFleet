@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   AppMention,
   ComposerSendIntent,
+  ComposerSubmission,
   ComposerTriggerMode,
   FollowUpMessageBehavior,
   QueuedMessage,
@@ -9,6 +10,11 @@ import type {
   SendMessageResult,
   WorkspaceInfo,
 } from "@/types";
+import {
+  claimSubmissionId,
+  createComposerSubmission,
+  createSubmissionIdRegistry,
+} from "@utils/submissionIds";
 
 type UseQueuedSendOptions = {
   activeThreadId: string | null;
@@ -30,7 +36,11 @@ type UseQueuedSendOptions = {
     text: string,
     images?: string[],
     appMentions?: AppMention[],
-    options?: { sendIntent?: ComposerSendIntent; replaceMessageId?: string },
+    options?: {
+      sendIntent?: ComposerSendIntent;
+      replaceMessageId?: string;
+      submission?: ComposerSubmission;
+    },
   ) => Promise<SendMessageResult>;
   sendUserMessageToThread: (
     workspace: WorkspaceInfo,
@@ -72,6 +82,7 @@ type UseQueuedSendResult = {
     submitIntent?: ComposerSendIntent,
     options?: { replaceMessageId?: string },
     references?: ComposerReference[],
+    submission?: ComposerSubmission,
   ) => Promise<void>;
   queueMessage: (
     text: string,
@@ -184,6 +195,7 @@ export function useQueuedSend({
     Record<string, boolean>
   >({});
   const queueCancelGenerationByThread = useRef<Record<string, number>>({});
+  const handledSubmissionIdsRef = useRef(createSubmissionIdRegistry());
   const steerInFlightMessageIds = useRef(new Set<string>());
   const queuedFailureCountByMessageId = useRef(new Map<string, number>());
   const queuedRetryTimersByMessageId = useRef(
@@ -360,6 +372,7 @@ export function useQueuedSend({
       submitIntent: ComposerSendIntent = "default",
       options?: { replaceMessageId?: string },
       references: ComposerReference[] = [],
+      submission?: ComposerSubmission,
     ) => {
       const trimmed = text.trim();
       const command = parseSlashCommand(trimmed, appsEnabled, composerTriggerMode);
@@ -382,6 +395,12 @@ export function useQueuedSend({
         return;
       }
       if (activeThreadId && isReviewing) {
+        return;
+      }
+      if (
+        submission &&
+        !claimSubmissionId(handledSubmissionIdsRef.current, submission.id)
+      ) {
         return;
       }
       if (isProcessing && activeThreadId && effectiveIntent === "queue") {
@@ -410,21 +429,25 @@ export function useQueuedSend({
         if (activeWorkspace && !activeWorkspace.connected) {
           await connectWorkspace(activeWorkspace);
         }
+        const sendOptions = {
+          sendIntent: effectiveIntent,
+          replaceMessageId: options?.replaceMessageId,
+          ...(submission ? { submission } : {}),
+        };
         sendResult =
           submittedMentions.length > 0
             ? await sendUserMessage(
                 trimmed,
                 submittedImages,
                 submittedMentions,
-                {
-                  sendIntent: effectiveIntent,
-                  replaceMessageId: options?.replaceMessageId,
-                },
+                sendOptions,
               )
-            : await sendUserMessage(trimmed, submittedImages, undefined, {
-                sendIntent: effectiveIntent,
-                replaceMessageId: options?.replaceMessageId,
-              });
+            : await sendUserMessage(
+                trimmed,
+                submittedImages,
+                undefined,
+                sendOptions,
+              );
       } catch (error) {
         if (imageTransferToken) {
           restoreImagesForDraft?.(imageTransferToken, submittedImages);
@@ -525,6 +548,7 @@ export function useQueuedSend({
         return;
       }
       const cancelGeneration = queueCancelGenerationByThread.current[threadId] ?? 0;
+      const submission = createComposerSubmission("queue-steer", 0);
       steerInFlightMessageIds.current.add(messageId);
       removeQueuedMessage(threadId, messageId);
       try {
@@ -533,9 +557,11 @@ export function useQueuedSend({
           mentions.length > 0
             ? await sendUserMessage(trimmed, item.images ?? [], mentions, {
                 sendIntent: "steer",
+                submission,
               })
             : await sendUserMessage(trimmed, item.images ?? [], undefined, {
                 sendIntent: "steer",
+                submission,
               });
         if (
           result.status !== "sent" &&

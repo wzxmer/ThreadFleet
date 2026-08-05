@@ -2,6 +2,8 @@ import { useCallback, useMemo } from "react";
 import type {
   AppMention,
   ComposerSendIntent,
+  ComposerSubmission,
+  ComposerReference,
   GitLogEntry,
   GitHubPullRequest,
   PullRequestReviewAction,
@@ -52,6 +54,9 @@ type UsePullRequestComposerOptions = {
     images: string[],
     appMentions?: AppMention[],
     submitIntent?: ComposerSendIntent,
+    options?: { replaceMessageId?: string },
+    references?: ComposerReference[],
+    submission?: ComposerSubmission,
   ) => Promise<void>;
 };
 
@@ -134,6 +139,9 @@ export function usePullRequestComposer({
       images: string[] = [],
       appMentions: AppMention[] = [],
       submitIntent?: ComposerSendIntent,
+      options?: { replaceMessageId?: string },
+      references: ComposerReference[] = [],
+      submission?: ComposerSubmission,
     ) => {
       if (pullRequestReviewLaunching) {
         return;
@@ -154,9 +162,25 @@ export function usePullRequestComposer({
       }
       if (KNOWN_SLASH_COMMAND_REGEX.test(trimmed)) {
         if (appMentions.length > 0) {
-          await handleSend(trimmed, images, appMentions, submitIntent);
+          await handleSend(
+            trimmed,
+            images,
+            appMentions,
+            submitIntent,
+            options,
+            references,
+            submission,
+          );
         } else {
-          await handleSend(trimmed, images, undefined, submitIntent);
+          await handleSend(
+            trimmed,
+            images,
+            undefined,
+            submitIntent,
+            options,
+            references,
+            submission,
+          );
         }
         return;
       }

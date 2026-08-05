@@ -2,6 +2,7 @@ import type {
   AccessMode,
   AppMention,
   ComposerSendIntent,
+  ComposerSubmission,
   RateLimitSnapshot,
   ReviewTarget,
   ServiceTier,
@@ -19,6 +20,7 @@ export type SendMessageOptions = {
   accessMode?: AccessMode;
   appMentions?: AppMention[];
   sendIntent?: ComposerSendIntent;
+  submission?: ComposerSubmission;
   replaceMessageId?: string;
   skipAutoCompact?: boolean;
 };

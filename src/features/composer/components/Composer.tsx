@@ -15,6 +15,8 @@ import type {
   ComposerTriggerMode,
   ComposerSendShortcut,
   ComposerSendIntent,
+  ComposerSubmission,
+  ComposerSubmissionSource,
   ComposerEditorSettings,
   CustomPromptOption,
   DictationTranscript,
@@ -67,6 +69,7 @@ import {
   buildSkillInsertion,
   resolveSkillSuggestion,
 } from "../utils/skillSuggestions";
+import { createComposerSubmission } from "@utils/submissionIds";
 
 type ComposerProps = {
   inputBackgroundColor?: string;
@@ -76,6 +79,7 @@ type ComposerProps = {
     appMentions?: AppMention[],
     submitIntent?: ComposerSendIntent,
     references?: ComposerReference[],
+    submission?: ComposerSubmission,
   ) => void;
   onStop: () => void;
   canStop: boolean;
@@ -331,7 +335,11 @@ export const Composer = memo(function Composer({
   const [headerComposerToolsHost, setHeaderComposerToolsHost] =
     useState<HTMLElement | null>(null);
   const internalRef = useRef<HTMLTextAreaElement | null>(null);
+  const currentTextRef = useRef(draftText);
+  const draftGenerationByKeyRef = useRef(new Map<string, number>());
+  const consumedDraftGenerationByKeyRef = useRef(new Map<string, number>());
   const textareaRef = externalTextareaRef ?? internalRef;
+  const draftIdentity = historyKey ?? pasteUndoKey ?? "__composer-default__";
   const editorSettings = editorSettingsProp ?? DEFAULT_EDITOR_SETTINGS;
   const isDictationBusy = dictationState !== "idle";
   const canSend = text.trim().length > 0 || attachedImages.length > 0 || references.length > 0;
@@ -362,16 +370,50 @@ export const Composer = memo(function Composer({
     continueListOnShiftEnter,
   } = editorSettings;
 
+  const advanceDraftGeneration = useCallback(() => {
+    const nextGeneration =
+      (draftGenerationByKeyRef.current.get(draftIdentity) ?? 0) + 1;
+    draftGenerationByKeyRef.current.set(draftIdentity, nextGeneration);
+    return nextGeneration;
+  }, [draftIdentity]);
   const setComposerText = useCallback(
     (next: string) => {
-      setText(next);
+      if (currentTextRef.current !== next) {
+        advanceDraftGeneration();
+        currentTextRef.current = next;
+        setText(next);
+      }
       onDraftChange?.(next);
     },
-    [onDraftChange],
+    [advanceDraftGeneration, onDraftChange],
   );
-  const syncDraftText = useCallback((next: string) => {
-    setText((prev) => (prev === next ? prev : next));
-  }, []);
+  const syncDraftText = useCallback(
+    (next: string) => {
+      if (currentTextRef.current === next) {
+        return;
+      }
+      advanceDraftGeneration();
+      currentTextRef.current = next;
+      setText(next);
+    },
+    [advanceDraftGeneration],
+  );
+  const clearComposerTextAfterSend = useCallback(() => {
+    currentTextRef.current = "";
+    setText("");
+    onDraftChange?.("");
+  }, [onDraftChange]);
+  const attachmentDraftSignature = attachedImages.join("\u0000");
+  const referenceDraftSignature = references
+    .map((reference) => `${reference.id}\u0000${reference.prompt}`)
+    .join("\u0001");
+  useEffect(() => {
+    advanceDraftGeneration();
+  }, [
+    advanceDraftGeneration,
+    attachmentDraftSignature,
+    referenceDraftSignature,
+  ]);
 
   const bindingsFromMentions = useCallback(
     (mentions?: AppMention[]) =>
@@ -504,7 +546,10 @@ export const Composer = memo(function Composer({
     [skills, text],
   );
 
-  const handleSend = useCallback((submitIntent: ComposerSendIntent = "default") => {
+  const handleSend = useCallback((
+    submitIntent: ComposerSendIntent = "default",
+    submissionSource: ComposerSubmissionSource = "button",
+  ) => {
     if (disabled) {
       return;
     }
@@ -516,37 +561,82 @@ export const Composer = memo(function Composer({
     if (!submittedText && attachedImages.length === 0) {
       return;
     }
+    const draftGeneration =
+      draftGenerationByKeyRef.current.get(draftIdentity) ?? 0;
+    if (
+      consumedDraftGenerationByKeyRef.current.get(draftIdentity) ===
+      draftGeneration
+    ) {
+      return;
+    }
+    consumedDraftGenerationByKeyRef.current.set(
+      draftIdentity,
+      draftGeneration,
+    );
+    const submission = createComposerSubmission(
+      submissionSource,
+      draftGeneration,
+    );
     if (trimmed) {
       recordHistory(trimmed);
     }
     const resolvedMentions = resolveBoundAppMentions(trimmed, appMentionBindings);
     if (resolvedMentions.length > 0) {
       if (references.length > 0) {
-        onSend(submittedText, attachedImages, resolvedMentions, submitIntent, references);
+        onSend(
+          submittedText,
+          attachedImages,
+          resolvedMentions,
+          submitIntent,
+          references,
+          submission,
+        );
       } else {
-        onSend(trimmed, attachedImages, resolvedMentions, submitIntent);
+        onSend(
+          trimmed,
+          attachedImages,
+          resolvedMentions,
+          submitIntent,
+          undefined,
+          submission,
+        );
       }
     } else {
       if (references.length > 0) {
-        onSend(submittedText, attachedImages, undefined, submitIntent, references);
+        onSend(
+          submittedText,
+          attachedImages,
+          undefined,
+          submitIntent,
+          references,
+          submission,
+        );
       } else {
-        onSend(trimmed, attachedImages, undefined, submitIntent);
+        onSend(
+          trimmed,
+          attachedImages,
+          undefined,
+          submitIntent,
+          undefined,
+          submission,
+        );
       }
     }
     clearPasteUndoHistory();
     resetHistoryNavigation();
-    setComposerText("");
+    clearComposerTextAfterSend();
     setAppMentionBindings([]);
   }, [
     appMentionBindings,
     attachedImages,
     clearPasteUndoHistory,
+    clearComposerTextAfterSend,
     disabled,
+    draftIdentity,
     onSend,
     recordHistory,
     references,
     resetHistoryNavigation,
-    setComposerText,
     text,
   ]);
 
@@ -905,7 +995,7 @@ export const Composer = memo(function Composer({
         canSend={canSend}
         isProcessing={isProcessing}
         onStop={onStop}
-        onSend={() => handleSend(defaultSubmitIntent)}
+        onSend={() => handleSend(defaultSubmitIntent, "button")}
         dictationEnabled={dictationEnabled}
         dictationState={dictationState}
         dictationLevel={dictationLevel}

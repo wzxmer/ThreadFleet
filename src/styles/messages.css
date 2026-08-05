@@ -1319,6 +1319,32 @@
   white-space: nowrap;
 }
 
+.message-repeat-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  padding: 2px 5px 2px 3px;
+  border: 1px solid color-mix(in srgb, var(--status-error) 38%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--status-error) 10%, transparent);
+  color: var(--status-error);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.message-repeat-toggle:hover {
+  border-color: color-mix(in srgb, var(--status-error) 58%, transparent);
+  background: color-mix(in srgb, var(--status-error) 17%, transparent);
+}
+
+.message-repeat-toggle:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--status-error) 45%, transparent);
+  outline-offset: 2px;
+}
+
 :root:not([data-theme]) .messages-view .message-agent-time,
 :root[data-theme="light"] .messages-view .message-agent-time {
   color: var(--messages-process-text-soft);

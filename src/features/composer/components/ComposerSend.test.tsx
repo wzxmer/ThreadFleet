@@ -9,6 +9,8 @@ import type {
   AppMention,
   ComposerSendIntent,
   ComposerSendShortcut,
+  ComposerSubmission,
+  ComposerSubmissionSource,
   ComposerReference,
   CustomPromptOption,
   FollowUpMessageBehavior,
@@ -39,6 +41,8 @@ type HarnessProps = {
     images: string[],
     appMentions?: AppMention[],
     submitIntent?: ComposerSendIntent,
+    references?: ComposerReference[],
+    submission?: ComposerSubmission,
   ) => void;
   apps?: AppOption[];
   prompts?: CustomPromptOption[];
@@ -131,6 +135,22 @@ function ComposerHarness({
   );
 }
 
+function expectComposerSend(
+  onSend: ReturnType<typeof vi.fn>,
+  expectedArgs: unknown[],
+  source: ComposerSubmissionSource,
+) {
+  const call = onSend.mock.calls[onSend.mock.calls.length - 1];
+  expect(call?.slice(0, expectedArgs.length)).toEqual(expectedArgs);
+  expect(call?.[5]).toEqual(
+    expect.objectContaining({
+      id: expect.stringMatching(/^composer-/),
+      source,
+      draftGeneration: expect.any(Number),
+    }),
+  );
+}
+
 describe("Composer send triggers", () => {
   it("shows current context usage from the app-server token snapshot", () => {
     render(
@@ -211,7 +231,59 @@ describe("Composer send triggers", () => {
     fireEvent.keyDown(textarea, { key: "Enter" });
 
     expect(onSend).toHaveBeenCalledTimes(1);
-    expect(onSend).toHaveBeenCalledWith("hello world", [], undefined, "default");
+    expectComposerSend(
+      onSend,
+      ["hello world", [], undefined, "default", undefined],
+      "keyboard-enter",
+    );
+  });
+
+  it("consumes one draft only once when keyboard and button submissions overlap", () => {
+    let retriggered = false;
+    const onSend = vi.fn(() => {
+      if (retriggered) {
+        return;
+      }
+      retriggered = true;
+      fireEvent.click(screen.getByLabelText("发送"));
+    });
+    render(<ComposerHarness onSend={onSend} />);
+
+    const textarea = screen.getByRole("textbox");
+    fireEvent.change(textarea, { target: { value: "one draft" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    expect(onSend).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores repeated send keydown events", () => {
+    const onSend = vi.fn();
+    render(<ComposerHarness onSend={onSend} />);
+
+    const textarea = screen.getByRole("textbox");
+    fireEvent.change(textarea, { target: { value: "held enter" } });
+    fireEvent.keyDown(textarea, { key: "Enter", repeat: true });
+
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("allows the same text after the user creates a new draft", () => {
+    const onSend = vi.fn();
+    render(<ComposerHarness onSend={onSend} />);
+
+    const textarea = screen.getByRole("textbox");
+    fireEvent.change(textarea, { target: { value: "继续" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    fireEvent.change(textarea, { target: { value: "继续" } });
+    fireEvent.click(screen.getByLabelText("发送"));
+
+    expect(onSend).toHaveBeenCalledTimes(2);
+    const firstSubmission = onSend.mock.calls[0]?.[5] as ComposerSubmission;
+    const secondSubmission = onSend.mock.calls[1]?.[5] as ComposerSubmission;
+    expect(firstSubmission.id).not.toBe(secondSubmission.id);
+    expect(secondSubmission.draftGeneration).toBeGreaterThan(
+      firstSubmission.draftGeneration,
+    );
   });
 
   it("keeps local input when the parent mirrors drafts without rerendering", () => {
@@ -266,12 +338,10 @@ describe("Composer send triggers", () => {
     render(<ComposerHarness onSend={onSend} references={references} />);
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "body" } });
     fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
-    expect(onSend).toHaveBeenCalledWith(
-      "> two\n\n> one\n\nbody",
-      [],
-      undefined,
-      "default",
-      references,
+    expectComposerSend(
+      onSend,
+      ["> two\n\n> one\n\nbody", [], undefined, "default", references],
+      "keyboard-enter",
     );
   });
 
@@ -284,7 +354,11 @@ describe("Composer send triggers", () => {
     fireEvent.keyDown(textarea, { key: "Enter", ctrlKey: true });
 
     expect(onSend).toHaveBeenCalledTimes(1);
-    expect(onSend).toHaveBeenCalledWith("ctrl send", [], undefined, "default");
+    expectComposerSend(
+      onSend,
+      ["ctrl send", [], undefined, "default", undefined],
+      "keyboard-ctrl-enter",
+    );
   });
 
   it("uses Ctrl+Enter for steer in chat mode while processing", () => {
@@ -304,7 +378,11 @@ describe("Composer send triggers", () => {
     fireEvent.keyDown(textarea, { key: "Enter", ctrlKey: true });
 
     expect(onSend).toHaveBeenCalledTimes(1);
-    expect(onSend).toHaveBeenCalledWith("steer this", [], undefined, "steer");
+    expectComposerSend(
+      onSend,
+      ["steer this", [], undefined, "steer", undefined],
+      "keyboard-ctrl-enter",
+    );
   });
 
   it("does not send on plain Enter when Ctrl+Enter is selected", () => {
@@ -327,7 +405,11 @@ describe("Composer send triggers", () => {
     fireEvent.click(screen.getByLabelText("发送"));
 
     expect(onSend).toHaveBeenCalledTimes(1);
-    expect(onSend).toHaveBeenCalledWith("from button", [], undefined, "default");
+    expectComposerSend(
+      onSend,
+      ["from button", [], undefined, "default", undefined],
+      "button",
+    );
   });
 
   it("sends a Chinese slash instruction instead of applying a prompt suggestion", () => {
@@ -350,7 +432,11 @@ describe("Composer send triggers", () => {
     fireEvent.keyDown(textarea, { key: "Enter" });
 
     expect(onSend).toHaveBeenCalledTimes(1);
-    expect(onSend).toHaveBeenCalledWith("/自造词", [], undefined, "default");
+    expectComposerSend(
+      onSend,
+      ["/自造词", [], undefined, "default", undefined],
+      "keyboard-enter",
+    );
   });
 
   it("sends a plus-prefixed Chinese slash instruction instead of applying a prompt suggestion", () => {
@@ -373,7 +459,11 @@ describe("Composer send triggers", () => {
     fireEvent.keyDown(textarea, { key: "Enter" });
 
     expect(onSend).toHaveBeenCalledTimes(1);
-    expect(onSend).toHaveBeenCalledWith("/+自造词", [], undefined, "default");
+    expectComposerSend(
+      onSend,
+      ["/+自造词", [], undefined, "default", undefined],
+      "keyboard-enter",
+    );
   });
 
   it("shows the fast-mode indicator when enabled", () => {
@@ -430,11 +520,10 @@ describe("Composer send triggers", () => {
     fireEvent.keyDown(textarea, { key: "Enter" });
 
     expect(onSend).toHaveBeenCalledTimes(1);
-    expect(onSend).toHaveBeenCalledWith(
-      "dismiss keyboard",
-      [],
-      undefined,
-      "default",
+    expectComposerSend(
+      onSend,
+      ["dismiss keyboard", [], undefined, "default", undefined],
+      "keyboard-enter",
     );
     expect(blurSpy).toHaveBeenCalledTimes(1);
   });
@@ -461,11 +550,16 @@ describe("Composer send triggers", () => {
     fireEvent.keyDown(textarea, { key: "Enter" });
 
     expect(onSend).toHaveBeenCalledTimes(1);
-    expect(onSend).toHaveBeenCalledWith(
-      "$calendar-app",
-      [],
-      [{ name: "Calendar App", path: "app://connector_calendar" }],
-      "default",
+    expectComposerSend(
+      onSend,
+      [
+        "$calendar-app",
+        [],
+        [{ name: "Calendar App", path: "app://connector_calendar" }],
+        "default",
+        undefined,
+      ],
+      "keyboard-enter",
     );
   });
 
@@ -485,7 +579,11 @@ describe("Composer send triggers", () => {
     fireEvent.keyDown(textarea, { key: "Enter" });
 
     expect(onSend).toHaveBeenCalledTimes(1);
-    expect(onSend).toHaveBeenCalledWith("queue this", [], undefined, "queue");
+    expectComposerSend(
+      onSend,
+      ["queue this", [], undefined, "queue", undefined],
+      "keyboard-enter",
+    );
   });
 
   it("uses Shift+Enter for steer in editor mode while processing", () => {
@@ -505,7 +603,11 @@ describe("Composer send triggers", () => {
     fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true });
 
     expect(onSend).toHaveBeenCalledTimes(1);
-    expect(onSend).toHaveBeenCalledWith("steer this", [], undefined, "steer");
+    expectComposerSend(
+      onSend,
+      ["steer this", [], undefined, "steer", undefined],
+      "keyboard-shift-enter",
+    );
   });
 
   it("uses Enter for steer in steer-priority mode while processing", () => {
@@ -525,7 +627,11 @@ describe("Composer send triggers", () => {
     fireEvent.keyDown(textarea, { key: "Enter" });
 
     expect(onSend).toHaveBeenCalledTimes(1);
-    expect(onSend).toHaveBeenCalledWith("steer priority", [], undefined, "steer");
+    expectComposerSend(
+      onSend,
+      ["steer priority", [], undefined, "steer", undefined],
+      "keyboard-enter",
+    );
   });
 
   it("falls back to the default send intent on Enter in steer-priority mode when steer is unavailable", () => {
@@ -545,7 +651,11 @@ describe("Composer send triggers", () => {
     fireEvent.keyDown(textarea, { key: "Enter" });
 
     expect(onSend).toHaveBeenCalledTimes(1);
-    expect(onSend).toHaveBeenCalledWith("fallback queue", [], undefined, "queue");
+    expectComposerSend(
+      onSend,
+      ["fallback queue", [], undefined, "queue", undefined],
+      "keyboard-enter",
+    );
   });
 
   it("uses Enter for default send in steer-priority mode", () => {
@@ -562,7 +672,11 @@ describe("Composer send triggers", () => {
     fireEvent.keyDown(textarea, { key: "Enter" });
 
     expect(onSend).toHaveBeenCalledTimes(1);
-    expect(onSend).toHaveBeenCalledWith("normal send", [], undefined, "default");
+    expectComposerSend(
+      onSend,
+      ["normal send", [], undefined, "default", undefined],
+      "keyboard-enter",
+    );
   });
 
   it("inserts a newline on Shift+Enter in steer-priority mode", () => {
@@ -618,7 +732,11 @@ describe("Composer send triggers", () => {
 
     expect(screen.queryByText("追问方式")).toBeNull();
     expect(onSend).toHaveBeenCalledTimes(1);
-    expect(onSend).toHaveBeenCalledWith("queue fallback", [], undefined, "queue");
+    expectComposerSend(
+      onSend,
+      ["queue fallback", [], undefined, "queue", undefined],
+      "keyboard-enter",
+    );
   });
 
   it("does not restore the last submitted prompt into the composer when stopping a turn", () => {

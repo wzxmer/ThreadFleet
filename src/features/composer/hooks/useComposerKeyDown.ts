@@ -1,5 +1,9 @@
 import { useCallback, type KeyboardEvent, type RefObject } from "react";
-import type { ComposerSendIntent, ComposerSendShortcut } from "../../../types";
+import type {
+  ComposerSendIntent,
+  ComposerSendShortcut,
+  ComposerSubmissionSource,
+} from "../../../types";
 import { getListContinuation } from "../../../utils/composerText";
 import { isComposingEvent } from "../../../utils/keys";
 import { isMobilePlatform } from "../../../utils/platformPaths";
@@ -20,7 +24,10 @@ type UseComposerKeyDownArgs = {
   expandFenceOnSpace: boolean;
   handleHistoryKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   handleInputKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
-  handleSend: (submitIntent?: ComposerSendIntent) => void;
+  handleSend: (
+    submitIntent?: ComposerSendIntent,
+    submissionSource?: ComposerSubmissionSource,
+  ) => void;
   isDictationBusy: boolean;
   isMac: boolean;
   onReviewPromptKeyDown?: (event: ReviewPromptKeyEvent) => boolean;
@@ -58,6 +65,10 @@ export function useComposerKeyDown({
   return useCallback(
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
       if (isComposingEvent(event)) {
+        return;
+      }
+      if (event.key === "Enter" && event.repeat) {
+        event.preventDefault();
         return;
       }
       const insertNewline = () => {
@@ -152,7 +163,10 @@ export function useComposerKeyDown({
         !event.metaKey &&
         !event.ctrlKey &&
         !event.altKey;
-      const sendWithIntent = (submitIntent: ComposerSendIntent) => {
+      const sendWithIntent = (
+        submitIntent: ComposerSendIntent,
+        submissionSource: ComposerSubmissionSource,
+      ) => {
         if (expandFenceOnEnter && isPlainEnter) {
           const textarea = textareaRef.current;
           if (textarea) {
@@ -170,7 +184,7 @@ export function useComposerKeyDown({
         }
         event.preventDefault();
         const dismissKeyboardAfterSend = canSend && isMobilePlatform();
-        handleSend(submitIntent);
+        handleSend(submitIntent, submissionSource);
         if (dismissKeyboardAfterSend) {
           textareaRef.current?.blur();
         }
@@ -180,16 +194,19 @@ export function useComposerKeyDown({
           return;
         }
         if (isCtrlEnter) {
-          sendWithIntent(defaultSubmitIntent);
+          sendWithIntent(defaultSubmitIntent, "keyboard-ctrl-enter");
           return;
         }
         if (isShiftEnter) {
-          sendWithIntent(oppositeSubmitIntent);
+          sendWithIntent(oppositeSubmitIntent, "keyboard-shift-enter");
           return;
         }
       } else if (composerSendShortcut === "steer-priority") {
         if (isPlainEnter) {
-          sendWithIntent(steerAvailable ? oppositeSubmitIntent : defaultSubmitIntent);
+          sendWithIntent(
+            steerAvailable ? oppositeSubmitIntent : defaultSubmitIntent,
+            "keyboard-enter",
+          );
           return;
         }
         if (isCtrlEnter) {
@@ -198,11 +215,11 @@ export function useComposerKeyDown({
         }
       } else {
         if (isPlainEnter) {
-          sendWithIntent(defaultSubmitIntent);
+          sendWithIntent(defaultSubmitIntent, "keyboard-enter");
           return;
         }
         if (isCtrlEnter) {
-          sendWithIntent(oppositeSubmitIntent);
+          sendWithIntent(oppositeSubmitIntent, "keyboard-ctrl-enter");
           return;
         }
       }

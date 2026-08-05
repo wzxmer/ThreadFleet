@@ -388,6 +388,9 @@ describe("useThreadUiOrchestration", () => {
       ["img-1"],
       undefined,
       undefined,
+      undefined,
+      undefined,
+      undefined,
     );
     expect(params.pendingNewThreadSeedRef.current).toMatchObject({
       workflowGateId: "wf-draft",

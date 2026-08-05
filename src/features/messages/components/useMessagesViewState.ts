@@ -138,12 +138,6 @@ export function useMessagesViewState({
   const scrollToLatest = useCallback(() => {
     autoScrollRef.current = true;
     showLatest();
-    const container = containerRef.current;
-    if (container) {
-      container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
-    } else {
-      bottomRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
-    }
     setShowScrollToLatest(false);
   }, [showLatest]);
 

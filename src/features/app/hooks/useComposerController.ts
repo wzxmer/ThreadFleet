@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from "react";
 import type {
   AppMention,
   ComposerSendIntent,
+  ComposerSubmission,
   ComposerTriggerMode,
   FollowUpMessageBehavior,
   QueuedMessage,
@@ -60,7 +61,11 @@ export function useComposerController({
     text: string,
     images?: string[],
     appMentions?: AppMention[],
-    options?: { sendIntent?: ComposerSendIntent; replaceMessageId?: string },
+    options?: {
+      sendIntent?: ComposerSendIntent;
+      replaceMessageId?: string;
+      submission?: ComposerSubmission;
+    },
   ) => Promise<{ status: "sent" | "blocked" | "steer_failed" }>;
   sendUserMessageToThread: (
     workspace: WorkspaceInfo,
@@ -172,9 +177,18 @@ export function useComposerController({
     submitIntent: ComposerSendIntent = "default",
     options?: { replaceMessageId?: string },
     references: ComposerReference[] = [],
+    submission?: ComposerSubmission,
   ) => {
     try {
-      await handleQueuedSend(text, images, appMentions, submitIntent, options, references);
+      await handleQueuedSend(
+        text,
+        images,
+        appMentions,
+        submitIntent,
+        options,
+        references,
+        submission,
+      );
     } catch (error) {
       if (draftKey && references.length > 0) {
         const restoredText = stripReferenceText(

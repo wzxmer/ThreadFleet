@@ -59,6 +59,7 @@ import {
   WorkingIndicator,
   type AssistantMessageMeta,
   type AssistantProcessDisclosure,
+  type RepeatedErrorDisclosure,
 } from "./MessageRows";
 import { SubagentResultSummary } from "./SubagentResultSummary";
 import { useMessagesViewState } from "./useMessagesViewState";
@@ -66,6 +67,67 @@ import type { SubagentResultSummary as SubagentResultSummaryData } from "../util
 import { ConversationExportControls } from "../export/ConversationExportControls";
 import { useConversationExport } from "../export/useConversationExport";
 import type { ModelActivityState } from "@/features/models/components/ModelActivityCore";
+
+type RepeatedErrorRun = {
+  id: string;
+  count: number;
+  latestEntryIndex: number;
+};
+
+const EMPTY_REPEATED_ERROR_GROUPS = new Set<string>();
+
+function getRepeatableErrorText(entry: MessageListEntry) {
+  if (
+    entry.kind !== "item" ||
+    entry.item.kind !== "message" ||
+    entry.item.role !== "assistant" ||
+    (entry.item.images?.length ?? 0) > 0 ||
+    (entry.item.attachments?.length ?? 0) > 0
+  ) {
+    return null;
+  }
+  const text = entry.item.text.trim();
+  return text.startsWith("Turn failed") ? text : null;
+}
+
+function buildRepeatedErrorRuns(entries: MessageListEntry[]) {
+  const runsByEntryIndex = new Map<number, RepeatedErrorRun>();
+  let startIndex = 0;
+
+  while (startIndex < entries.length) {
+    const signature = getRepeatableErrorText(entries[startIndex]);
+    if (!signature) {
+      startIndex += 1;
+      continue;
+    }
+
+    let endIndex = startIndex + 1;
+    while (
+      endIndex < entries.length &&
+      getRepeatableErrorText(entries[endIndex]) === signature
+    ) {
+      endIndex += 1;
+    }
+
+    if (endIndex - startIndex > 1) {
+      const firstEntry = entries[startIndex];
+      const run: RepeatedErrorRun = {
+        id:
+          firstEntry.kind === "item"
+            ? `repeated-error-${firstEntry.item.id}`
+            : `repeated-error-${startIndex}`,
+        count: endIndex - startIndex,
+        latestEntryIndex: endIndex - 1,
+      };
+      for (let index = startIndex; index < endIndex; index += 1) {
+        runsByEntryIndex.set(index, run);
+      }
+    }
+    startIndex = endIndex;
+  }
+
+  return runsByEntryIndex;
+}
 
 function getSearchTargetForEntry(entry: MessageListEntry) {
   if (entry.kind === "processGroup") {
@@ -435,6 +497,14 @@ export const Messages = memo(function Messages({
   const [searchQuery, setSearchQuery] = useState("");
   const [activeSearchIndex, setActiveSearchIndex] = useState(0);
   const [searchNavigationVersion, setSearchNavigationVersion] = useState(0);
+  const [repeatedErrorExpansion, setRepeatedErrorExpansion] = useState<{
+    threadId: string | null;
+    groupIds: Set<string>;
+  }>(() => ({ threadId, groupIds: new Set() }));
+  const expandedRepeatedErrorGroups =
+    repeatedErrorExpansion.threadId === threadId
+      ? repeatedErrorExpansion.groupIds
+      : EMPTY_REPEATED_ERROR_GROUPS;
   const [resendViewSnapshot, setResendViewSnapshot] = useState<{
     threadId: string | null;
     messageId: string;
@@ -554,6 +624,23 @@ export const Messages = memo(function Messages({
     summaries: turnExecutionSummaries,
     threadId,
   });
+  const repeatedErrorRunsByEntryIndex = useMemo(
+    () => buildRepeatedErrorRuns(groupedItems),
+    [groupedItems],
+  );
+  const toggleRepeatedErrorGroup = useCallback((groupId: string) => {
+    setRepeatedErrorExpansion((current) => {
+      const next = new Set(
+        current.threadId === threadId ? current.groupIds : [],
+      );
+      if (next.has(groupId)) {
+        next.delete(groupId);
+      } else {
+        next.add(groupId);
+      }
+      return { threadId, groupIds: next };
+    });
+  }, [threadId]);
   useEffect(
     () => () => {
       if (olderHistoryRestoreFrameRef.current !== null) {
@@ -1255,6 +1342,7 @@ export const Messages = memo(function Messages({
     item: ConversationItem,
     assistantProcessDisclosure?: AssistantProcessDisclosure,
     assistantProcessContent?: ReactNode,
+    repeatedErrorDisclosure?: RepeatedErrorDisclosure,
   ) => {
     if (item.kind === "message") {
       const isCopied = copiedMessageId === item.id;
@@ -1290,6 +1378,9 @@ export const Messages = memo(function Messages({
           }
           assistantProcessContent={
             item.role === "assistant" ? assistantProcessContent : undefined
+          }
+          repeatedErrorDisclosure={
+            item.role === "assistant" ? repeatedErrorDisclosure : undefined
           }
           codeBlockCopyUseModifier={codeBlockCopyUseModifier}
           showMessageFilePath={showMessageFilePath}
@@ -1645,6 +1736,21 @@ export const Messages = memo(function Messages({
             </button>
           )}
           {groupedItems.map((entry, entryIndex) => {
+            const repeatedErrorRun =
+              repeatedErrorRunsByEntryIndex.get(entryIndex);
+            const showAllRepeatedErrors =
+              isSearchActiveForThread || conversationExport.selecting;
+            const isRepeatedErrorGroupExpanded = repeatedErrorRun
+              ? expandedRepeatedErrorGroups.has(repeatedErrorRun.id)
+              : false;
+            if (
+              repeatedErrorRun &&
+              !showAllRepeatedErrors &&
+              !isRepeatedErrorGroupExpanded &&
+              entryIndex !== repeatedErrorRun.latestEntryIndex
+            ) {
+              return null;
+            }
             const searchTarget = getSearchTargetForEntry(entry);
             const isActiveSearchMatch = activeSearchTargetId === searchTarget;
             const isUserMessageSearchTarget =
@@ -1786,6 +1892,24 @@ export const Messages = memo(function Messages({
                   </div>
                 </div>
               ) : undefined;
+            const repeatedErrorDisclosure:
+              | RepeatedErrorDisclosure
+              | undefined =
+              repeatedErrorRun &&
+              !showAllRepeatedErrors &&
+              entryIndex === repeatedErrorRun.latestEntryIndex
+                ? {
+                    count: repeatedErrorRun.count,
+                    isExpanded: isRepeatedErrorGroupExpanded,
+                    label: t(
+                      isRepeatedErrorGroupExpanded
+                        ? "messages.collapseRepeatedErrors"
+                        : "messages.expandRepeatedErrors",
+                    ).replace("{count}", String(repeatedErrorRun.count)),
+                    onToggle: () =>
+                      toggleRepeatedErrorGroup(repeatedErrorRun.id),
+                  }
+                : undefined;
             return (
               <div
                 key={`item-search-${entry.item.id}`}
@@ -1793,7 +1917,12 @@ export const Messages = memo(function Messages({
                 data-history-anchor={entry.item.id}
                 className={searchTargetClassName}
               >
-                {renderItem(entry.item, processDisclosure, processContent)}
+                {renderItem(
+                  entry.item,
+                  processDisclosure,
+                  processContent,
+                  repeatedErrorDisclosure,
+                )}
               </div>
             );
           })}

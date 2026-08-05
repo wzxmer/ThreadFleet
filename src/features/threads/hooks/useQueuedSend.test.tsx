@@ -159,6 +159,49 @@ describe("useQueuedSend", () => {
     );
   });
 
+  it("executes one submission id only once", async () => {
+    const options = makeOptions();
+    const { result } = renderHook((props) => useQueuedSend(props), {
+      initialProps: options,
+    });
+    const submission = {
+      id: "submission-1",
+      source: "keyboard-ctrl-enter" as const,
+      draftGeneration: 3,
+    };
+
+    await act(async () => {
+      await Promise.all([
+        result.current.handleSend("Steer once", [], [], "default", undefined, [], submission),
+        result.current.handleSend("Steer once", [], [], "default", undefined, [], submission),
+      ]);
+    });
+
+    expect(options.sendUserMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves identical text from distinct submissions", async () => {
+    const options = makeOptions();
+    const { result } = renderHook((props) => useQueuedSend(props), {
+      initialProps: options,
+    });
+
+    await act(async () => {
+      await result.current.handleSend("继续", [], [], "default", undefined, [], {
+        id: "submission-1",
+        source: "keyboard-enter",
+        draftGeneration: 1,
+      });
+      await result.current.handleSend("继续", [], [], "default", undefined, [], {
+        id: "submission-2",
+        source: "keyboard-enter",
+        draftGeneration: 2,
+      });
+    });
+
+    expect(options.sendUserMessage).toHaveBeenCalledTimes(2);
+  });
+
   it("queues send while processing when steer is enabled but turn id is unavailable", async () => {
     const options = makeOptions({
       isProcessing: true,
@@ -251,7 +294,14 @@ describe("useQueuedSend", () => {
       "Guide this turn",
       [],
       undefined,
-      { sendIntent: "steer" },
+      {
+        sendIntent: "steer",
+        submission: expect.objectContaining({
+          id: expect.stringMatching(/^composer-/),
+          source: "queue-steer",
+          draftGeneration: 0,
+        }),
+      },
     );
     expect(result.current.activeQueue).toHaveLength(0);
   });

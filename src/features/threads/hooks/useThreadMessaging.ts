@@ -6,6 +6,7 @@ import type {
   ComputerControlRouteDecision,
   CodexProviderKind,
   ComposerSendIntent,
+  ComposerSubmission,
   RateLimitSnapshot,
   CustomPromptOption,
   DebugEntry,
@@ -68,6 +69,10 @@ import {
   resolveSendMessageOptions,
   type SendMessageOptions,
 } from "./threadMessagingHelpers";
+import {
+  claimSubmissionId,
+  createSubmissionIdRegistry,
+} from "@utils/submissionIds";
 
 const TEXT_ATTACHMENT_EXTENSIONS = /\.(txt|md|markdown|json|jsonc|yaml|yml|toml|xml|html?|css|scss|sass|less|js|jsx|ts|tsx|mjs|cjs|rs|go|py|rb|php|java|kt|kts|swift|c|cc|cpp|cxx|h|hpp|cs|sh|bash|zsh|fish|ps1|bat|cmd|sql|csv|tsv|log|diff|patch|ini|env|gitignore|dockerfile)$/i;
 const WORKFLOW_PREFLIGHT_TIMEOUT_MS = 1_500;
@@ -448,6 +453,7 @@ export function useThreadMessaging({
 }: UseThreadMessagingOptions) {
   const { t } = useI18n();
   const interruptInFlightRef = useRef(new Set<string>());
+  const handledSubmissionIdsRef = useRef(createSubmissionIdRegistry());
   const runtimeResumeAttemptsRef = useRef(
     new Map<string, ThreadRuntimeResumeAttempt>(),
   );
@@ -897,6 +903,9 @@ export function useThreadMessaging({
           serviceTier: resolvedServiceTier,
           collaborationMode: sanitizedCollaborationMode,
           sendIntent,
+          submissionId: options?.submission?.id,
+          submissionSource: options?.submission?.source,
+          draftGeneration: options?.submission?.draftGeneration,
           threadCustomName: customThreadName,
         },
       });
@@ -1295,7 +1304,11 @@ export function useThreadMessaging({
       text: string,
       images: string[] = [],
       appMentions: AppMention[] = [],
-      options?: { sendIntent?: ComposerSendIntent; replaceMessageId?: string },
+      options?: {
+        sendIntent?: ComposerSendIntent;
+        replaceMessageId?: string;
+        submission?: ComposerSubmission;
+      },
     ): Promise<SendMessageResult> => {
       if (!activeWorkspace) {
         return { status: "blocked" };
@@ -1303,6 +1316,15 @@ export function useThreadMessaging({
       const messageText = text.trim();
       if (!messageText && images.length === 0) {
         return { status: "blocked" };
+      }
+      if (
+        options?.submission &&
+        !claimSubmissionId(
+          handledSubmissionIdsRef.current,
+          options.submission.id,
+        )
+      ) {
+        return { status: "sent" };
       }
       const promptExpansion = expandCustomPromptText(messageText, customPrompts);
       if (promptExpansion && "error" in promptExpansion) {
@@ -1395,6 +1417,7 @@ export function useThreadMessaging({
           appMentions,
           sendIntent: options?.sendIntent,
           replaceMessageId: options?.replaceMessageId,
+          submission: options?.submission,
         }, optimisticMessage, pendingTurnStart);
       } finally {
         clearPendingTurnStart(pendingTurnStart);

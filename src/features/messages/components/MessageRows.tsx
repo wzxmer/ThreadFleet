@@ -103,12 +103,20 @@ type MessageRowProps = MarkdownFileLinkProps & {
   assistantMeta?: AssistantMessageMeta | null;
   assistantProcessDisclosure?: AssistantProcessDisclosure;
   assistantProcessContent?: ReactNode;
+  repeatedErrorDisclosure?: RepeatedErrorDisclosure;
   interrupted?: { label: string } | null;
   codeBlockCopyUseModifier?: boolean;
   exportSelectionMode?: boolean;
   exportSelected?: boolean;
   onExportStart?: (messageId: string) => void;
   onExportToggle?: (messageId: string) => void;
+};
+
+export type RepeatedErrorDisclosure = {
+  count: number;
+  isExpanded: boolean;
+  label: string;
+  onToggle: () => void;
 };
 
 export type AssistantMessageMeta = {
@@ -727,6 +735,7 @@ export const MessageRow = memo(function MessageRow({
   assistantMeta = null,
   assistantProcessDisclosure,
   assistantProcessContent,
+  repeatedErrorDisclosure,
   interrupted,
   codeBlockCopyUseModifier,
   showMessageFilePath,
@@ -945,6 +954,24 @@ export const MessageRow = memo(function MessageRow({
               >
                 {messageTimestamp.dateTime}
               </time>
+            ) : null}
+            {repeatedErrorDisclosure ? (
+              <button
+                type="button"
+                className="message-repeat-toggle"
+                data-button-elevation="none"
+                onClick={repeatedErrorDisclosure.onToggle}
+                aria-expanded={repeatedErrorDisclosure.isExpanded}
+                aria-label={repeatedErrorDisclosure.label}
+                title={repeatedErrorDisclosure.label}
+              >
+                {repeatedErrorDisclosure.isExpanded ? (
+                  <ChevronDown size={13} strokeWidth={2} aria-hidden />
+                ) : (
+                  <ChevronRight size={13} strokeWidth={2} aria-hidden />
+                )}
+                <span>x{repeatedErrorDisclosure.count}</span>
+              </button>
             ) : null}
             <AgentProcessStats
               toolCount={
