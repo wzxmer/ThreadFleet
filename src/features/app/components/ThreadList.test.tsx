@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ThreadSummary } from "../../../types";
+import { COLLAPSED_THREAD_ROOT_LIMIT } from "../hooks/useThreadRows";
 import { ThreadList } from "./ThreadList";
 
 const nestedThread: ThreadSummary = {
@@ -81,8 +82,8 @@ describe("ThreadList", () => {
     );
   });
 
-  it("shows 10 roots after the first click and 10 more after each later click", () => {
-    const rows = Array.from({ length: 25 }, (_, index) => ({
+  it("shows one root batch and reveals one more batch per click", () => {
+    const rows = Array.from({ length: 15 }, (_, index) => ({
       thread: {
         id: `thread-${index}`,
         name: `Thread ${index}`,
@@ -98,20 +99,26 @@ describe("ThreadList", () => {
       />,
     );
 
-    expect(container.querySelectorAll(".thread-row")).toHaveLength(6);
+    expect(container.querySelectorAll(".thread-row")).toHaveLength(
+      COLLAPSED_THREAD_ROOT_LIMIT,
+    );
 
     let moreButton = screen.getByRole("button", { name: "更多..." });
     fireEvent.click(moreButton);
-    expect(container.querySelectorAll(".thread-row")).toHaveLength(10);
+    expect(container.querySelectorAll(".thread-row")).toHaveLength(
+      COLLAPSED_THREAD_ROOT_LIMIT * 2,
+    );
 
     moreButton = screen.getByRole("button", { name: "更多..." });
     fireEvent.click(moreButton);
-    expect(container.querySelectorAll(".thread-row")).toHaveLength(20);
+    expect(container.querySelectorAll(".thread-row")).toHaveLength(rows.length);
 
-    moreButton = screen.getByRole("button", { name: "更多..." });
-    fireEvent.click(moreButton);
-    expect(container.querySelectorAll(".thread-row")).toHaveLength(25);
-    expect(screen.getByRole("button", { name: "收起" })).toBeTruthy();
+    const collapseButton = screen.getByRole("button", { name: "收起" });
+    fireEvent.click(collapseButton);
+    expect(container.querySelectorAll(".thread-row")).toHaveLength(
+      COLLAPSED_THREAD_ROOT_LIMIT,
+    );
+    expect(screen.getByRole("button", { name: "更多..." })).toBeTruthy();
   });
 
   it("counts pinned roots toward each visible batch", () => {
@@ -123,7 +130,7 @@ describe("ThreadList", () => {
       },
       depth: 0,
     }));
-    const unpinnedRows = Array.from({ length: 18 }, (_, index) => ({
+    const unpinnedRows = Array.from({ length: 38 }, (_, index) => ({
       thread: {
         id: `unpinned-${index}`,
         name: `Unpinned ${index}`,
@@ -140,13 +147,17 @@ describe("ThreadList", () => {
       />,
     );
 
-    expect(container.querySelectorAll(".thread-row")).toHaveLength(6);
+    expect(container.querySelectorAll(".thread-row")).toHaveLength(
+      COLLAPSED_THREAD_ROOT_LIMIT,
+    );
     fireEvent.click(screen.getByRole("button", { name: "更多..." }));
-    expect(container.querySelectorAll(".thread-row")).toHaveLength(10);
+    expect(container.querySelectorAll(".thread-row")).toHaveLength(
+      COLLAPSED_THREAD_ROOT_LIMIT * 2,
+    );
   });
 
   it("resets expanded roots when an owning workspace collapses", () => {
-    const rows = Array.from({ length: 15 }, (_, index) => ({
+    const rows = Array.from({ length: 45 }, (_, index) => ({
       thread: {
         id: `thread-${index}`,
         name: `Thread ${index}`,
@@ -164,7 +175,9 @@ describe("ThreadList", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "更多..." }));
-    expect(container.querySelectorAll(".thread-row")).toHaveLength(10);
+    expect(container.querySelectorAll(".thread-row")).toHaveLength(
+      COLLAPSED_THREAD_ROOT_LIMIT * 2,
+    );
 
     rerender(
       <ThreadList
@@ -175,14 +188,29 @@ describe("ThreadList", () => {
       />,
     );
 
-    expect(container.querySelectorAll(".thread-row")).toHaveLength(6);
+    expect(container.querySelectorAll(".thread-row")).toHaveLength(
+      COLLAPSED_THREAD_ROOT_LIMIT,
+    );
   });
 
   it("loads older threads when a cursor is available", () => {
     const onLoadOlderThreads = vi.fn();
-    render(
+    const initialRows = Array.from(
+      { length: COLLAPSED_THREAD_ROOT_LIMIT },
+      (_, index) => ({
+        thread: {
+          id: `thread-${index}`,
+          name: `Thread ${index}`,
+          updatedAt: 1000 - index,
+        },
+        depth: 0,
+      }),
+    );
+    const { container, rerender } = render(
       <ThreadList
         {...baseProps}
+        unpinnedRows={initialRows}
+        totalThreadRoots={initialRows.length}
         nextCursor="cursor"
         onLoadOlderThreads={onLoadOlderThreads}
       />,
@@ -191,6 +219,31 @@ describe("ThreadList", () => {
     const loadButton = screen.getByRole("button", { name: "加载更早会话..." });
     fireEvent.click(loadButton);
     expect(onLoadOlderThreads).toHaveBeenCalledWith("ws-1");
+
+    const appendedRows = [
+      ...initialRows,
+      ...Array.from({ length: COLLAPSED_THREAD_ROOT_LIMIT }, (_, index) => ({
+        thread: {
+          id: `older-thread-${index}`,
+          name: `Older thread ${index}`,
+          updatedAt: 500 - index,
+        },
+        depth: 0,
+      })),
+    ];
+    rerender(
+      <ThreadList
+        {...baseProps}
+        unpinnedRows={appendedRows}
+        totalThreadRoots={appendedRows.length}
+        nextCursor="next-cursor"
+        onLoadOlderThreads={onLoadOlderThreads}
+      />,
+    );
+    expect(container.querySelectorAll(".thread-row")).toHaveLength(
+      COLLAPSED_THREAD_ROOT_LIMIT * 2,
+    );
+    expect(screen.getByRole("button", { name: "加载更早会话..." })).toBeTruthy();
   });
 
   it("renders nested rows with indentation and disables pinning", () => {

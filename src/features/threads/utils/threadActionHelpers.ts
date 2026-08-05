@@ -534,8 +534,31 @@ export function buildWorkspaceThreadListState({
     );
   });
 
-  const summaries = uniqueThreads
-    .slice(0, threadListTargetCount)
+  const presentThreadIds = new Set(
+    uniqueThreads.map((thread) => String(thread.id ?? "")).filter(Boolean),
+  );
+  const selectedRootIds = new Set<string>();
+  const firstPageThreads = uniqueThreads.filter((thread) => {
+    const threadId = String(thread.id ?? "");
+    let rootId = threadId;
+    const visited = new Set<string>([threadId]);
+    let parentId = threadParentById[threadId];
+    while (parentId && presentThreadIds.has(parentId) && !visited.has(parentId)) {
+      visited.add(parentId);
+      rootId = parentId;
+      parentId = threadParentById[parentId];
+    }
+    if (selectedRootIds.has(rootId)) {
+      return true;
+    }
+    if (selectedRootIds.size >= threadListTargetCount) {
+      return false;
+    }
+    selectedRootIds.add(rootId);
+    return true;
+  });
+
+  const summaries = firstPageThreads
     .map((thread) => summaryById.get(String(thread.id ?? "")) ?? null)
     .filter((entry): entry is ThreadSummary => Boolean(entry));
   const includedIds = new Set(summaries.map((thread) => thread.id));
@@ -578,6 +601,7 @@ export function buildWorkspaceThreadListState({
   });
 
   const previewUpdates = uniqueThreads
+    .filter((thread) => includedIds.has(String(thread.id ?? "")))
     .map((thread) => {
       const threadId = String(thread.id ?? "");
       const text = asString(thread.preview ?? "").trim();

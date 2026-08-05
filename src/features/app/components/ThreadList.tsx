@@ -139,9 +139,16 @@ export function ThreadList({
   const handleShowMore = () => {
     setVisibleRootLimit((currentLimit) => {
       const effectiveLimit = Math.max(currentLimit, visibleRootCount);
-      const nextLimit = effectiveLimit < 10 ? 10 : effectiveLimit + 10;
+      const nextLimit = effectiveLimit + COLLAPSED_THREAD_ROOT_LIMIT;
       return Math.min(totalThreadRoots, nextLimit);
     });
+  };
+
+  const handleLoadOlder = () => {
+    setVisibleRootLimit((currentLimit) =>
+      Math.max(currentLimit, totalThreadRoots) + COLLAPSED_THREAD_ROOT_LIMIT,
+    );
+    onLoadOlderThreads(workspaceId);
   };
 
   return (
@@ -215,7 +222,7 @@ export function ThreadList({
             className="thread-more"
             onClick={(event) => {
               event.stopPropagation();
-              onLoadOlderThreads(workspaceId);
+              handleLoadOlder();
             }}
             disabled={isPaging}
           >

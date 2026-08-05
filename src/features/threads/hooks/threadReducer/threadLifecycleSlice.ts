@@ -58,6 +58,56 @@ function dedupeThreadSummaries(threads: ThreadSummary[]) {
     .filter((thread): thread is ThreadSummary => Boolean(thread));
 }
 
+function getThreadRootId(
+  threadId: string,
+  presentThreadIds: Set<string>,
+  threadParentById: ThreadState["threadParentById"],
+) {
+  let rootId = threadId;
+  const visited = new Set<string>([threadId]);
+  let parentId = threadParentById[threadId];
+  while (parentId && presentThreadIds.has(parentId) && !visited.has(parentId)) {
+    visited.add(parentId);
+    rootId = parentId;
+    parentId = threadParentById[parentId];
+  }
+  return rootId;
+}
+
+function getPendingThreadIds(state: ThreadState, workspaceId: string) {
+  const pendingThreadIds = new Set<string>();
+  state.approvals.forEach((approval) => {
+    if (approval.workspace_id !== workspaceId) {
+      return;
+    }
+    const threadId = String(
+      approval.params?.threadId ?? approval.params?.thread_id ?? "",
+    ).trim();
+    if (threadId) {
+      pendingThreadIds.add(threadId);
+    }
+  });
+  state.userInputRequests.forEach((request) => {
+    if (request.workspace_id === workspaceId && request.params.thread_id) {
+      pendingThreadIds.add(request.params.thread_id);
+    }
+  });
+  return pendingThreadIds;
+}
+
+function omitThreadKeys<T>(record: Record<string, T>, omittedIds: Set<string>) {
+  let changed = false;
+  const next: Record<string, T> = {};
+  Object.entries(record).forEach(([threadId, value]) => {
+    if (omittedIds.has(threadId)) {
+      changed = true;
+      return;
+    }
+    next[threadId] = value;
+  });
+  return changed ? next : record;
+}
+
 export function reduceThreadLifecycle(
   state: ThreadState,
   action: ThreadAction,
@@ -681,6 +731,124 @@ export function reduceThreadLifecycle(
           [action.workspaceId]: action.cursor,
         },
       };
+    case "setThreadListFirstPageCursor":
+      return {
+        ...state,
+        threadListFirstPageCursorByWorkspace: {
+          ...state.threadListFirstPageCursorByWorkspace,
+          [action.workspaceId]: action.cursor,
+        },
+      };
+    case "compactThreadList": {
+      const threads = state.threadsByWorkspace[action.workspaceId] ?? [];
+      const presentThreadIds = new Set(threads.map((thread) => thread.id));
+      const retainedRootIds = new Set<string>();
+      for (const thread of threads) {
+        const rootId = getThreadRootId(
+          thread.id,
+          presentThreadIds,
+          state.threadParentById,
+        );
+        if (retainedRootIds.has(rootId)) {
+          continue;
+        }
+        if (retainedRootIds.size >= Math.max(0, action.rootLimit)) {
+          break;
+        }
+        retainedRootIds.add(rootId);
+      }
+
+      const retainedThreadIds = new Set<string>();
+      threads.forEach((thread) => {
+        const rootId = getThreadRootId(
+          thread.id,
+          presentThreadIds,
+          state.threadParentById,
+        );
+        if (retainedRootIds.has(rootId)) {
+          retainedThreadIds.add(thread.id);
+        }
+      });
+
+      const anchorThreadIds = getPendingThreadIds(state, action.workspaceId);
+      action.pinnedThreadIds.forEach((threadId) => anchorThreadIds.add(threadId));
+      const activeThreadId = state.activeThreadIdByWorkspace[action.workspaceId];
+      if (activeThreadId) {
+        anchorThreadIds.add(activeThreadId);
+      }
+      threads.forEach((thread) => {
+        const status = state.threadStatusById[thread.id];
+        if (
+          status?.isProcessing ||
+          status?.isReviewing ||
+          state.threadResumeLoadingById[thread.id]
+        ) {
+          anchorThreadIds.add(thread.id);
+        }
+      });
+
+      anchorThreadIds.forEach((threadId) => {
+        if (!presentThreadIds.has(threadId)) {
+          return;
+        }
+        retainedThreadIds.add(threadId);
+        const visited = new Set<string>([threadId]);
+        let parentId = state.threadParentById[threadId];
+        while (parentId && presentThreadIds.has(parentId) && !visited.has(parentId)) {
+          visited.add(parentId);
+          retainedThreadIds.add(parentId);
+          parentId = state.threadParentById[parentId];
+        }
+      });
+
+      const omittedThreadIds = new Set(
+        threads
+          .filter((thread) => !retainedThreadIds.has(thread.id))
+          .map((thread) => thread.id),
+      );
+      const nextThreadParentById: ThreadState["threadParentById"] = {};
+      Object.entries(state.threadParentById).forEach(([threadId, parentId]) => {
+        if (!omittedThreadIds.has(threadId) && !omittedThreadIds.has(parentId)) {
+          nextThreadParentById[threadId] = parentId;
+        }
+      });
+
+      return {
+        ...state,
+        threadsByWorkspace: {
+          ...state.threadsByWorkspace,
+          [action.workspaceId]: threads.filter((thread) =>
+            retainedThreadIds.has(thread.id),
+          ),
+        },
+        threadListPagingByWorkspace: {
+          ...state.threadListPagingByWorkspace,
+          [action.workspaceId]: false,
+        },
+        threadListLoadingByWorkspace: {
+          ...state.threadListLoadingByWorkspace,
+          [action.workspaceId]: false,
+        },
+        threadListCursorByWorkspace: {
+          ...state.threadListCursorByWorkspace,
+          [action.workspaceId]:
+            state.threadListFirstPageCursorByWorkspace[action.workspaceId] ?? null,
+        },
+        threadParentById: nextThreadParentById,
+        threadStatusById: omitThreadKeys(
+          state.threadStatusById,
+          omittedThreadIds,
+        ),
+        threadResumeLoadingById: omitThreadKeys(
+          state.threadResumeLoadingById,
+          omittedThreadIds,
+        ),
+        lastAgentMessageByThread: omitThreadKeys(
+          state.lastAgentMessageByThread,
+          omittedThreadIds,
+        ),
+      };
+    }
     default:
       return state;
   }

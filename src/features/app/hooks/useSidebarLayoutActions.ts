@@ -31,6 +31,7 @@ type UseSidebarLayoutActionsOptions = {
   removeWorkspace: (workspaceId: string) => void | Promise<unknown>;
   removeWorktree: (workspaceId: string) => void | Promise<unknown>;
   loadOlderThreadsForWorkspace: (workspace: WorkspaceInfo) => void | Promise<unknown>;
+  compactThreadListForWorkspace: (workspaceId: string) => void;
   listThreadsForWorkspace: (workspace: WorkspaceInfo) => void | Promise<unknown>;
 };
 
@@ -58,6 +59,7 @@ export function useSidebarLayoutActions({
   removeWorkspace,
   removeWorktree,
   loadOlderThreadsForWorkspace,
+  compactThreadListForWorkspace,
   listThreadsForWorkspace,
 }: UseSidebarLayoutActionsOptions) {
   const onOpenSettings = useCallback(() => {
@@ -106,8 +108,19 @@ export function useSidebarLayoutActions({
       void updateWorkspaceSettings(workspaceId, {
         sidebarCollapsed: collapsed,
       });
+      if (collapsed) {
+        compactThreadListForWorkspace(workspaceId);
+        workspacesById.forEach((workspace) => {
+          if (
+            workspace.parentId === workspaceId ||
+            workspace.settings.cloneSourceWorkspaceId === workspaceId
+          ) {
+            compactThreadListForWorkspace(workspace.id);
+          }
+        });
+      }
     },
-    [updateWorkspaceSettings, workspacesById],
+    [compactThreadListForWorkspace, updateWorkspaceSettings, workspacesById],
   );
 
   const onSelectThread = useCallback(

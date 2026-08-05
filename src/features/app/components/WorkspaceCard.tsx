@@ -163,7 +163,9 @@ export function WorkspaceCard({
         aria-hidden={isCollapsed}
         inert={isCollapsed ? true : undefined}
       >
-        <div className="workspace-card-content-inner">{children}</div>
+        <div className="workspace-card-content-inner">
+          {isCollapsed ? null : children}
+        </div>
       </div>
     </div>
   );

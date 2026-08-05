@@ -988,6 +988,7 @@ export function useThreads({
     listThreadsForWorkspaces,
     listThreadsForWorkspace,
     loadOlderThreadsForWorkspace,
+    compactThreadListForWorkspace,
     archiveThread,
   } = useThreadActions({
     dispatch,
@@ -1005,6 +1006,7 @@ export function useThreads({
     tokenEfficiencyMode,
     onDebug,
     getCustomName,
+    isThreadPinned,
     threadActivityRef,
     loadedThreadsRef,
     loadedThreadRuntimeKeyRef,
@@ -1650,6 +1652,7 @@ export function useThreads({
     resumeThreadById,
     resetWorkspaceThreads,
     loadOlderThreadsForWorkspace,
+    compactThreadListForWorkspace,
     loadOlderThreadHistory,
     threadHistoryPageByThread,
     sendUserMessage,

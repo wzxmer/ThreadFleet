@@ -59,8 +59,8 @@ import type {
   ThreadListVerifiedCache,
 } from "@threads/types";
 
-const THREAD_LIST_PAGE_SIZE = 100;
-const THREAD_LIST_TARGET_COUNT = THREAD_LIST_PAGE_SIZE;
+export const THREAD_LIST_PAGE_SIZE = 20;
+export const THREAD_LIST_TARGET_COUNT = 6;
 const THREAD_LIST_MAX_PAGES_OLDER = 6;
 const THREAD_LIST_MAX_PAGES_DEFAULT = 6;
 const THREAD_LIST_CURSOR_PAGE_START = "__codex_monitor_page_start__";
@@ -108,6 +108,7 @@ type UseThreadActionsOptions = {
   tokenEfficiencyMode: TokenEfficiencyMode;
   onDebug?: (entry: DebugEntry) => void;
   getCustomName: (workspaceId: string, threadId: string) => string | undefined;
+  isThreadPinned: (workspaceId: string, threadId: string) => boolean;
   threadActivityRef: MutableRefObject<Record<string, Record<string, number>>>;
   loadedThreadsRef: MutableRefObject<Record<string, boolean>>;
   loadedThreadRuntimeKeyRef: MutableRefObject<Record<string, string>>;
@@ -159,6 +160,7 @@ export function useThreadActions({
   tokenEfficiencyMode,
   onDebug,
   getCustomName,
+  isThreadPinned,
   threadActivityRef,
   loadedThreadsRef,
   loadedThreadRuntimeKeyRef,
@@ -173,6 +175,9 @@ export function useThreadActions({
   hydrateTurnExecutionSummary = async () => null,
 }: UseThreadActionsOptions) {
   const localArchivedCursorByWorkspaceRef = useRef<Record<string, string | null>>({});
+  const localArchivedFirstPageCursorByWorkspaceRef = useRef<
+    Record<string, string | null>
+  >({});
   const threadListRequestSequenceRef = useRef<Record<string, number>>({});
   const threadListLoadingOwnerRef = useRef<
     Record<string, { refresh?: number; paging?: number } | undefined>
@@ -1214,6 +1219,14 @@ export function useThreadActions({
           const nextCursor = getThreadListNextCursor(result);
           processThreadListPage(data, pageCursor);
           cursor = nextCursor;
+          const hasFilledInitialPageForEveryWorkspace = requestWorkspaceIds.every(
+            (workspaceId) =>
+              (uniqueThreadIdsByWorkspace[workspaceId]?.size ?? 0) >=
+              THREAD_LIST_TARGET_COUNT,
+          );
+          if (hasFilledInitialPageForEveryWorkspace) {
+            break;
+          }
           if (pagesFetched >= maxPages) {
             break;
           }
@@ -1289,6 +1302,9 @@ export function useThreadActions({
           archivedPaginationComplete = archivedCursor === null;
           localArchivedCursorByWorkspaceRef.current[LOCAL_CODEX_WORKSPACE_ID] =
             archivedCursor;
+          localArchivedFirstPageCursorByWorkspaceRef.current[
+            LOCAL_CODEX_WORKSPACE_ID
+          ] = archivedCursor ? THREAD_LIST_CURSOR_PAGE_START : null;
         }
         const paginationComplete =
           livePaginationComplete &&
@@ -1530,15 +1546,21 @@ export function useThreadActions({
             preserveAnchors,
             continuity,
           });
+          const firstPageCursor =
+            resumeCursorByWorkspace[workspace.id] ??
+            cursor ??
+            (workspace.id === LOCAL_CODEX_WORKSPACE_ID && archivedCursor
+              ? THREAD_LIST_CURSOR_PAGE_START
+              : null);
           dispatch({
             type: "setThreadListCursor",
             workspaceId: workspace.id,
-            cursor:
-              resumeCursorByWorkspace[workspace.id] ??
-              cursor ??
-              (workspace.id === LOCAL_CODEX_WORKSPACE_ID && archivedCursor
-                ? THREAD_LIST_CURSOR_PAGE_START
-                : null),
+            cursor: firstPageCursor,
+          });
+          dispatch({
+            type: "setThreadListFirstPageCursor",
+            workspaceId: workspace.id,
+            cursor: firstPageCursor,
           });
           threadListState.previewUpdates.forEach(({ threadId, text, timestamp }) => {
             dispatchPreviewMessage(threadId, text, timestamp);
@@ -1702,11 +1724,36 @@ export function useThreadActions({
           });
           return;
         }
+        const existingIds = new Set(existing.map((thread) => thread.id));
         const matchingThreads: Record<string, unknown>[] = [];
+        const newMatchingThreadIds = new Set<string>();
+        const trackMatchingThreads = (
+          threads: Record<string, unknown>[],
+          pageCursor: string | null,
+          setResumeCursor: (cursor: string) => void,
+        ) => {
+          threads.forEach((thread) => {
+            matchingThreads.push(thread);
+            const threadId = String(thread?.id ?? "");
+            if (
+              !threadId ||
+              existingIds.has(threadId) ||
+              newMatchingThreadIds.has(threadId)
+            ) {
+              return;
+            }
+            newMatchingThreadIds.add(threadId);
+            if (newMatchingThreadIds.size > THREAD_LIST_TARGET_COUNT) {
+              setResumeCursor(pageCursor ?? THREAD_LIST_CURSOR_PAGE_START);
+            }
+          });
+        };
         const maxPagesWithoutMatch = THREAD_LIST_MAX_PAGES_OLDER;
         let pagesFetched = 0;
         let cursor: string | null = nextCursor;
+        let liveResumeCursor: string | null = null;
         do {
+          const pageCursor = cursor;
           pagesFetched += 1;
           const response =
             (await listThreadsService(
@@ -1737,8 +1784,8 @@ export function useThreadActions({
             ? (result.data as Record<string, unknown>[])
             : [];
           const next = getThreadListNextCursor(result);
-          matchingThreads.push(
-            ...data.filter(
+          trackMatchingThreads(
+            data.filter(
               (thread) => {
                 const owningWorkspaceId = resolveWorkspaceIdForThreadPath(
                   String(thread?.cwd ?? ""),
@@ -1763,27 +1810,45 @@ export function useThreadActions({
                 return true;
               },
             ),
+            pageCursor,
+            (resumeCursor) => {
+              liveResumeCursor ??= resumeCursor;
+            },
           );
           cursor = next;
-          if (matchingThreads.length === 0 && pagesFetched >= maxPagesWithoutMatch) {
+          if (
+            newMatchingThreadIds.size === 0 &&
+            pagesFetched >= maxPagesWithoutMatch
+          ) {
             break;
           }
           if (pagesFetched >= THREAD_LIST_MAX_PAGES_OLDER) {
             break;
           }
-        } while (cursor && matchingThreads.length < THREAD_LIST_TARGET_COUNT);
+        } while (
+          cursor && newMatchingThreadIds.size < THREAD_LIST_TARGET_COUNT
+        );
         let archivedCursor =
           workspace.id === LOCAL_CODEX_WORKSPACE_ID
             ? (localArchivedCursorByWorkspaceRef.current[workspace.id] ?? null)
             : null;
-        if (workspace.id === LOCAL_CODEX_WORKSPACE_ID && archivedCursor) {
+        let archivedResumeCursor: string | null = null;
+        if (
+          workspace.id === LOCAL_CODEX_WORKSPACE_ID &&
+          !cursor &&
+          archivedCursor &&
+          newMatchingThreadIds.size < THREAD_LIST_TARGET_COUNT
+        ) {
           let archivedPagesFetched = 0;
           do {
+            const pageCursor = archivedCursor;
             archivedPagesFetched += 1;
             const response =
               (await listThreadsService(
                 requestWorkspaceId,
-                archivedCursor,
+                archivedCursor === THREAD_LIST_CURSOR_PAGE_START
+                  ? null
+                  : archivedCursor,
                 THREAD_LIST_PAGE_SIZE,
                 requestedSortKey,
                 true,
@@ -1810,8 +1875,8 @@ export function useThreadActions({
               ? (result.data as Record<string, unknown>[])
               : [];
             const next = getThreadListNextCursor(result);
-            matchingThreads.push(
-              ...data.filter((thread) => {
+            trackMatchingThreads(
+              data.filter((thread) => {
                 const threadId = String(thread?.id ?? "");
                 if (threadId && shouldHideSubagentThreadFromSidebar(thread.source)) {
                   hiddenThreadIds.add(threadId);
@@ -1819,13 +1884,21 @@ export function useThreadActions({
                 }
                 return true;
               }),
+              pageCursor,
+              (resumeCursor) => {
+                archivedResumeCursor ??= resumeCursor;
+              },
             );
             archivedCursor = next;
             if (archivedPagesFetched >= THREAD_LIST_MAX_PAGES_OLDER) {
               break;
             }
-          } while (archivedCursor && matchingThreads.length < THREAD_LIST_TARGET_COUNT);
-          localArchivedCursorByWorkspaceRef.current[workspace.id] = archivedCursor;
+          } while (
+            archivedCursor &&
+            newMatchingThreadIds.size < THREAD_LIST_TARGET_COUNT
+          );
+          localArchivedCursorByWorkspaceRef.current[workspace.id] =
+            archivedResumeCursor ?? archivedCursor;
         }
 
         if (sourceId && workspaceLookupComplete) {
@@ -1858,9 +1931,11 @@ export function useThreadActions({
           }
         }
 
-        const existingIds = new Set(existing.map((thread) => thread.id));
         const additions: ThreadSummary[] = [];
         matchingThreads.forEach((thread) => {
+          if (additions.length >= THREAD_LIST_TARGET_COUNT) {
+            return;
+          }
           const id = String(thread?.id ?? "");
           if (!id || existingIds.has(id)) {
             return;
@@ -1929,15 +2004,20 @@ export function useThreadActions({
           type: "setThreadListCursor",
           workspaceId: workspace.id,
           cursor:
+            liveResumeCursor ??
             cursor ??
-            (workspace.id === LOCAL_CODEX_WORKSPACE_ID && archivedCursor
+            (workspace.id === LOCAL_CODEX_WORKSPACE_ID &&
+            (archivedResumeCursor || archivedCursor)
               ? THREAD_LIST_CURSOR_PAGE_START
               : null),
         });
+        const residentThreadIds = new Set(
+          [...existing, ...additions].map((thread) => thread.id),
+        );
         matchingThreads.forEach((thread) => {
           const threadId = String(thread?.id ?? "");
           const preview = asString(thread?.preview ?? "").trim();
-          if (!threadId || !preview) {
+          if (!threadId || !residentThreadIds.has(threadId) || !preview) {
             return;
           }
           dispatch({
@@ -2020,6 +2100,27 @@ export function useThreadActions({
     [onDebug, threadListContinuityByWorkspace],
   );
 
+  const compactThreadListForWorkspace = useCallback(
+    (workspaceId: string) => {
+      threadListRequestSequenceRef.current[workspaceId] =
+        (threadListRequestSequenceRef.current[workspaceId] ?? 0) + 1;
+      delete threadListLoadingOwnerRef.current[workspaceId];
+      if (workspaceId === LOCAL_CODEX_WORKSPACE_ID) {
+        localArchivedCursorByWorkspaceRef.current[workspaceId] =
+          localArchivedFirstPageCursorByWorkspaceRef.current[workspaceId] ?? null;
+      }
+      dispatch({
+        type: "compactThreadList",
+        workspaceId,
+        rootLimit: THREAD_LIST_TARGET_COUNT,
+        pinnedThreadIds: (threadsByWorkspace[workspaceId] ?? [])
+          .filter((thread) => isThreadPinned(workspaceId, thread.id))
+          .map((thread) => thread.id),
+      });
+    },
+    [dispatch, isThreadPinned, threadsByWorkspace],
+  );
+
   return {
     startThreadForWorkspace,
     forkThreadForWorkspace,
@@ -2034,6 +2135,7 @@ export function useThreadActions({
     listThreadsForWorkspaces,
     listThreadsForWorkspace,
     loadOlderThreadsForWorkspace,
+    compactThreadListForWorkspace,
     archiveThread,
   };
 }

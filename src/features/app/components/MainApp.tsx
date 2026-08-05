@@ -798,6 +798,7 @@ export default function MainApp() {
     listThreadsForWorkspace,
     resumeThreadById,
     loadOlderThreadsForWorkspace,
+    compactThreadListForWorkspace,
     resetWorkspaceThreads,
     refreshThread,
     sendUserMessage,
@@ -2353,6 +2354,7 @@ export default function MainApp() {
       removeWorkspace,
       removeWorktree,
       loadOlderThreadsForWorkspace,
+      compactThreadListForWorkspace,
       listThreadsForWorkspace,
     },
     workspaceCycling: {

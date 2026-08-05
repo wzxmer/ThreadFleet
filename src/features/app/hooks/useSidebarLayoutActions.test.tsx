@@ -39,6 +39,7 @@ describe("useSidebarLayoutActions", () => {
       removeWorkspace: vi.fn(async () => {}),
       removeWorktree: vi.fn(async () => {}),
       loadOlderThreadsForWorkspace: vi.fn(async () => {}),
+      compactThreadListForWorkspace: vi.fn(),
       listThreadsForWorkspace: vi.fn(async () => {}),
     } as const;
 
@@ -98,6 +99,7 @@ describe("useSidebarLayoutActions", () => {
         removeWorkspace: vi.fn(async () => {}),
         removeWorktree: vi.fn(async () => {}),
         loadOlderThreadsForWorkspace: vi.fn(async () => {}),
+        compactThreadListForWorkspace: vi.fn(),
         listThreadsForWorkspace: vi.fn(async () => {}),
       }),
     );
@@ -145,6 +147,7 @@ describe("useSidebarLayoutActions", () => {
         removeWorkspace: vi.fn(async () => {}),
         removeWorktree: vi.fn(async () => {}),
         loadOlderThreadsForWorkspace: vi.fn(async () => {}),
+        compactThreadListForWorkspace: vi.fn(),
         listThreadsForWorkspace: vi.fn(async () => {}),
       }),
     );
@@ -194,6 +197,7 @@ describe("useSidebarLayoutActions", () => {
         removeWorkspace: vi.fn(async () => {}),
         removeWorktree: vi.fn(async () => {}),
         loadOlderThreadsForWorkspace: vi.fn(async () => {}),
+        compactThreadListForWorkspace: vi.fn(),
         listThreadsForWorkspace: vi.fn(async () => {}),
       }),
     );
@@ -244,6 +248,7 @@ describe("useSidebarLayoutActions", () => {
         removeWorkspace: vi.fn(async () => {}),
         removeWorktree: vi.fn(async () => {}),
         loadOlderThreadsForWorkspace: vi.fn(async () => {}),
+        compactThreadListForWorkspace: vi.fn(),
         listThreadsForWorkspace: vi.fn(async () => {}),
       }),
     );
@@ -289,6 +294,7 @@ describe("useSidebarLayoutActions", () => {
         removeWorkspace: vi.fn(async () => {}),
         removeWorktree: vi.fn(async () => {}),
         loadOlderThreadsForWorkspace: vi.fn(async () => {}),
+        compactThreadListForWorkspace: vi.fn(),
         listThreadsForWorkspace: vi.fn(async () => {}),
       }),
     );
@@ -299,5 +305,60 @@ describe("useSidebarLayoutActions", () => {
 
     expect(connectWorkspace).toHaveBeenCalledWith(workspace);
     expect(setActiveTab).toHaveBeenCalledWith("codex");
+  });
+
+  it("compacts a workspace and its nested lists when the workspace collapses", () => {
+    const childWorkspace: WorkspaceInfo = {
+      ...workspace,
+      id: "ws-child",
+      name: "Child",
+      parentId: workspace.id,
+    };
+    const updateWorkspaceSettings = vi.fn(async () => workspace);
+    const compactThreadListForWorkspace = vi.fn();
+    const { result } = renderHook(() =>
+      useSidebarLayoutActions({
+        openSettings: vi.fn(),
+        resetPullRequestSelection: vi.fn(),
+        clearDraftState: vi.fn(),
+        clearDraftStateIfDifferentWorkspace: vi.fn(),
+        selectHome: vi.fn(),
+        exitDiffView: vi.fn(),
+        selectWorkspace: vi.fn(),
+        setActiveThreadId: vi.fn(),
+        activeWorkspaceId: null,
+        activeThreadId: null,
+        connectWorkspace: vi.fn(async () => {}),
+        isCompact: false,
+        setActiveTab: vi.fn(),
+        workspacesById: new Map([
+          [workspace.id, workspace],
+          [childWorkspace.id, childWorkspace],
+        ]),
+        updateWorkspaceSettings,
+        removeThread: vi.fn(),
+        clearDraftForThread: vi.fn(),
+        removeImagesForThread: vi.fn(),
+        refreshThread: vi.fn(async () => {}),
+        handleRenameThread: vi.fn(),
+        removeWorkspace: vi.fn(async () => {}),
+        removeWorktree: vi.fn(async () => {}),
+        loadOlderThreadsForWorkspace: vi.fn(async () => {}),
+        compactThreadListForWorkspace,
+        listThreadsForWorkspace: vi.fn(async () => {}),
+      }),
+    );
+
+    act(() => {
+      result.current.onToggleWorkspaceCollapse(workspace.id, true);
+    });
+
+    expect(updateWorkspaceSettings).toHaveBeenCalledWith(workspace.id, {
+      sidebarCollapsed: true,
+    });
+    expect(compactThreadListForWorkspace.mock.calls).toEqual([
+      [workspace.id],
+      [childWorkspace.id],
+    ]);
   });
 });

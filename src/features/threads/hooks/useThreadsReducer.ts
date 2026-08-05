@@ -39,6 +39,7 @@ export type ThreadState = {
   threadListLoadingByWorkspace: Record<string, boolean>;
   threadListPagingByWorkspace: Record<string, boolean>;
   threadListCursorByWorkspace: Record<string, string | null>;
+  threadListFirstPageCursorByWorkspace: Record<string, string | null>;
   threadListContinuityByWorkspace: Record<
     string,
     ThreadListContinuityState | undefined
@@ -190,6 +191,17 @@ export type ThreadAction =
       workspaceId: string;
       cursor: string | null;
     }
+  | {
+      type: "setThreadListFirstPageCursor";
+      workspaceId: string;
+      cursor: string | null;
+    }
+  | {
+      type: "compactThreadList";
+      workspaceId: string;
+      rootLimit: number;
+      pinnedThreadIds: string[];
+    }
   | { type: "addApproval"; approval: ApprovalRequest }
   | { type: "removeApproval"; requestId: number | string; workspaceId: string }
   | { type: "addUserInputRequest"; request: RequestUserInputRequest }
@@ -266,6 +278,7 @@ export const initialState: ThreadState = {
   threadListLoadingByWorkspace: {},
   threadListPagingByWorkspace: {},
   threadListCursorByWorkspace: {},
+  threadListFirstPageCursorByWorkspace: {},
   threadListContinuityByWorkspace: {},
   threadSortKeyByWorkspace: {},
   activeTurnIdByThread: {},

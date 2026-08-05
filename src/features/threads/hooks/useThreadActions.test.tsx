@@ -33,7 +33,11 @@ import {
 } from "@utils/threadItems";
 import { saveThreadActivity } from "@threads/utils/threadStorage";
 import { LOCAL_CODEX_WORKSPACE_ID } from "@/features/workspaces/domain/localCodexWorkspace";
-import { useThreadActions } from "./useThreadActions";
+import {
+  THREAD_LIST_PAGE_SIZE,
+  THREAD_LIST_TARGET_COUNT,
+  useThreadActions,
+} from "./useThreadActions";
 
 vi.mock("@services/tauri", () => ({
   startThread: vi.fn(),
@@ -158,6 +162,7 @@ describe("useThreadActions", () => {
       threadSortKey: "updated_at",
       tokenEfficiencyMode: "quality",
       getCustomName: () => undefined,
+      isThreadPinned: () => false,
       threadActivityRef,
       loadedThreadsRef,
       loadedThreadRuntimeKeyRef,
@@ -1772,7 +1777,7 @@ describe("useThreadActions", () => {
     expect(listThreads).toHaveBeenCalledWith(
       "ws-1",
       null,
-      100,
+      THREAD_LIST_PAGE_SIZE,
       "updated_at",
     );
     expect(dispatch).toHaveBeenCalledWith({
@@ -1796,6 +1801,11 @@ describe("useThreadActions", () => {
     });
     expect(dispatch).toHaveBeenCalledWith({
       type: "setThreadListCursor",
+      workspaceId: "ws-1",
+      cursor: "cursor-1",
+    });
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "setThreadListFirstPageCursor",
       workspaceId: "ws-1",
       cursor: "cursor-1",
     });
@@ -2661,10 +2671,12 @@ describe("useThreadActions", () => {
     if (!setThreadsAction || setThreadsAction.type !== "setThreads") {
       return;
     }
-    expect(setThreadsAction.threads).toHaveLength(21);
-    expect(setThreadsAction.threads[20]?.id).toBe("thread-21");
-    expect(setThreadsAction.threads[20]?.name).toBe("Thread 21 fresh");
-    expect(setThreadsAction.threads[20]?.updatedAt).toBe(4980);
+    expect(setThreadsAction.threads).toHaveLength(THREAD_LIST_TARGET_COUNT + 1);
+    expect(setThreadsAction.threads[THREAD_LIST_TARGET_COUNT]?.id).toBe("thread-21");
+    expect(setThreadsAction.threads[THREAD_LIST_TARGET_COUNT]?.name).toBe(
+      "Thread 21 fresh",
+    );
+    expect(setThreadsAction.threads[THREAD_LIST_TARGET_COUNT]?.updatedAt).toBe(4980);
   });
 
   it("keeps processing activity fresh while rebuilding thread summaries", async () => {
@@ -2759,7 +2771,12 @@ describe("useThreadActions", () => {
     });
 
     expect(listThreads).toHaveBeenCalledTimes(1);
-    expect(listThreads).toHaveBeenCalledWith("ws-1", null, 100, "updated_at");
+    expect(listThreads).toHaveBeenCalledWith(
+      "ws-1",
+      null,
+      THREAD_LIST_PAGE_SIZE,
+      "updated_at",
+    );
     expect(dispatch).toHaveBeenCalledWith({
       type: "setThreads",
       workspaceId: "ws-1",
@@ -2806,7 +2823,12 @@ describe("useThreadActions", () => {
     });
 
     expect(listWorkspaces).not.toHaveBeenCalled();
-    expect(listThreads).toHaveBeenCalledWith("ws-1", null, 100, "updated_at");
+    expect(listThreads).toHaveBeenCalledWith(
+      "ws-1",
+      null,
+      THREAD_LIST_PAGE_SIZE,
+      "updated_at",
+    );
   });
 
   it("records the refresh reason in thread list debug entries", async () => {
@@ -3135,14 +3157,14 @@ describe("useThreadActions", () => {
       1,
       LOCAL_CODEX_WORKSPACE_ID,
       null,
-      100,
+      THREAD_LIST_PAGE_SIZE,
       "updated_at",
     );
     expect(listThreads).toHaveBeenNthCalledWith(
       2,
       LOCAL_CODEX_WORKSPACE_ID,
       null,
-      100,
+      THREAD_LIST_PAGE_SIZE,
       "updated_at",
       true,
     );
@@ -3280,12 +3302,18 @@ describe("useThreadActions", () => {
     });
 
     expect(listThreads).toHaveBeenCalledTimes(2);
-    expect(listThreads).toHaveBeenNthCalledWith(1, "ws-1", null, 100, "updated_at");
+    expect(listThreads).toHaveBeenNthCalledWith(
+      1,
+      "ws-1",
+      null,
+      THREAD_LIST_PAGE_SIZE,
+      "updated_at",
+    );
     expect(listThreads).toHaveBeenNthCalledWith(
       2,
       "ws-1",
       "cursor-1",
-      100,
+      THREAD_LIST_PAGE_SIZE,
       "updated_at",
     );
   });
@@ -3334,7 +3362,7 @@ describe("useThreadActions", () => {
       2,
       "ws-1",
       "cursor-legacy-1",
-      100,
+      THREAD_LIST_PAGE_SIZE,
       "updated_at",
     );
   });
@@ -3379,7 +3407,12 @@ describe("useThreadActions", () => {
     expect(dispatch).toHaveBeenCalledWith({
       type: "setThreadListCursor",
       workspaceId: "ws-1",
-      cursor: "cursor-1",
+      cursor: "__codex_monitor_page_start__",
+    });
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "setThreadListFirstPageCursor",
+      workspaceId: "ws-1",
+      cursor: "__codex_monitor_page_start__",
     });
   });
 
@@ -3582,7 +3615,7 @@ describe("useThreadActions", () => {
     expect(listThreads).toHaveBeenCalledWith(
       "ws-1",
       null,
-      100,
+      THREAD_LIST_PAGE_SIZE,
       "updated_at",
     );
     expect(dispatch).toHaveBeenCalledWith({
@@ -3810,7 +3843,7 @@ describe("useThreadActions", () => {
     expect(listThreads).toHaveBeenCalledWith(
       "ws-1",
       null,
-      100,
+      THREAD_LIST_PAGE_SIZE,
       "created_at",
     );
   });
@@ -4076,7 +4109,7 @@ describe("useThreadActions", () => {
     expect(listThreads).toHaveBeenCalledWith(
       "ws-1",
       null,
-      100,
+      THREAD_LIST_PAGE_SIZE,
       "updated_at",
     );
   });
@@ -4118,7 +4151,7 @@ describe("useThreadActions", () => {
     expect(listThreads).toHaveBeenCalledWith(
       "ws-1",
       "cursor-1",
-      100,
+      THREAD_LIST_PAGE_SIZE,
       "updated_at",
     );
     expect(dispatch).toHaveBeenCalledWith({
@@ -4381,6 +4414,77 @@ describe("useThreadActions", () => {
         label: "thread/archive error",
         payload: "nope",
       }),
+    );
+  });
+
+  it("compacts a workspace list with its pinned thread anchors", () => {
+    const threads = Array.from({ length: 25 }, (_, index) => ({
+      id: `thread-${index + 1}`,
+      name: `Thread ${index + 1}`,
+      updatedAt: 1_000 - index,
+    }));
+    const { result, dispatch } = renderActions({
+      threadsByWorkspace: { "ws-1": threads },
+      isThreadPinned: (workspaceId, threadId) =>
+        workspaceId === "ws-1" && threadId === "thread-25",
+    });
+
+    act(() => {
+      result.current.compactThreadListForWorkspace("ws-1");
+    });
+
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "compactThreadList",
+      workspaceId: "ws-1",
+      rootLimit: THREAD_LIST_TARGET_COUNT,
+      pinnedThreadIds: ["thread-25"],
+    });
+  });
+
+  it("rewinds local archived paging to the archive page start after compaction", async () => {
+    let archivedCalls = 0;
+    vi.mocked(listThreads).mockImplementation(
+      async (_workspaceId, _cursor, _pageSize, _sortKey, archived) => {
+        if (!archived) {
+          return { result: { data: [], nextCursor: null } };
+        }
+        archivedCalls += 1;
+        return {
+          result: {
+            data: [],
+            nextCursor:
+              archivedCalls <= 6 ? `archived-${archivedCalls}` : null,
+          },
+        };
+      },
+    );
+
+    const { args, result, rerender } = renderActions({
+      threadsByWorkspace: { [LOCAL_CODEX_WORKSPACE_ID]: [] },
+    });
+
+    await act(async () => {
+      await result.current.listThreadsForWorkspace(localCodexWorkspace);
+    });
+    expect(archivedCalls).toBe(6);
+
+    act(() => {
+      result.current.compactThreadListForWorkspace(LOCAL_CODEX_WORKSPACE_ID);
+    });
+    args.threadListCursorByWorkspace[LOCAL_CODEX_WORKSPACE_ID] =
+      "__codex_monitor_page_start__";
+    rerender();
+
+    await act(async () => {
+      await result.current.loadOlderThreadsForWorkspace(localCodexWorkspace);
+    });
+
+    expect(listThreads).toHaveBeenLastCalledWith(
+      LOCAL_CODEX_WORKSPACE_ID,
+      null,
+      THREAD_LIST_PAGE_SIZE,
+      "updated_at",
+      true,
     );
   });
 

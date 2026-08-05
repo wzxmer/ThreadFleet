@@ -105,7 +105,9 @@ export function WorktreeCard({
         aria-hidden={worktreeCollapsed}
         inert={worktreeCollapsed ? true : undefined}
       >
-        <div className="worktree-card-content-inner">{children}</div>
+        <div className="worktree-card-content-inner">
+          {worktreeCollapsed ? null : children}
+        </div>
       </div>
     </div>
   );

@@ -1210,6 +1210,94 @@ describe("threadReducer", () => {
     ]);
   });
 
+  it("compacts expanded thread pages while retaining operational anchors", () => {
+    const roots = Array.from({ length: 30 }, (_, index) => ({
+      id: `root-${index + 1}`,
+      name: `Root ${index + 1}`,
+      updatedAt: 1_000 - index,
+    }));
+    const activeChild = {
+      id: "active-child",
+      name: "Active child",
+      updatedAt: 10,
+      isSubagent: true,
+    };
+    const base: ThreadState = {
+      ...initialState,
+      threadsByWorkspace: { "ws-1": [...roots, activeChild] },
+      activeThreadIdByWorkspace: { "ws-1": activeChild.id },
+      threadParentById: { [activeChild.id]: "root-30" },
+      threadStatusById: {
+        "root-27": {
+          isProcessing: true,
+          hasUnread: false,
+          isReviewing: false,
+          processingStartedAt: 900,
+          lastDurationMs: null,
+        },
+      },
+      approvals: [
+        {
+          workspace_id: "ws-1",
+          request_id: 1,
+          method: "item/commandExecution/requestApproval",
+          params: { threadId: "root-29" },
+        },
+      ],
+      userInputRequests: [
+        {
+          workspace_id: "ws-1",
+          request_id: 2,
+          params: {
+            thread_id: "root-28",
+            turn_id: "turn-1",
+            item_id: "item-1",
+            questions: [],
+          },
+        },
+      ],
+      threadListPagingByWorkspace: { "ws-1": true },
+      threadListLoadingByWorkspace: { "ws-1": true },
+      threadListCursorByWorkspace: { "ws-1": "cursor-later" },
+      threadListFirstPageCursorByWorkspace: { "ws-1": "cursor-first" },
+      lastAgentMessageByThread: {
+        "root-1": { text: "Retained preview", timestamp: 1_000 },
+        "root-21": { text: "Released preview", timestamp: 980 },
+      },
+    };
+
+    const next = threadReducer(base, {
+      type: "compactThreadList",
+      workspaceId: "ws-1",
+      rootLimit: 20,
+      pinnedThreadIds: ["root-26"],
+    });
+    const retainedIds = new Set(
+      next.threadsByWorkspace["ws-1"]?.map((thread) => thread.id),
+    );
+
+    expect(retainedIds.size).toBe(26);
+    expect(retainedIds).toEqual(
+      new Set([
+        ...roots.slice(0, 20).map((thread) => thread.id),
+        "root-26",
+        "root-27",
+        "root-28",
+        "root-29",
+        "root-30",
+        "active-child",
+      ]),
+    );
+    expect(next.threadListCursorByWorkspace["ws-1"]).toBe("cursor-first");
+    expect(next.threadListPagingByWorkspace["ws-1"]).toBe(false);
+    expect(next.threadListLoadingByWorkspace["ws-1"]).toBe(false);
+    expect(next.lastAgentMessageByThread["root-1"]?.text).toBe(
+      "Retained preview",
+    );
+    expect(next.lastAgentMessageByThread["root-21"]).toBeUndefined();
+    expect(next.threadParentById[activeChild.id]).toBe("root-30");
+  });
+
   it("preserves a resolved title when a newer list snapshot only has an Agent fallback", () => {
     const next = threadReducer(
       {
