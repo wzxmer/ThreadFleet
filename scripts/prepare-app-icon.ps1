@@ -1,6 +1,7 @@
 param(
     [string]$Source = (Join-Path $PSScriptRoot "..\branding\threadfleet-icon.png"),
     [string]$AppIconOutput = (Join-Path $PSScriptRoot "..\branding\threadfleet-icon-rounded.png"),
+    [string]$WindowsTrayIconOutput = (Join-Path $PSScriptRoot "..\src-tauri\icons\tray-icon.png"),
     [string]$TrayIconOutput = (Join-Path $PSScriptRoot "..\src-tauri\icons\tray-icon-template.png")
 )
 
@@ -39,6 +40,28 @@ try {
         $appGraphics.SetClip($appPath)
         $appGraphics.DrawImage($sourceBitmap, [System.Drawing.Rectangle]::new(0, 0, $appSize, $appSize))
         $appBitmap.Save($AppIconOutput, [System.Drawing.Imaging.ImageFormat]::Png)
+
+        $windowsTraySize = 32
+        $windowsTrayBitmap = [System.Drawing.Bitmap]::new(
+            $windowsTraySize,
+            $windowsTraySize,
+            [System.Drawing.Imaging.PixelFormat]::Format32bppArgb
+        )
+        $windowsTrayGraphics = [System.Drawing.Graphics]::FromImage($windowsTrayBitmap)
+        try {
+            $windowsTrayGraphics.Clear([System.Drawing.Color]::Transparent)
+            $windowsTrayGraphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+            $windowsTrayGraphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+            $windowsTrayGraphics.DrawImage(
+                $appBitmap,
+                [System.Drawing.Rectangle]::new(0, 0, $windowsTraySize, $windowsTraySize)
+            )
+            $windowsTrayBitmap.Save($WindowsTrayIconOutput, [System.Drawing.Imaging.ImageFormat]::Png)
+        }
+        finally {
+            $windowsTrayGraphics.Dispose()
+            $windowsTrayBitmap.Dispose()
+        }
     }
     finally {
         $appPath.Dispose()

@@ -97,6 +97,32 @@ describe("useUpdaterController", () => {
     });
   });
 
+  it("shows the same notification when settings invoke the exposed check action", async () => {
+    const { result } = renderHook(() =>
+      useUpdaterController({
+        notificationSoundsEnabled: false,
+        systemNotificationsEnabled: true,
+        subagentSystemNotificationsEnabled: true,
+        updateNotificationTitle: "Update",
+        upToDateNotificationBody: "Already on the latest version.",
+        updateAvailableNotificationBody: "A new version is available.",
+        onDebug: vi.fn(),
+        successSoundUrl: "success.mp3",
+        errorSoundUrl: "error.mp3",
+      }),
+    );
+
+    await act(async () => {
+      await result.current.checkForUpdates();
+    });
+
+    expect(mocks.sendTransientNotification).toHaveBeenCalledWith(
+      "Update",
+      "Already on the latest version.",
+      3000,
+    );
+  });
+
   it("shows a system notification when an update is found in the background", async () => {
     mocks.updaterState = { stage: "available", version: "1.2.3" };
 

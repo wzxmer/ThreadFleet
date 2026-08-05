@@ -63,6 +63,33 @@ export function useUpdaterController({
   const nextTestSoundIsError = useRef(false);
   const handledAvailableVersionRef = useRef<string | null>(null);
 
+  const checkForUpdatesWithNotice = useCallback(async () => {
+    const result = await checkForUpdates();
+    if (result?.stage !== "upToDate" || !systemNotificationsEnabled) {
+      return result;
+    }
+    void sendTransientNotification(
+      updateNotificationTitle,
+      upToDateNotificationBody,
+      3000,
+    ).catch((error) => {
+      onDebug({
+        id: `${Date.now()}-client-updater-current-notification-error`,
+        timestamp: Date.now(),
+        source: "error",
+        label: "updater/current-notification-error",
+        payload: error instanceof Error ? error.message : String(error),
+      });
+    });
+    return result;
+  }, [
+    checkForUpdates,
+    onDebug,
+    systemNotificationsEnabled,
+    updateNotificationTitle,
+    upToDateNotificationBody,
+  ]);
+
   const subscribeUpdaterCheckEvent = useCallback(
     (handler: () => void) =>
       subscribeUpdaterCheck(handler, {
@@ -82,24 +109,7 @@ export function useUpdaterController({
   useTauriEvent(
     subscribeUpdaterCheckEvent,
     () => {
-      void checkForUpdates().then((result) => {
-        if (result?.stage !== "upToDate" || !systemNotificationsEnabled) {
-          return;
-        }
-        void sendTransientNotification(
-          updateNotificationTitle,
-          upToDateNotificationBody,
-          3000,
-        ).catch((error) => {
-          onDebug({
-            id: `${Date.now()}-client-updater-current-notification-error`,
-            timestamp: Date.now(),
-            source: "error",
-            label: "updater/current-notification-error",
-            payload: error instanceof Error ? error.message : String(error),
-          });
-        });
-      });
+      void checkForUpdatesWithNotice();
     },
     { enabled },
   );
@@ -178,7 +188,7 @@ export function useUpdaterController({
   return {
     updaterState,
     startUpdate,
-    checkForUpdates,
+    checkForUpdates: checkForUpdatesWithNotice,
     dismissUpdate: dismiss,
     postUpdateNotice,
     dismissPostUpdateNotice,
