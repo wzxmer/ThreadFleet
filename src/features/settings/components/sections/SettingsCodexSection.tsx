@@ -31,6 +31,8 @@ import {
   resolveCodexProviderBaseUrl,
 } from "@/utils/providerProfiles";
 import type { ProviderSessionDiagnostics } from "@settings/utils/providerSessionDiagnostics";
+import type { SettingsWindowsUiUpdaterControls } from "../SettingsView";
+import { WindowsUiUpdatePrompt } from "@/features/update/components/WindowsUiUpdatePrompt";
 import { CodexSessionSharingStatus } from "./CodexSessionSharingStatus";
 
 type SettingsCodexSectionProps = {
@@ -83,6 +85,7 @@ type SettingsCodexSectionProps = {
     error: string | null;
     workspaceName: string | null;
   };
+  windowsUiUpdater?: SettingsWindowsUiUpdaterControls;
   globalAgentsMeta: string;
   globalAgentsError: string | null;
   globalAgentsContent: string;
@@ -121,6 +124,13 @@ type SettingsCodexSectionProps = {
 const DEFAULT_REASONING_EFFORT = "medium";
 const DEFAULT_CODEX_KEY_ENV_VAR = "OPENAI_API_KEY";
 const DEFAULT_CODEX_BASE_URL_ENV_VAR = "OPENAI_BASE_URL";
+const DISABLED_WINDOWS_UI_UPDATER: SettingsWindowsUiUpdaterControls = {
+  enabled: false,
+  state: { stage: "idle" },
+  checkForUpdates: () => undefined,
+  startInstall: () => undefined,
+  dismiss: () => undefined,
+};
 const normalizeEffortValue = (value: unknown): string | null => {
   if (typeof value !== "string") {
     return null;
@@ -271,6 +281,7 @@ export function SettingsCodexSection({
   codexSyncDiagnosticsState,
   mcpStatusState,
   computerControlStatusState,
+  windowsUiUpdater = DISABLED_WINDOWS_UI_UPDATER,
   globalAgentsMeta,
   globalAgentsError,
   globalAgentsContent,
@@ -406,6 +417,7 @@ export function SettingsCodexSection({
   >(null);
   const [providerSettingError, setProviderSettingError] = useState<string | null>(null);
   const [editingKeyProfileId, setEditingKeyProfileId] = useState<string | null>(null);
+  const [windowsUiUpdateConfirmOpen, setWindowsUiUpdateConfirmOpen] = useState(false);
   const keyProfiles = appSettings.codexKeyProfiles ?? [];
   const selectedExecutionProfileId =
     profileIdFromSelection(appSettings.executionCredentialSelection) ??
@@ -1886,6 +1898,113 @@ export function SettingsCodexSection({
               </div>
             </>
           )}
+          <div className="settings-windows-ui-update">
+            <SettingsToggleRow
+              className="settings-computer-control-toggle"
+              title={t("settings.codex.windowsUiAutoCheck")}
+              subtitle={t("settings.codex.windowsUiAutoCheckHelp")}
+            >
+              <SettingsToggleSwitch
+                pressed={appSettings.automaticWindowsUiUpdateChecksEnabled}
+                aria-label={t("settings.codex.windowsUiAutoCheck")}
+                onClick={() =>
+                  void onUpdateAppSettings({
+                    ...appSettings,
+                    automaticWindowsUiUpdateChecksEnabled:
+                      !appSettings.automaticWindowsUiUpdateChecksEnabled,
+                  })
+                }
+              />
+            </SettingsToggleRow>
+            <div className="settings-windows-ui-update-row">
+              <div className="settings-windows-ui-update-summary">
+                <div className="settings-field-label">
+                  {t("settings.codex.windowsUiUpdateTitle")}
+                </div>
+                <div
+                  className={`settings-help${
+                    windowsUiUpdater.state.stage === "error"
+                      ? " settings-help-error"
+                      : ""
+                  }`}
+                >
+                  {windowsUiUpdater.state.stage === "idle"
+                    ? appSettings.backendMode === "remote"
+                      ? t("settings.codex.windowsUiUpdateRemoteUnsupported")
+                      : t("settings.codex.windowsUiUpdateIdle")
+                    : windowsUiUpdater.state.stage === "checking"
+                      ? t("settings.codex.windowsUiUpdateChecking")
+                      : windowsUiUpdater.state.stage === "unsupported"
+                        ? windowsUiUpdater.state.check?.reasonCode === "remoteExecutionHost"
+                          ? t("settings.codex.windowsUiUpdateRemoteUnsupported")
+                          : t("settings.codex.windowsUiUpdatePlatformUnsupported")
+                        : windowsUiUpdater.state.stage === "unmanaged"
+                          ? t("settings.codex.windowsUiUpdateUnmanaged")
+                          : windowsUiUpdater.state.stage === "upToDate"
+                            ? `${t("settings.codex.windowsUiUpdateCurrent")} ${
+                                windowsUiUpdater.state.check?.currentVersion ?? "-"
+                              } · ${t("settings.codex.windowsUiUpdateLatest")}`
+                            : windowsUiUpdater.state.stage === "available"
+                              ? windowsUiUpdater.state.check?.installed
+                                ? `${t("settings.codex.windowsUiUpdateCurrent")} ${
+                                    windowsUiUpdater.state.check.currentVersion ?? "-"
+                                  } · ${t("settings.codex.windowsUiUpdateAvailable")} ${
+                                    windowsUiUpdater.state.check.release?.version ?? "-"
+                                  }`
+                                : `${t("settings.codex.windowsUiUpdateNotInstalled")} · ${
+                                    t("settings.codex.windowsUiUpdateAvailable")
+                                  } ${windowsUiUpdater.state.check?.release?.version ?? "-"}`
+                              : windowsUiUpdater.state.stage === "downloading"
+                                ? `${t("settings.codex.windowsUiUpdateDownloading")} ${
+                                    windowsUiUpdater.state.progress?.totalBytes
+                                      ? `${Math.round(
+                                          ((windowsUiUpdater.state.progress.downloadedBytes ?? 0) /
+                                            windowsUiUpdater.state.progress.totalBytes) *
+                                            100,
+                                        )}%`
+                                      : ""
+                                  }`
+                                : windowsUiUpdater.state.stage === "installing"
+                                  ? t("settings.codex.windowsUiUpdateVerifying")
+                                  : windowsUiUpdater.state.stage === "restartRequired"
+                                    ? `${t("settings.codex.windowsUiUpdateInstalled")} v${
+                                        windowsUiUpdater.state.version ?? "-"
+                                      } · ${t("settings.codex.windowsUiUpdateRestartNotice")}`
+                                    : `${t("settings.codex.windowsUiUpdateFailed")}: ${
+                                        windowsUiUpdater.state.error ?? t("common.unknown")
+                                      }`}
+                </div>
+              </div>
+              <div className="settings-windows-ui-update-actions">
+                {windowsUiUpdater.state.stage === "available" ? (
+                  <button
+                    type="button"
+                    className="primary settings-button-compact"
+                    disabled={!windowsUiUpdater.enabled}
+                    onClick={() => setWindowsUiUpdateConfirmOpen(true)}
+                  >
+                    {t("settings.codex.windowsUiUpdateInstall")}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="ghost settings-button-compact"
+                    disabled={
+                      !windowsUiUpdater.enabled ||
+                      windowsUiUpdater.state.stage === "checking" ||
+                      windowsUiUpdater.state.stage === "downloading" ||
+                      windowsUiUpdater.state.stage === "installing"
+                    }
+                    onClick={() => void windowsUiUpdater.checkForUpdates()}
+                  >
+                    {windowsUiUpdater.state.stage === "checking"
+                      ? t("settings.codex.windowsUiUpdateChecking")
+                      : t("settings.codex.windowsUiUpdateCheck")}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
         <div className="settings-field-actions">
           <button
@@ -1929,6 +2048,18 @@ args = ["server.mjs"]
 # env = { API_KEY = "$MY_API_KEY" }`}</pre>
         </details>
       </div>
+
+      <WindowsUiUpdatePrompt
+        open={windowsUiUpdateConfirmOpen}
+        version={windowsUiUpdater.state.check?.release?.version ?? null}
+        assetSize={windowsUiUpdater.state.check?.release?.assetSize ?? null}
+        assetSha256={windowsUiUpdater.state.check?.release?.assetSha256 ?? null}
+        onCancel={() => setWindowsUiUpdateConfirmOpen(false)}
+        onConfirm={() => {
+          setWindowsUiUpdateConfirmOpen(false);
+          void windowsUiUpdater.startInstall();
+        }}
+      />
 
       <FileEditorCard
         title="Global config.toml"

@@ -109,6 +109,7 @@ type UseMainAppModalsArgs = {
     queueSaveSettings: (next: AppSettings) => Promise<unknown>;
     handleToggleAutomaticAppUpdateChecks: () => void;
     updater: NonNullable<SettingsViewProps["updater"]>;
+    windowsUiUpdater: NonNullable<SettingsViewProps["windowsUiUpdater"]>;
     doctor: (
       codexBin: string | null,
       codexArgs: string | null,
@@ -188,6 +189,7 @@ function buildSettingsViewProps({
     onToggleAutomaticAppUpdateChecks:
       settings.handleToggleAutomaticAppUpdateChecks,
     updater: settings.updater,
+    windowsUiUpdater: settings.windowsUiUpdater,
     onRunDoctor: settings.doctor,
     onRunCodexUpdate: settings.codexUpdate,
     onUpdateWorkspaceSettings: async (id, nextSettings) => {

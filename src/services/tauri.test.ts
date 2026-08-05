@@ -99,6 +99,8 @@ import {
   prepareWindowsInstallerMigration,
   getWindowsInstallerMigrationCapability,
   getWindowsInstallerMigrationRecoveryStatus,
+  checkWindowsUiUpdate,
+  installWindowsUiUpdate,
   saveComposerImages,
   promoteComposerImages,
   generateAgentDescription,
@@ -537,6 +539,26 @@ describe("tauri invoke wrappers", () => {
     expect(invokeMock).toHaveBeenCalledWith(
       "windows_installer_migration_recovery_status",
     );
+  });
+
+  it("keeps windows-ui release authority in the backend", async () => {
+    const invokeMock = vi.mocked(invoke);
+
+    await checkWindowsUiUpdate();
+    await installWindowsUiUpdate(
+      "1.3.18",
+      "windows-ui-request-1",
+      54_072_316,
+      "a".repeat(64),
+    );
+
+    expect(invokeMock).toHaveBeenNthCalledWith(1, "check_windows_ui_update");
+    expect(invokeMock).toHaveBeenNthCalledWith(2, "install_windows_ui_update", {
+      version: "1.3.18",
+      requestId: "windows-ui-request-1",
+      expectedAssetSize: 54_072_316,
+      expectedAssetSha256: "a".repeat(64),
+    });
   });
 
   it("returns an empty list when workspace picker is cancelled", async () => {

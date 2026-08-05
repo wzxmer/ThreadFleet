@@ -199,6 +199,7 @@ const baseSettings: AppSettings = {
   autoDeleteArchivedThreadsEnabled: false,
   autoDeleteArchivedThreadsDays: 30,
   automaticAppUpdateChecksEnabled: true,
+  automaticWindowsUiUpdateChecksEnabled: true,
   experimentalWindowsInstallerMigrationEnabled: false,
   uiFontFamily:
     'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
@@ -384,11 +385,22 @@ const renderCodexSection = (
     providerSessionDiagnostics?: ComponentProps<
       typeof SettingsView
     >["providerSessionDiagnostics"];
+    windowsUiUpdater?: Partial<
+      NonNullable<ComponentProps<typeof SettingsView>["windowsUiUpdater"]>
+    >;
   } = {},
 ) => {
   cleanup();
   const onUpdateAppSettings =
     options.onUpdateAppSettings ?? vi.fn().mockResolvedValue(undefined);
+  const windowsUiUpdater = {
+    enabled: true,
+    state: { stage: "idle" as const },
+    checkForUpdates: vi.fn(),
+    startInstall: vi.fn(),
+    dismiss: vi.fn(),
+    ...options.windowsUiUpdater,
+  };
   const props: ComponentProps<typeof SettingsView> = {
     reduceTransparency: false,
     onToggleTransparency: vi.fn(),
@@ -417,6 +429,7 @@ const renderCodexSection = (
     onCancelDictationDownload: vi.fn(),
     onRemoveDictationModel: vi.fn(),
     providerSessionDiagnostics: options.providerSessionDiagnostics,
+    windowsUiUpdater,
     initialSection: options.initialSection ?? "codex",
   };
 
@@ -1411,6 +1424,76 @@ describe("SettingsView Environments", () => {
 });
 
 describe("SettingsView Codex section", () => {
+  it("toggles automatic windows-ui update checks", async () => {
+    const onUpdateAppSettings = vi.fn().mockResolvedValue(undefined);
+    renderCodexSection({
+      appSettings: { automaticWindowsUiUpdateChecksEnabled: false },
+      onUpdateAppSettings,
+    });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "自动检查 windows-ui 更新" }),
+    );
+
+    await waitFor(() => {
+      expect(onUpdateAppSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ automaticWindowsUiUpdateChecksEnabled: true }),
+      );
+    });
+  });
+
+  it("explains that remote execution hosts cannot be updated locally", () => {
+    renderCodexSection({
+      appSettings: { backendMode: "remote" },
+      windowsUiUpdater: { enabled: false },
+    });
+
+    expect(screen.getByText("远程执行模式下不能从此设备更新。")).toBeTruthy();
+    expect(
+      (screen.getByRole("button", { name: "检查更新" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+  });
+
+  it("requires confirmation before installing a windows-ui update", async () => {
+    const startInstall = vi.fn();
+    renderCodexSection({
+      windowsUiUpdater: {
+        state: {
+          stage: "available",
+          check: {
+            status: "available",
+            installed: true,
+            managed: true,
+            currentVersion: "1.3.16",
+            release: {
+              version: "1.3.18",
+              releaseUrl:
+                "https://github.com/sbroenne/mcp-windows/releases/tag/v1.3.18",
+              assetSize: 1024,
+              assetSha256: "a".repeat(64),
+            },
+            reasonCode: null,
+          },
+        },
+        startInstall,
+      },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "安装更新" }));
+    expect(startInstall).not.toHaveBeenCalled();
+
+    const dialog = screen.getByRole("dialog", {
+      name: "安装 windows-ui 更新？",
+    });
+    expect(within(dialog).getByText("sbroenne/mcp-windows")).toBeTruthy();
+    expect(within(dialog).getByText("a".repeat(64))).toBeTruthy();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "下载并安装" }));
+    expect(startInstall).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("dialog", { name: "安装 windows-ui 更新？" })).toBeNull();
+  });
+
   it("updates review mode in codex section", async () => {
     cleanup();
     const onUpdateAppSettings = vi.fn().mockResolvedValue(undefined);

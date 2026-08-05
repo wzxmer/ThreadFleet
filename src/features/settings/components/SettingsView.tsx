@@ -22,12 +22,21 @@ import { SettingsSectionContainers } from "./sections/SettingsSectionContainers"
 import type { SettingsWorkflowSectionProps } from "./sections/SettingsWorkflowSection";
 import type { ProviderSessionDiagnostics } from "@settings/utils/providerSessionDiagnostics";
 import type { UpdateState } from "@/features/update/hooks/useUpdater";
+import type { WindowsUiUpdaterState } from "@/features/update/hooks/useWindowsUiUpdater";
 
 export type SettingsUpdaterControls = {
   enabled: boolean;
   state: UpdateState;
   checkForUpdates: () => void;
   startUpdate: () => void;
+  dismiss: () => void;
+};
+
+export type SettingsWindowsUiUpdaterControls = {
+  enabled: boolean;
+  state: WindowsUiUpdaterState;
+  checkForUpdates: () => void;
+  startInstall: () => void;
   dismiss: () => void;
 };
 
@@ -57,6 +66,7 @@ export type SettingsViewProps = {
   onUpdateAppSettings: (next: AppSettings) => Promise<void>;
   onToggleAutomaticAppUpdateChecks?: () => void;
   updater?: SettingsUpdaterControls;
+  windowsUiUpdater?: SettingsWindowsUiUpdaterControls;
   onRunDoctor: (
     codexBin: string | null,
     codexArgs: string | null,
@@ -106,6 +116,7 @@ export function SettingsView({
   onUpdateAppSettings,
   onToggleAutomaticAppUpdateChecks,
   updater,
+  windowsUiUpdater,
   onRunDoctor,
   onRunCodexUpdate,
   onUpdateWorkspaceSettings,
@@ -172,6 +183,7 @@ export function SettingsView({
     onUpdateAppSettings,
     onToggleAutomaticAppUpdateChecks,
     updater,
+    windowsUiUpdater,
     onRunDoctor,
     onRunCodexUpdate,
     onUpdateWorkspaceSettings,

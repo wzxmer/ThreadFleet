@@ -17,6 +17,7 @@ import type {
   CodexUpdateResult,
   CodexDoctorResult,
   InstalledManagedCodex,
+  InstalledWindowsUi,
   DictationModelStatus,
   DictationSessionState,
   LocalUsageSnapshot,
@@ -76,6 +77,7 @@ import type {
   ComputerControlCapabilitySnapshot,
   ComputerControlBackend,
   ComputerControlRouteDecision,
+  WindowsUiUpdateCheckResult,
 } from "../types";
 import {
   buildThirdPartyUsageUrl,
@@ -1791,6 +1793,24 @@ export async function installManagedCodex(
     version,
     expectedSize,
     expectedSha256,
+  });
+}
+
+export async function checkWindowsUiUpdate(): Promise<WindowsUiUpdateCheckResult> {
+  return invoke<WindowsUiUpdateCheckResult>("check_windows_ui_update");
+}
+
+export async function installWindowsUiUpdate(
+  version: string,
+  requestId: string,
+  expectedAssetSize: number,
+  expectedAssetSha256: string,
+): Promise<InstalledWindowsUi> {
+  return invoke<InstalledWindowsUi>("install_windows_ui_update", {
+    version,
+    requestId,
+    expectedAssetSize,
+    expectedAssetSha256,
   });
 }
 

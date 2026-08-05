@@ -2113,6 +2113,84 @@
   font-size: 10px;
 }
 
+.settings-windows-ui-update {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 2px;
+}
+
+.settings-windows-ui-update-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+}
+
+.settings-windows-ui-update-summary {
+  min-width: 0;
+}
+
+.settings-windows-ui-update-summary .settings-help {
+  margin-top: 3px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.settings-windows-ui-update-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.windows-ui-update-confirm {
+  width: min(500px, calc(100vw - 48px));
+  border-radius: 8px;
+}
+
+.windows-ui-update-confirm-details {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  border-top: 1px solid var(--cm-panel-border);
+  border-bottom: 1px solid var(--cm-panel-border);
+}
+
+.windows-ui-update-confirm-details > div {
+  display: grid;
+  grid-template-columns: minmax(84px, auto) minmax(0, 1fr);
+  gap: 12px;
+  padding: 9px 0;
+}
+
+.windows-ui-update-confirm-details > div + div {
+  border-top: 1px solid var(--cm-panel-border);
+}
+
+.windows-ui-update-confirm-details dt,
+.windows-ui-update-confirm-details dd {
+  min-width: 0;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.windows-ui-update-confirm-details dt {
+  color: color-mix(in srgb, var(--cm-text-primary) 66%, transparent);
+}
+
+.windows-ui-update-confirm-details dd {
+  color: var(--cm-text-strong);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.windows-ui-update-confirm-details code {
+  white-space: normal;
+  word-break: break-all;
+}
+
 .settings-empty {
   color: var(--text-faint);
   font-size: 12px;
@@ -2221,6 +2299,24 @@
 
   .settings-computer-control-header .settings-button-compact {
     align-self: flex-start;
+  }
+
+  .settings-windows-ui-update-row {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .settings-windows-ui-update-actions {
+    align-self: flex-start;
+  }
+
+  .windows-ui-update-confirm-details > div {
+    grid-template-columns: 1fr;
+    gap: 3px;
+  }
+
+  .windows-ui-update-confirm-details dd {
+    text-align: left;
   }
 
   .settings-window {

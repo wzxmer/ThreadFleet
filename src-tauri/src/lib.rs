@@ -392,6 +392,8 @@ pub fn run() {
             updater::download_and_open_release_asset,
             updater::download_release_asset,
             updater::install_managed_codex,
+            updater::check_windows_ui_update,
+            updater::install_windows_ui_update,
             updater::managed_codex_platform,
             updater::release_platform,
             updater::windows_installer_kind,

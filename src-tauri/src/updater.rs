@@ -1,11 +1,29 @@
 use futures_util::StreamExt;
 use serde::Serialize;
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use tauri::Emitter;
 use tauri::Manager;
-use tokio::io::AsyncWriteExt;
+use tauri::State;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
+use tokio::process::{ChildStdin, ChildStdout};
+
+use crate::shared::process_core::{kill_child_process_tree, tokio_command};
+use crate::shared::windows_ui_update_core::{
+    configure_windows_ui, inspect_windows_ui_installation, load_windows_ui_installation_snapshot,
+    normalize_windows_ui_version, parse_windows_ui_version_output, resolve_windows_ui_release,
+    validate_windows_ui_mcp_probe, validate_windows_ui_release_confirmation,
+    windows_ui_executable_path, windows_ui_install_dir, windows_ui_install_root, GithubRelease,
+    InstalledWindowsUi, ResolvedWindowsUiRelease, WindowsUiInstallationKind, WindowsUiReleaseInfo,
+    WindowsUiUpdateCheckResult, WindowsUiUpdateStatus, WINDOWS_UI_EXECUTABLE_NAME,
+    WINDOWS_UI_MAX_ARCHIVE_ENTRIES, WINDOWS_UI_MAX_EXTRACTED_BYTES,
+    WINDOWS_UI_MCP_PROTOCOL_VERSION, WINDOWS_UI_RELEASE_API, WINDOWS_UI_RELEASE_TAG_API_PREFIX,
+};
+use crate::state::AppState;
+use crate::types::BackendMode;
 
 const RELEASE_HOST: &str = "github.com";
 const RELEASE_PATH_PREFIX: &str = "/wzxmer/ThreadFleet/releases/download/";
@@ -17,6 +35,10 @@ const TENCENT_CODEX_CLI_BASE_URL: Option<&str> =
     option_env!("THREADFLEET_TENCENT_CODEX_CLI_BASE_URL");
 const ALIYUN_CODEX_CLI_BASE_URL: Option<&str> =
     option_env!("THREADFLEET_ALIYUN_CODEX_CLI_BASE_URL");
+const WINDOWS_UI_RELEASE_RESPONSE_MAX_BYTES: usize = 1024 * 1024;
+const WINDOWS_UI_MCP_PROBE_TIMEOUT_SECS: u64 = 10;
+
+static WINDOWS_UI_INSTALL_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -29,6 +51,169 @@ pub struct DownloadedReleaseAsset {
 pub struct InstalledManagedCodex {
     path: String,
     version: String,
+}
+
+#[tauri::command]
+pub async fn check_windows_ui_update(
+    state: State<'_, AppState>,
+) -> Result<WindowsUiUpdateCheckResult, String> {
+    if std::env::consts::OS != "windows" {
+        return Ok(WindowsUiUpdateCheckResult::unsupported(
+            "unsupportedPlatform",
+        ));
+    }
+    let settings = state.app_settings.lock().await.clone();
+    if matches!(settings.backend_mode, BackendMode::Remote) {
+        return Ok(WindowsUiUpdateCheckResult::unsupported(
+            "remoteExecutionHost",
+        ));
+    }
+    let codex_home = crate::codex::home::resolve_settings_codex_home(&settings)
+        .ok_or_else(|| "Unable to resolve CODEX_HOME for windows-ui updates.".to_string())?;
+    let installation = inspect_windows_ui_installation(&codex_home)?;
+    if installation.kind == WindowsUiInstallationKind::Unmanaged {
+        return Ok(WindowsUiUpdateCheckResult {
+            status: WindowsUiUpdateStatus::Unmanaged,
+            installed: installation.executable_exists,
+            managed: false,
+            current_version: None,
+            release: None,
+            reason_code: Some("unmanagedConfiguration".to_string()),
+        });
+    }
+
+    let verified_version = if installation.executable_exists {
+        let executable = installation
+            .executable_path
+            .as_deref()
+            .ok_or_else(|| "windows-ui executable path is missing.".to_string())?;
+        let install_dir = executable
+            .parent()
+            .ok_or_else(|| "windows-ui executable directory is missing.".to_string())?;
+        validate_existing_install_dir(&codex_home, install_dir)?;
+        let expected_version = installation
+            .version
+            .as_ref()
+            .ok_or_else(|| "windows-ui configured version is missing.".to_string())?;
+        Some(verify_windows_ui_executable(executable, expected_version).await?)
+    } else {
+        None
+    };
+    let latest = fetch_windows_ui_release(WINDOWS_UI_RELEASE_API).await?;
+    let update_available = verified_version
+        .as_ref()
+        .map(|current| latest.version > *current)
+        .unwrap_or(true);
+
+    Ok(WindowsUiUpdateCheckResult {
+        status: if update_available {
+            WindowsUiUpdateStatus::Available
+        } else {
+            WindowsUiUpdateStatus::UpToDate
+        },
+        installed: verified_version.is_some(),
+        managed: true,
+        current_version: verified_version.map(|version| version.to_string()),
+        release: Some(WindowsUiReleaseInfo::from(&latest)),
+        reason_code: if installation.kind == WindowsUiInstallationKind::Managed
+            && !installation.executable_exists
+        {
+            Some("missingExecutable".to_string())
+        } else {
+            None
+        },
+    })
+}
+
+#[tauri::command]
+pub async fn install_windows_ui_update(
+    app_handle: tauri::AppHandle,
+    state: State<'_, AppState>,
+    version: String,
+    request_id: String,
+    expected_asset_size: u64,
+    expected_asset_sha256: String,
+) -> Result<InstalledWindowsUi, String> {
+    if std::env::consts::OS != "windows" {
+        return Err("windows-ui updates are only available on Windows.".to_string());
+    }
+    validate_download_request_id(&request_id)?;
+    let requested_version = normalize_windows_ui_version(&version)?;
+    let _install_guard = WINDOWS_UI_INSTALL_LOCK.lock().await;
+    let settings = state.app_settings.lock().await.clone();
+    if matches!(settings.backend_mode, BackendMode::Remote) {
+        return Err("windows-ui updates cannot modify a remote execution host.".to_string());
+    }
+    let codex_home = crate::codex::home::resolve_settings_codex_home(&settings)
+        .ok_or_else(|| "Unable to resolve CODEX_HOME for windows-ui updates.".to_string())?;
+    let (config_snapshot, installation) = load_windows_ui_installation_snapshot(&codex_home)?;
+    if installation.kind == WindowsUiInstallationKind::Unmanaged {
+        return Err(
+            "Existing windows-ui MCP configuration is not managed by ThreadFleet; refusing to overwrite it."
+                .to_string(),
+        );
+    }
+
+    let release_url = format!("{WINDOWS_UI_RELEASE_TAG_API_PREFIX}{requested_version}");
+    let release = fetch_windows_ui_release(&release_url).await?;
+    validate_windows_ui_release_confirmation(
+        &release,
+        &requested_version,
+        expected_asset_size,
+        &expected_asset_sha256,
+    )?;
+
+    ensure_windows_ui_install_root(&codex_home).await?;
+    let install_dir = windows_ui_install_dir(&codex_home, &requested_version);
+    let executable_path = windows_ui_executable_path(&codex_home, &requested_version);
+    if install_dir.exists() {
+        validate_existing_install_dir(&codex_home, &install_dir)?;
+        if !executable_path.is_file() {
+            return Err(
+                "The target windows-ui version directory exists but is incomplete; remove it manually before retrying."
+                    .to_string(),
+            );
+        }
+        verify_windows_ui_executable(&executable_path, &requested_version).await?;
+    } else {
+        install_downloaded_windows_ui(&app_handle, &codex_home, &release, &request_id).await?;
+    }
+
+    let current_settings = state.app_settings.lock().await.clone();
+    if matches!(current_settings.backend_mode, BackendMode::Remote) {
+        return Err(
+            "windows-ui execution target changed after confirmation; check again.".to_string(),
+        );
+    }
+    let current_codex_home = crate::codex::home::resolve_settings_codex_home(&current_settings)
+        .ok_or_else(|| "Unable to resolve CODEX_HOME for windows-ui updates.".to_string())?;
+    if current_codex_home != codex_home {
+        return Err(
+            "windows-ui execution target changed after confirmation; check again.".to_string(),
+        );
+    }
+
+    configure_windows_ui(
+        &codex_home,
+        &executable_path,
+        &requested_version,
+        &config_snapshot,
+    )?;
+    if let Some(previous_version) = installation.version.as_ref() {
+        if previous_version != &requested_version {
+            if let Err(error) =
+                cleanup_previous_windows_ui_install(&codex_home, previous_version).await
+            {
+                eprintln!(
+                    "windows-ui updater: installed {requested_version}, but failed to remove previous managed version {previous_version}: {error}"
+                );
+            }
+        }
+    }
+    Ok(InstalledWindowsUi {
+        version: requested_version.to_string(),
+        requires_codex_restart: true,
+    })
 }
 
 #[tauri::command]
@@ -313,6 +498,468 @@ pub async fn install_managed_codex(
     })
 }
 
+fn validate_download_request_id(request_id: &str) -> Result<(), String> {
+    if request_id.is_empty()
+        || request_id.len() > 128
+        || !request_id
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
+    {
+        return Err("Invalid windows-ui download request ID.".to_string());
+    }
+    Ok(())
+}
+
+async fn fetch_windows_ui_release(url: &str) -> Result<ResolvedWindowsUiRelease, String> {
+    let response = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(20))
+        .user_agent("ThreadFleet windows-ui updater")
+        .build()
+        .map_err(|error| format!("Failed to create windows-ui update client: {error}"))?
+        .get(url)
+        .header(reqwest::header::ACCEPT, "application/vnd.github+json")
+        .header("X-GitHub-Api-Version", "2022-11-28")
+        .send()
+        .await
+        .map_err(|error| format!("Failed to check windows-ui release: {error}"))?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "windows-ui release check failed ({}).",
+            response.status()
+        ));
+    }
+    if response
+        .content_length()
+        .is_some_and(|length| length > WINDOWS_UI_RELEASE_RESPONSE_MAX_BYTES as u64)
+    {
+        return Err("windows-ui release response is too large.".to_string());
+    }
+    let body = response
+        .bytes()
+        .await
+        .map_err(|error| format!("Failed to read windows-ui release response: {error}"))?;
+    if body.len() > WINDOWS_UI_RELEASE_RESPONSE_MAX_BYTES {
+        return Err("windows-ui release response is too large.".to_string());
+    }
+    let release = serde_json::from_slice::<GithubRelease>(&body)
+        .map_err(|error| format!("Invalid windows-ui release response: {error}"))?;
+    resolve_windows_ui_release(release, std::env::consts::ARCH)
+}
+
+async fn ensure_windows_ui_install_root(codex_home: &Path) -> Result<(), String> {
+    tokio::fs::create_dir_all(codex_home)
+        .await
+        .map_err(|error| format!("Failed to create CODEX_HOME: {error}"))?;
+    let mcp_servers_dir = codex_home.join("mcp-servers");
+    ensure_real_child_directory(codex_home, &mcp_servers_dir, "MCP server directory").await?;
+    let install_root = windows_ui_install_root(codex_home);
+    ensure_real_child_directory(
+        &mcp_servers_dir,
+        &install_root,
+        "windows-ui install directory",
+    )
+    .await
+}
+
+async fn ensure_real_child_directory(
+    parent: &Path,
+    child: &Path,
+    label: &str,
+) -> Result<(), String> {
+    if !tokio::fs::try_exists(child)
+        .await
+        .map_err(|error| format!("Failed to inspect {label}: {error}"))?
+    {
+        tokio::fs::create_dir(child)
+            .await
+            .map_err(|error| format!("Failed to create {label}: {error}"))?;
+    }
+    validate_real_child_directory(parent, child, label)
+}
+
+fn validate_real_child_directory(parent: &Path, child: &Path, label: &str) -> Result<(), String> {
+    if child.parent() != Some(parent) {
+        return Err(format!("{label} is outside its managed parent directory."));
+    }
+    let metadata = std::fs::symlink_metadata(child)
+        .map_err(|error| format!("Failed to inspect {label}: {error}"))?;
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return Err(format!("{label} must be a real directory."));
+    }
+    let canonical_parent = std::fs::canonicalize(parent)
+        .map_err(|error| format!("Failed to validate {label} parent: {error}"))?;
+    let canonical_child = std::fs::canonicalize(child)
+        .map_err(|error| format!("Failed to validate {label}: {error}"))?;
+    if canonical_child.parent() != Some(canonical_parent.as_path()) {
+        return Err(format!("{label} escapes its managed parent directory."));
+    }
+    Ok(())
+}
+
+fn validate_existing_install_dir(codex_home: &Path, install_dir: &Path) -> Result<(), String> {
+    let mcp_servers_dir = codex_home.join("mcp-servers");
+    validate_real_child_directory(codex_home, &mcp_servers_dir, "MCP server directory")?;
+    let install_root = windows_ui_install_root(codex_home);
+    validate_real_child_directory(
+        &mcp_servers_dir,
+        &install_root,
+        "windows-ui install directory",
+    )?;
+    validate_real_child_directory(&install_root, install_dir, "windows-ui version directory")
+}
+
+async fn cleanup_previous_windows_ui_install(
+    codex_home: &Path,
+    previous_version: &semver::Version,
+) -> Result<(), String> {
+    let previous_dir = windows_ui_install_dir(codex_home, previous_version);
+    if !tokio::fs::try_exists(&previous_dir)
+        .await
+        .map_err(|error| format!("Failed to inspect previous windows-ui version: {error}"))?
+    {
+        return Ok(());
+    }
+    validate_existing_install_dir(codex_home, &previous_dir)?;
+    tokio::fs::remove_dir_all(&previous_dir)
+        .await
+        .map_err(|error| format!("Failed to remove previous windows-ui version: {error}"))
+}
+
+async fn install_downloaded_windows_ui(
+    app_handle: &tauri::AppHandle,
+    codex_home: &Path,
+    release: &ResolvedWindowsUiRelease,
+    request_id: &str,
+) -> Result<(), String> {
+    let cache_dir = app_handle
+        .path()
+        .app_cache_dir()
+        .map_err(|error| format!("Failed to resolve app cache directory: {error}"))?
+        .join("windows-ui-updates")
+        .join(uuid::Uuid::new_v4().to_string());
+    tokio::fs::create_dir_all(&cache_dir)
+        .await
+        .map_err(|error| format!("Failed to create windows-ui download directory: {error}"))?;
+    let archive_path = cache_dir.join(format!("{}.download", release.asset_name));
+    let temporary_install_dir = windows_ui_install_root(codex_home).join(format!(
+        ".{}-{}.installing",
+        release.version,
+        uuid::Uuid::new_v4()
+    ));
+
+    let result = async {
+        download_to_path(
+            app_handle,
+            request_id,
+            &release.asset_url,
+            &archive_path,
+            Some(release.asset_size),
+            Some(&release.asset_sha256),
+        )
+        .await?;
+
+        let archive_for_extract = archive_path.clone();
+        let install_for_extract = temporary_install_dir.clone();
+        tokio::task::spawn_blocking(move || {
+            extract_windows_ui_archive(&archive_for_extract, &install_for_extract)
+        })
+        .await
+        .map_err(|error| format!("windows-ui extraction task failed: {error}"))??;
+
+        let temporary_executable = temporary_install_dir.join(WINDOWS_UI_EXECUTABLE_NAME);
+        verify_windows_ui_executable(&temporary_executable, &release.version).await?;
+        let final_install_dir = windows_ui_install_dir(codex_home, &release.version);
+        tokio::fs::rename(&temporary_install_dir, &final_install_dir)
+            .await
+            .map_err(|error| format!("Failed to finalize windows-ui installation: {error}"))?;
+        Ok(())
+    }
+    .await;
+
+    let _ = tokio::fs::remove_dir_all(&cache_dir).await;
+    if result.is_err() {
+        let _ = tokio::fs::remove_dir_all(&temporary_install_dir).await;
+    }
+    result
+}
+
+fn extract_windows_ui_archive(archive_path: &Path, install_root: &Path) -> Result<(), String> {
+    if install_root.exists() {
+        return Err("Temporary windows-ui install directory already exists.".to_string());
+    }
+    std::fs::create_dir_all(install_root)
+        .map_err(|error| format!("Failed to create temporary windows-ui directory: {error}"))?;
+    let archive_file = std::fs::File::open(archive_path)
+        .map_err(|error| format!("Failed to open windows-ui package: {error}"))?;
+    let mut archive = zip::ZipArchive::new(archive_file)
+        .map_err(|error| format!("Invalid windows-ui package: {error}"))?;
+    if archive.len() == 0 || archive.len() > WINDOWS_UI_MAX_ARCHIVE_ENTRIES {
+        return Err("windows-ui package has an invalid entry count.".to_string());
+    }
+
+    let mut extracted_bytes = 0_u64;
+    for index in 0..archive.len() {
+        let mut entry = archive
+            .by_index(index)
+            .map_err(|error| format!("Failed to read windows-ui package: {error}"))?;
+        let relative_path = entry
+            .enclosed_name()
+            .ok_or_else(|| "windows-ui package contains an unsafe path.".to_string())?;
+        if let Some(mode) = entry.unix_mode() {
+            let file_type = mode & 0o170000;
+            if file_type == 0o120000 {
+                return Err("windows-ui package contains a symbolic link.".to_string());
+            }
+            if file_type != 0 && file_type != 0o040000 && file_type != 0o100000 {
+                return Err("windows-ui package contains an unsupported entry type.".to_string());
+            }
+        }
+        extracted_bytes = extracted_bytes
+            .checked_add(entry.size())
+            .ok_or_else(|| "windows-ui package expanded size overflowed.".to_string())?;
+        if extracted_bytes > WINDOWS_UI_MAX_EXTRACTED_BYTES {
+            return Err("windows-ui package expands beyond the allowed size.".to_string());
+        }
+        let target_path = install_root.join(&relative_path);
+        if entry.is_dir() {
+            std::fs::create_dir_all(&target_path).map_err(|error| {
+                format!("Failed to create windows-ui package directory: {error}")
+            })?;
+            continue;
+        }
+        if let Some(parent) = target_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|error| {
+                format!("Failed to create windows-ui package directory: {error}")
+            })?;
+        }
+        let mut output = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&target_path)
+            .map_err(|error| format!("Failed to create windows-ui package file: {error}"))?;
+        let written = std::io::copy(&mut entry, &mut output)
+            .map_err(|error| format!("Failed to extract windows-ui package file: {error}"))?;
+        if written != entry.size() {
+            return Err("windows-ui package entry size changed during extraction.".to_string());
+        }
+    }
+
+    let executable = install_root.join(WINDOWS_UI_EXECUTABLE_NAME);
+    if !executable.is_file() {
+        return Err(format!(
+            "windows-ui package does not contain {WINDOWS_UI_EXECUTABLE_NAME} at its root."
+        ));
+    }
+    Ok(())
+}
+
+async fn verify_windows_ui_executable(
+    executable_path: &Path,
+    expected_version: &semver::Version,
+) -> Result<semver::Version, String> {
+    validate_real_windows_ui_executable(executable_path)?;
+    let mut version_command = tokio_command(executable_path);
+    version_command.arg("--version").kill_on_drop(true);
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(WINDOWS_UI_MCP_PROBE_TIMEOUT_SECS),
+        version_command.output(),
+    )
+    .await
+    .map_err(|_| "windows-ui --version probe timed out.".to_string())?
+    .map_err(|error| format!("Failed to run windows-ui --version: {error}"))?;
+    if !output.status.success() {
+        return Err("windows-ui --version probe failed.".to_string());
+    }
+    let version_output = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let reported_version = parse_windows_ui_version_output(&version_output)?;
+    if &reported_version != expected_version {
+        return Err(
+            "windows-ui executable version does not match its release directory.".to_string(),
+        );
+    }
+    probe_windows_ui_mcp(executable_path, expected_version).await?;
+    Ok(reported_version)
+}
+
+fn validate_real_windows_ui_executable(executable_path: &Path) -> Result<(), String> {
+    let parent = executable_path
+        .parent()
+        .ok_or_else(|| "windows-ui executable has no parent directory.".to_string())?;
+    if executable_path.file_name().and_then(|value| value.to_str())
+        != Some(WINDOWS_UI_EXECUTABLE_NAME)
+    {
+        return Err("windows-ui executable has an unexpected file name.".to_string());
+    }
+    let metadata = std::fs::symlink_metadata(executable_path)
+        .map_err(|error| format!("Failed to inspect windows-ui executable: {error}"))?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err("windows-ui executable must be a real file.".to_string());
+    }
+    let canonical_parent = std::fs::canonicalize(parent)
+        .map_err(|error| format!("Failed to validate windows-ui executable directory: {error}"))?;
+    let canonical_executable = std::fs::canonicalize(executable_path)
+        .map_err(|error| format!("Failed to validate windows-ui executable: {error}"))?;
+    if canonical_executable.parent() != Some(canonical_parent.as_path()) {
+        return Err("windows-ui executable escapes its verified version directory.".to_string());
+    }
+    Ok(())
+}
+
+async fn probe_windows_ui_mcp(
+    executable_path: &Path,
+    expected_version: &semver::Version,
+) -> Result<(), String> {
+    let mut command = tokio_command(executable_path);
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+    if let Some(parent) = executable_path.parent() {
+        command.current_dir(parent);
+    }
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("Failed to start windows-ui MCP probe: {error}"))?;
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| "windows-ui MCP probe stdin is unavailable.".to_string())?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "windows-ui MCP probe stdout is unavailable.".to_string())?;
+    let mut lines = BufReader::new(stdout).lines();
+
+    let probe_result = async {
+        write_mcp_message(
+            &mut stdin,
+            &json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": WINDOWS_UI_MCP_PROTOCOL_VERSION,
+                    "capabilities": {},
+                    "clientInfo": {
+                        "name": "threadfleet-windows-ui-updater",
+                        "version": env!("CARGO_PKG_VERSION")
+                    }
+                }
+            }),
+        )
+        .await?;
+        let initialize_response = read_mcp_response(&mut lines, 1).await?;
+        write_mcp_message(
+            &mut stdin,
+            &json!({
+                "jsonrpc": "2.0",
+                "method": "notifications/initialized",
+                "params": {}
+            }),
+        )
+        .await?;
+
+        let mut tool_names = HashSet::new();
+        let mut cursor: Option<String> = None;
+        let mut exhausted = false;
+        for page in 0..4_u64 {
+            let request_id = 2 + page;
+            let params = cursor
+                .as_ref()
+                .map(|cursor| json!({ "cursor": cursor }))
+                .unwrap_or_else(|| json!({}));
+            write_mcp_message(
+                &mut stdin,
+                &json!({
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "method": "tools/list",
+                    "params": params
+                }),
+            )
+            .await?;
+            let response = read_mcp_response(&mut lines, request_id).await?;
+            if response.get("error").is_some() {
+                return Err("windows-ui MCP tools/list returned an error.".to_string());
+            }
+            let result = response
+                .get("result")
+                .and_then(Value::as_object)
+                .ok_or_else(|| "windows-ui MCP tools/list result is missing.".to_string())?;
+            let tools = result
+                .get("tools")
+                .and_then(Value::as_array)
+                .ok_or_else(|| "windows-ui MCP tool list is missing.".to_string())?;
+            for tool in tools {
+                if let Some(name) = tool.get("name").and_then(Value::as_str) {
+                    tool_names.insert(name.to_string());
+                }
+            }
+            cursor = result
+                .get("nextCursor")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .filter(|value| !value.is_empty());
+            if cursor.is_none() {
+                exhausted = true;
+                break;
+            }
+        }
+        if !exhausted {
+            return Err("windows-ui MCP tool list exceeded the probe page limit.".to_string());
+        }
+        validate_windows_ui_mcp_probe(&initialize_response, &tool_names, expected_version)
+    }
+    .await;
+
+    kill_child_process_tree(&mut child).await;
+    probe_result
+}
+
+async fn write_mcp_message(stdin: &mut ChildStdin, message: &Value) -> Result<(), String> {
+    let mut encoded = serde_json::to_vec(message)
+        .map_err(|error| format!("Failed to encode windows-ui MCP probe request: {error}"))?;
+    encoded.push(b'\n');
+    stdin
+        .write_all(&encoded)
+        .await
+        .map_err(|error| format!("Failed to write windows-ui MCP probe request: {error}"))?;
+    stdin
+        .flush()
+        .await
+        .map_err(|error| format!("Failed to flush windows-ui MCP probe request: {error}"))
+}
+
+async fn read_mcp_response(
+    lines: &mut Lines<BufReader<ChildStdout>>,
+    request_id: u64,
+) -> Result<Value, String> {
+    let deadline = tokio::time::Instant::now()
+        + std::time::Duration::from_secs(WINDOWS_UI_MCP_PROBE_TIMEOUT_SECS);
+    for _ in 0..32 {
+        let line = tokio::time::timeout_at(deadline, lines.next_line())
+            .await
+            .map_err(|_| "windows-ui MCP probe timed out.".to_string())?
+            .map_err(|error| format!("Failed to read windows-ui MCP probe response: {error}"))?
+            .ok_or_else(|| "windows-ui MCP probe closed unexpectedly.".to_string())?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let value = serde_json::from_str::<Value>(&line)
+            .map_err(|error| format!("Invalid windows-ui MCP probe response: {error}"))?;
+        if value.get("id").and_then(Value::as_u64) == Some(request_id) {
+            return Ok(value);
+        }
+    }
+    Err("windows-ui MCP probe returned too many unrelated messages.".to_string())
+}
+
 fn extract_managed_codex_archive(
     archive_path: &Path,
     install_root: &Path,
@@ -495,6 +1142,22 @@ fn emit_download_progress(
     );
 }
 
+fn checked_downloaded_size(
+    downloaded_bytes: u64,
+    chunk_size: usize,
+    expected_size: Option<u64>,
+) -> Result<u64, String> {
+    let chunk_size = u64::try_from(chunk_size)
+        .map_err(|_| "Installer download chunk size overflowed.".to_string())?;
+    let next_size = downloaded_bytes
+        .checked_add(chunk_size)
+        .ok_or_else(|| "Installer download size overflowed.".to_string())?;
+    if expected_size.is_some_and(|expected| next_size > expected) {
+        return Err("Installer download exceeded the expected size.".to_string());
+    }
+    Ok(next_size)
+}
+
 async fn download_to_path(
     app_handle: &tauri::AppHandle,
     request_id: &str,
@@ -518,7 +1181,15 @@ async fn download_to_path(
             response.status()
         ));
     }
-    let total_bytes = response.content_length();
+    let response_size = response.content_length();
+    if let (Some(expected_size), Some(response_size)) = (expected_size, response_size) {
+        if response_size != expected_size {
+            return Err(format!(
+                "Installer size mismatch: expected {expected_size}, got {response_size}."
+            ));
+        }
+    }
+    let total_bytes = expected_size.or(response_size);
     emit_download_progress(app_handle, request_id, 0, total_bytes);
 
     let mut file = tokio::fs::File::create(target_path)
@@ -536,11 +1207,13 @@ async fn download_to_path(
         .map_err(|_| "Installer download stalled.".to_string())?;
         let Some(chunk) = next_chunk else { break };
         let chunk = chunk.map_err(|error| format!("Failed to read installer download: {error}"))?;
+        let next_downloaded_bytes =
+            checked_downloaded_size(downloaded_bytes, chunk.len(), expected_size)?;
         hasher.update(&chunk);
         file.write_all(&chunk)
             .await
             .map_err(|error| format!("Failed to write installer file: {error}"))?;
-        downloaded_bytes = downloaded_bytes.saturating_add(chunk.len() as u64);
+        downloaded_bytes = next_downloaded_bytes;
         emit_download_progress(app_handle, request_id, downloaded_bytes, total_bytes);
     }
     file.flush()
@@ -611,9 +1284,11 @@ fn open_installer(path: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        extract_managed_codex_archive, resolve_release_architecture,
+        checked_downloaded_size, cleanup_previous_windows_ui_install,
+        extract_managed_codex_archive, extract_windows_ui_archive, resolve_release_architecture,
         sanitize_release_asset_file_name, should_preserve_installer_downloads,
-        validate_release_asset_url,
+        validate_download_request_id, validate_real_child_directory,
+        validate_real_windows_ui_executable, validate_release_asset_url,
     };
     use crate::windows_installer::{
         classify_windows_installer_registration, select_windows_installer_kind,
@@ -774,5 +1449,143 @@ mod tests {
         let path = extract_managed_codex_archive(&archive_path, &root).unwrap();
         assert_eq!(std::fs::read(path).unwrap(), b"test-codex");
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn extracts_windows_ui_package_into_an_empty_version_directory() {
+        let root =
+            std::env::temp_dir().join(format!("threadfleet-windows-ui-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let archive_path = root.join("windows-ui.zip");
+        let file = std::fs::File::create(&archive_path).unwrap();
+        let mut archive = zip::ZipWriter::new(file);
+        archive
+            .start_file(
+                crate::shared::windows_ui_update_core::WINDOWS_UI_EXECUTABLE_NAME,
+                zip::write::SimpleFileOptions::default(),
+            )
+            .unwrap();
+        archive.write_all(b"test-windows-ui").unwrap();
+        archive.finish().unwrap();
+
+        let install_dir = root.join("install");
+        extract_windows_ui_archive(&archive_path, &install_dir).unwrap();
+        assert_eq!(
+            std::fs::read(
+                install_dir.join(crate::shared::windows_ui_update_core::WINDOWS_UI_EXECUTABLE_NAME)
+            )
+            .unwrap(),
+            b"test-windows-ui"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn rejects_windows_ui_archive_path_traversal() {
+        let root = std::env::temp_dir().join(format!(
+            "threadfleet-windows-ui-unsafe-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let archive_path = root.join("windows-ui.zip");
+        let file = std::fs::File::create(&archive_path).unwrap();
+        let mut archive = zip::ZipWriter::new(file);
+        archive
+            .start_file(
+                "../Sbroenne.WindowsMcp.exe",
+                zip::write::SimpleFileOptions::default(),
+            )
+            .unwrap();
+        archive.write_all(b"unsafe").unwrap();
+        archive.finish().unwrap();
+
+        let error = extract_windows_ui_archive(&archive_path, &root.join("install")).unwrap_err();
+        assert!(error.contains("unsafe path"));
+        assert!(!root.join("Sbroenne.WindowsMcp.exe").exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn validates_windows_ui_progress_request_ids() {
+        assert!(validate_download_request_id("windows-ui.123_ab-c").is_ok());
+        assert!(validate_download_request_id("").is_err());
+        assert!(validate_download_request_id("../../escape").is_err());
+    }
+
+    #[test]
+    fn bounds_windows_ui_downloads_before_writing_past_the_confirmed_size() {
+        assert_eq!(checked_downloaded_size(40, 2, Some(42)).unwrap(), 42);
+        assert!(checked_downloaded_size(42, 1, Some(42))
+            .unwrap_err()
+            .contains("exceeded the expected size"));
+        assert!(checked_downloaded_size(u64::MAX, 1, None)
+            .unwrap_err()
+            .contains("overflowed"));
+    }
+
+    #[test]
+    fn validates_windows_ui_managed_directory_and_executable_boundaries() {
+        let root = std::env::temp_dir().join(format!(
+            "threadfleet-windows-ui-boundary-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let parent = root.join("parent");
+        let child = parent.join("child");
+        let sibling = root.join("sibling");
+        std::fs::create_dir_all(&child).unwrap();
+        std::fs::create_dir_all(&sibling).unwrap();
+        validate_real_child_directory(&parent, &child, "test child").unwrap();
+        assert!(
+            validate_real_child_directory(&parent, &sibling, "test child")
+                .unwrap_err()
+                .contains("outside its managed parent")
+        );
+
+        let executable =
+            child.join(crate::shared::windows_ui_update_core::WINDOWS_UI_EXECUTABLE_NAME);
+        std::fs::write(&executable, b"test").unwrap();
+        validate_real_windows_ui_executable(&executable).unwrap();
+        assert!(
+            validate_real_windows_ui_executable(&child.join("other.exe"))
+                .unwrap_err()
+                .contains("unexpected file name")
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn removes_only_the_previous_managed_windows_ui_version() {
+        let codex_home = std::env::temp_dir().join(format!(
+            "threadfleet-windows-ui-cleanup-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let previous_version = semver::Version::parse("1.3.17").unwrap();
+        let current_version = semver::Version::parse("1.3.18").unwrap();
+        let previous_dir = crate::shared::windows_ui_update_core::windows_ui_install_dir(
+            &codex_home,
+            &previous_version,
+        );
+        let current_dir = crate::shared::windows_ui_update_core::windows_ui_install_dir(
+            &codex_home,
+            &current_version,
+        );
+        std::fs::create_dir_all(&previous_dir).unwrap();
+        std::fs::create_dir_all(&current_dir).unwrap();
+        std::fs::write(previous_dir.join("old.txt"), b"old").unwrap();
+        std::fs::write(current_dir.join("current.txt"), b"current").unwrap();
+
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(cleanup_previous_windows_ui_install(
+                &codex_home,
+                &previous_version,
+            ))
+            .unwrap();
+
+        assert!(!previous_dir.exists());
+        assert!(current_dir.join("current.txt").is_file());
+        std::fs::remove_dir_all(codex_home).unwrap();
     }
 }

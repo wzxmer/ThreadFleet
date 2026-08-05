@@ -441,6 +441,7 @@ function buildDefaultSettings(): AppSettings {
     autoDeleteArchivedThreadsEnabled: false,
     autoDeleteArchivedThreadsDays: 30,
     automaticAppUpdateChecksEnabled: true,
+    automaticWindowsUiUpdateChecksEnabled: true,
     experimentalWindowsInstallerMigrationEnabled: false,
     uiFontFamily: DEFAULT_UI_FONT_FAMILY,
     uiLatinFontFamily: DEFAULT_UI_LATIN_FONT_FAMILY,
@@ -657,6 +658,8 @@ function normalizeAppSettings(settings: AppSettings): AppSettings {
     )
       ? settings.autoDeleteArchivedThreadsDays
       : 30,
+    automaticWindowsUiUpdateChecksEnabled:
+      settings.automaticWindowsUiUpdateChecksEnabled !== false,
     experimentalWindowsInstallerMigrationEnabled:
       settings.experimentalWindowsInstallerMigrationEnabled === true,
     personality: allowedPersonality.has(settings.personality)

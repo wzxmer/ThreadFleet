@@ -1107,6 +1107,36 @@ export const I18N_STRINGS = {
     "settings.codex.computerControlHostRemote": "远端执行",
     "settings.codex.computerControlLastChecked": "上次检查",
     "settings.codex.computerControlReadFailed": "电脑操控状态读取失败",
+    "settings.codex.windowsUiAutoCheck": "自动检查 windows-ui 更新",
+    "settings.codex.windowsUiAutoCheckHelp":
+      "启动时仅检查新版本；下载和安装前仍需你的确认。",
+    "settings.codex.windowsUiUpdateTitle": "windows-ui MCP",
+    "settings.codex.windowsUiUpdateIdle": "尚未检查更新。",
+    "settings.codex.windowsUiUpdateChecking": "正在检查...",
+    "settings.codex.windowsUiUpdateRemoteUnsupported":
+      "远程执行模式下不能从此设备更新。",
+    "settings.codex.windowsUiUpdatePlatformUnsupported":
+      "仅支持在本地 Windows 执行主机上更新。",
+    "settings.codex.windowsUiUpdateUnmanaged":
+      "当前配置不由 ThreadFleet 管理，已拒绝覆盖。",
+    "settings.codex.windowsUiUpdateCurrent": "当前版本",
+    "settings.codex.windowsUiUpdateLatest": "已是最新版本",
+    "settings.codex.windowsUiUpdateAvailable": "可更新至",
+    "settings.codex.windowsUiUpdateNotInstalled": "尚未安装",
+    "settings.codex.windowsUiUpdateDownloading": "正在下载...",
+    "settings.codex.windowsUiUpdateVerifying": "正在校验并安装...",
+    "settings.codex.windowsUiUpdateInstalled": "已安装",
+    "settings.codex.windowsUiUpdateRestartNotice":
+      "新建或重新连接 Codex 会话后生效。",
+    "settings.codex.windowsUiUpdateFailed": "更新失败",
+    "settings.codex.windowsUiUpdateInstall": "安装更新",
+    "settings.codex.windowsUiUpdateCheck": "检查更新",
+    "settings.codex.windowsUiUpdateConfirmTitle": "安装 windows-ui 更新？",
+    "settings.codex.windowsUiUpdateConfirmDescription":
+      "将从官方 GitHub Release 下载并验证此版本：",
+    "settings.codex.windowsUiUpdateSource": "来源",
+    "settings.codex.windowsUiUpdateSize": "下载大小",
+    "settings.codex.windowsUiUpdateConfirmInstall": "下载并安装",
     "settings.codex.configSnippet": "配置片段",
     "settings.codex.globalConfigPlaceholder": "编辑全局 Codex config.toml...",
     "settings.composer.title": "输入框",
@@ -2872,6 +2902,36 @@ export const I18N_STRINGS = {
     "settings.codex.computerControlHostRemote": "Remote execution",
     "settings.codex.computerControlLastChecked": "Last checked",
     "settings.codex.computerControlReadFailed": "Failed to read computer-control status",
+    "settings.codex.windowsUiAutoCheck": "Check for windows-ui updates automatically",
+    "settings.codex.windowsUiAutoCheckHelp":
+      "Only checks at startup. Downloading and installation still require your confirmation.",
+    "settings.codex.windowsUiUpdateTitle": "windows-ui MCP",
+    "settings.codex.windowsUiUpdateIdle": "Updates have not been checked yet.",
+    "settings.codex.windowsUiUpdateChecking": "Checking...",
+    "settings.codex.windowsUiUpdateRemoteUnsupported":
+      "Remote execution mode cannot be updated from this device.",
+    "settings.codex.windowsUiUpdatePlatformUnsupported":
+      "Updates are available only on a local Windows execution host.",
+    "settings.codex.windowsUiUpdateUnmanaged":
+      "The current configuration is not managed by ThreadFleet and will not be overwritten.",
+    "settings.codex.windowsUiUpdateCurrent": "Current",
+    "settings.codex.windowsUiUpdateLatest": "Up to date",
+    "settings.codex.windowsUiUpdateAvailable": "Update available",
+    "settings.codex.windowsUiUpdateNotInstalled": "Not installed",
+    "settings.codex.windowsUiUpdateDownloading": "Downloading...",
+    "settings.codex.windowsUiUpdateVerifying": "Verifying and installing...",
+    "settings.codex.windowsUiUpdateInstalled": "Installed",
+    "settings.codex.windowsUiUpdateRestartNotice":
+      "Takes effect after starting or reconnecting a Codex session.",
+    "settings.codex.windowsUiUpdateFailed": "Update failed",
+    "settings.codex.windowsUiUpdateInstall": "Install update",
+    "settings.codex.windowsUiUpdateCheck": "Check for updates",
+    "settings.codex.windowsUiUpdateConfirmTitle": "Install windows-ui update?",
+    "settings.codex.windowsUiUpdateConfirmDescription":
+      "This version will be downloaded from the official GitHub Release and verified:",
+    "settings.codex.windowsUiUpdateSource": "Source",
+    "settings.codex.windowsUiUpdateSize": "Download size",
+    "settings.codex.windowsUiUpdateConfirmInstall": "Download and install",
     "settings.codex.configSnippet": "Configuration snippet",
     "settings.codex.globalConfigPlaceholder": "Edit global Codex config.toml...",
     "settings.composer.title": "Composer",

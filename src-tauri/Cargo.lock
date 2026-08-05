@@ -5512,6 +5512,7 @@ dependencies = [
  "objc2-foundation",
  "portable-pty",
  "reqwest 0.12.28",
+ "semver",
  "serde",
  "serde_json",
  "sha2",

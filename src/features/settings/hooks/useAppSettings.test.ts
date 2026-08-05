@@ -131,6 +131,7 @@ describe("useAppSettings", () => {
     expect(result.current.settings.uiFontWeight).toBe(450);
     expect(result.current.settings.autoDeleteArchivedThreadsEnabled).toBe(false);
     expect(result.current.settings.autoDeleteArchivedThreadsDays).toBe(30);
+    expect(result.current.settings.automaticWindowsUiUpdateChecksEnabled).toBe(true);
     expect(result.current.settings.experimentalWindowsInstallerMigrationEnabled).toBe(false);
     expect(result.current.settings.preserveSessionLibraryOnProviderSwitch).toBe(true);
     expect(result.current.settings.syncProviderProfileToLocalConfig).toBe(false);

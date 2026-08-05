@@ -91,6 +91,33 @@ export type ReleaseAssetDownloadProgress = {
   totalBytes?: number | null;
 };
 
+export type WindowsUiUpdateStatus =
+  | "unsupported"
+  | "unmanaged"
+  | "upToDate"
+  | "available";
+
+export type WindowsUiReleaseInfo = {
+  version: string;
+  releaseUrl: string;
+  assetSize: number;
+  assetSha256: string;
+};
+
+export type WindowsUiUpdateCheckResult = {
+  status: WindowsUiUpdateStatus;
+  installed: boolean;
+  managed: boolean;
+  currentVersion: string | null;
+  release: WindowsUiReleaseInfo | null;
+  reasonCode: string | null;
+};
+
+export type InstalledWindowsUi = {
+  version: string;
+  requiresCodexRestart: boolean;
+};
+
 export type TrayLabels = {
   open: string;
   hide: string;
@@ -867,6 +894,7 @@ export type AppSettings = {
   autoDeleteArchivedThreadsEnabled: boolean;
   autoDeleteArchivedThreadsDays: 30 | 60 | 90 | 180;
   automaticAppUpdateChecksEnabled: boolean;
+  automaticWindowsUiUpdateChecksEnabled: boolean;
   experimentalWindowsInstallerMigrationEnabled: boolean;
   uiFontFamily: string;
   uiLatinFontFamily: string;

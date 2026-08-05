@@ -17,6 +17,7 @@ import { useBranchSwitcherShortcut } from "@/features/git/hooks/useBranchSwitche
 import { useRenameWorktreePrompt } from "@/features/workspaces/hooks/useRenameWorktreePrompt";
 import { SESSION_MANAGER_MIN_MAIN_CONTENT_WIDTH, useLayoutController } from "@app/hooks/useLayoutController";
 import { useUpdaterController } from "@app/hooks/useUpdaterController";
+import { useWindowsUiUpdater } from "@/features/update/hooks/useWindowsUiUpdater";
 import { useResponseRequiredNotificationsController } from "@app/hooks/useResponseRequiredNotificationsController";
 import { useErrorToasts } from "@/features/notifications/hooks/useErrorToasts";
 import { useComposerShortcuts } from "@/features/composer/hooks/useComposerShortcuts";
@@ -1131,6 +1132,15 @@ export default function MainApp() {
     successSoundUrl,
     errorSoundUrl,
   });
+  const windowsUiUpdaterEnabled =
+    updaterEnabled && appSettings.backendMode === "local";
+  const windowsUiUpdater = useWindowsUiUpdater({
+    enabled: windowsUiUpdaterEnabled,
+    autoCheckOnMount:
+      !appSettingsLoading &&
+      appSettings.automaticWindowsUiUpdateChecksEnabled,
+    onDebug: addDebugEntry,
+  });
   const gitState = useMainAppGitState({
     activeWorkspace: projectActiveWorkspace,
     activeWorkspaceId,
@@ -1723,6 +1733,10 @@ export default function MainApp() {
         checkForUpdates,
         startUpdate,
         dismiss: dismissUpdate,
+      },
+      windowsUiUpdater: {
+        enabled: windowsUiUpdaterEnabled,
+        ...windowsUiUpdater,
       },
       doctor,
       codexUpdate,
