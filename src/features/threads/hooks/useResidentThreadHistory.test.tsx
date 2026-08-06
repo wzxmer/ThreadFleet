@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { ConversationItem } from "@/types";
 import {
@@ -49,12 +49,15 @@ describe("useResidentThreadHistory", () => {
         itemsByThreadRef,
         threadStatusById: {},
         threadResumeLoadingById: {},
+        threadHistoryRestoreStateById: {},
+        threadHistoryRecoveryAnchorThreadId: null,
         activeTurnIdByThread: {},
         approvals: [],
         userInputRequests: [],
         pendingUserMessageReplacementByThread: {},
         loadedThreadsRef,
         loadedThreadRuntimeKeyRef,
+        runtimeKey: "runtime-1",
         dispatch,
         readThreadForWorkspace,
       }),
@@ -103,6 +106,8 @@ describe("useResidentThreadHistory", () => {
         },
       },
       threadResumeLoadingById: { "thread-loading": true },
+      threadHistoryRestoreStateById: { "thread-retrying": "loading" },
+      threadHistoryRecoveryAnchorThreadId: "thread-failed",
       activeTurnIdByThread: { "thread-turn": "turn-1" },
       approvals: [
         {
@@ -143,5 +148,146 @@ describe("useResidentThreadHistory", () => {
     protectedIds.forEach((threadId) => {
       expect(evicted).not.toContain(threadId);
     });
+  });
+
+  it("keeps one failed recovery anchor outside the recent history budget", () => {
+    const protectedThreadIds = getProtectedResidentThreadIds({
+      activeThreadId: "thread-active",
+      threadStatusById: {},
+      threadResumeLoadingById: {},
+      threadHistoryRestoreStateById: {},
+      threadHistoryRecoveryAnchorThreadId: "thread-failed",
+      activeTurnIdByThread: {},
+      approvals: [],
+      userInputRequests: [],
+      pendingUserMessageReplacementByThread: {},
+    });
+    const residents = [
+      "thread-failed",
+      "thread-old",
+      "thread-recent",
+      "thread-active",
+    ];
+
+    const evicted = selectResidentThreadEvictions(
+      residents,
+      residents,
+      protectedThreadIds,
+      MAX_RESIDENT_THREAD_HISTORIES,
+    );
+
+    expect(evicted).toEqual(["thread-old"]);
+    expect(residents.filter((threadId) => !evicted.includes(threadId))).toHaveLength(
+      MAX_RESIDENT_THREAD_HISTORIES + 1,
+    );
+  });
+
+  it("retries an evicted history read before reporting recovery failure", async () => {
+    vi.useFakeTimers();
+    const itemsByThread = buildItemsByThread(1);
+    const itemsByThreadRef = { current: itemsByThread };
+    const loadedThreadsRef = { current: { "thread-1": true } };
+    const loadedThreadRuntimeKeyRef = { current: { "thread-1": "runtime-1" } };
+    const dispatch = vi.fn();
+    const readThreadForWorkspace = vi
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce("thread-1");
+
+    const { result } = renderHook(() =>
+      useResidentThreadHistory({
+        activeThreadId: "thread-1",
+        itemsByThread,
+        itemsByThreadRef,
+        threadStatusById: {},
+        threadResumeLoadingById: {},
+        threadHistoryRestoreStateById: {},
+        threadHistoryRecoveryAnchorThreadId: null,
+        activeTurnIdByThread: {},
+        approvals: [],
+        userInputRequests: [],
+        pendingUserMessageReplacementByThread: {},
+        loadedThreadsRef,
+        loadedThreadRuntimeKeyRef,
+        runtimeKey: "runtime-1",
+        dispatch,
+        readThreadForWorkspace,
+      }),
+    );
+
+    let restorePromise!: Promise<string | null>;
+    act(() => {
+      restorePromise = result.current.restoreThreadHistory("ws-1", "thread-1");
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(readThreadForWorkspace).toHaveBeenCalledTimes(1);
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "setThreadHistoryRestoreState",
+      threadId: "thread-1",
+      state: "loading",
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    expect(readThreadForWorkspace).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+      await restorePromise;
+    });
+
+    expect(readThreadForWorkspace).toHaveBeenCalledTimes(3);
+    expect(dispatch).toHaveBeenLastCalledWith({
+      type: "setThreadHistoryRestoreState",
+      threadId: "thread-1",
+      state: null,
+    });
+    vi.useRealTimers();
+  });
+
+  it("reports recovery failure after bounded history retries", async () => {
+    vi.useFakeTimers();
+    const itemsByThread = buildItemsByThread(1);
+    const dispatch = vi.fn();
+    const readThreadForWorkspace = vi.fn().mockResolvedValue(null);
+    const { result } = renderHook(() =>
+      useResidentThreadHistory({
+        activeThreadId: "thread-1",
+        itemsByThread,
+        itemsByThreadRef: { current: itemsByThread },
+        threadStatusById: {},
+        threadResumeLoadingById: {},
+        threadHistoryRestoreStateById: {},
+        threadHistoryRecoveryAnchorThreadId: null,
+        activeTurnIdByThread: {},
+        approvals: [],
+        userInputRequests: [],
+        pendingUserMessageReplacementByThread: {},
+        loadedThreadsRef: { current: { "thread-1": true } },
+        loadedThreadRuntimeKeyRef: { current: { "thread-1": "runtime-1" } },
+        runtimeKey: "runtime-1",
+        dispatch,
+        readThreadForWorkspace,
+      }),
+    );
+
+    let restoredThreadId: string | null = "unexpected";
+    await act(async () => {
+      const restorePromise = result.current.restoreThreadHistory("ws-1", "thread-1");
+      await vi.advanceTimersByTimeAsync(1300);
+      restoredThreadId = await restorePromise;
+    });
+
+    expect(restoredThreadId).toBeNull();
+    expect(readThreadForWorkspace).toHaveBeenCalledTimes(3);
+    expect(dispatch).toHaveBeenLastCalledWith({
+      type: "setThreadHistoryRestoreState",
+      threadId: "thread-1",
+      state: "failed",
+    });
+    vi.useRealTimers();
   });
 });

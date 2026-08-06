@@ -1781,6 +1781,8 @@ export const I18N_STRINGS = {
     "messages.emptyExistingThread": "发送提示词给 Agent。",
     "messages.emptyNewThread": "发送提示词，启动新 Agent。",
     "messages.loading": "加载中...",
+    "messages.historyLoadFailed": "会话记录加载失败。",
+    "messages.retryHistory": "重新加载",
   },
   en: {
     "app.crash.title": "The interface failed to load",
@@ -3576,6 +3578,8 @@ export const I18N_STRINGS = {
     "messages.emptyExistingThread": "Send a prompt to the Agent.",
     "messages.emptyNewThread": "Send a prompt to start a new Agent.",
     "messages.loading": "Loading...",
+    "messages.historyLoadFailed": "Failed to load conversation history.",
+    "messages.retryHistory": "Reload",
   },
 } as const satisfies Record<ResolvedAppLanguage, Record<string, string>>;
 

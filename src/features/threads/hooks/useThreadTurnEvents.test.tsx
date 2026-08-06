@@ -1324,6 +1324,30 @@ describe("useThreadTurnEvents", () => {
     expect(safeMessageActivity).toHaveBeenCalled();
   });
 
+  it("anchors terminal failures and releases the anchor when a new turn starts", () => {
+    const { result, dispatch } = makeOptions();
+
+    act(() => {
+      result.current.onTurnError("ws-1", "thread-1", "turn-failed", {
+        message: "boom",
+        willRetry: false,
+      });
+    });
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "setThreadHistoryRecoveryAnchor",
+      threadId: "thread-1",
+    });
+
+    dispatch.mockClear();
+    act(() => {
+      result.current.onTurnStarted("ws-1", "thread-1", "turn-next");
+    });
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "clearThreadHistoryRecoveryAnchor",
+      threadId: "thread-1",
+    });
+  });
+
   it("ignores stale turn errors for non-active turns", () => {
     const {
       result,

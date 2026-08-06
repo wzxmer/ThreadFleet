@@ -15,6 +15,7 @@ import ArrowDown from "lucide-react/dist/esm/icons/arrow-down";
 import ArrowUp from "lucide-react/dist/esm/icons/arrow-up";
 import ChevronDown from "lucide-react/dist/esm/icons/chevron-down";
 import ChevronRight from "lucide-react/dist/esm/icons/chevron-right";
+import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw";
 import Search from "lucide-react/dist/esm/icons/search";
 import X from "lucide-react/dist/esm/icons/x";
 import type {
@@ -332,6 +333,8 @@ type MessagesProps = {
   isThinking: boolean;
   activityState?: ModelActivityState;
   isLoadingMessages?: boolean;
+  historyLoadFailed?: boolean;
+  onRetryHistory?: () => void;
   hasOlderHistory?: boolean;
   isLoadingOlderHistory?: boolean;
   onLoadOlderHistory?: () => Promise<boolean>;
@@ -441,6 +444,8 @@ export const Messages = memo(function Messages({
   isThinking,
   activityState = "idle",
   isLoadingMessages = false,
+  historyLoadFailed = false,
+  onRetryHistory,
   hasOlderHistory = false,
   isLoadingOlderHistory = false,
   onLoadOlderHistory,
@@ -1971,11 +1976,33 @@ export const Messages = memo(function Messages({
           {!items.length &&
             !userInputNode &&
             !isThinking &&
-            !isLoadingMessages && (
+            !isLoadingMessages &&
+            !historyLoadFailed && (
               <div className="empty messages-empty">
                 {threadId
                   ? t("messages.emptyExistingThread")
                   : t("messages.emptyNewThread")}
+              </div>
+            )}
+          {!items.length &&
+            !userInputNode &&
+            !isThinking &&
+            !isLoadingMessages &&
+            historyLoadFailed && (
+              <div className="empty messages-empty">
+                <div className="messages-history-load-failed" role="alert">
+                  <span>{t("messages.historyLoadFailed")}</span>
+                  {onRetryHistory && (
+                    <button
+                      type="button"
+                      className="ghost messages-history-retry"
+                      onClick={onRetryHistory}
+                    >
+                      <RefreshCw aria-hidden />
+                      <span>{t("messages.retryHistory")}</span>
+                    </button>
+                  )}
+                </div>
               </div>
             )}
           {!items.length &&

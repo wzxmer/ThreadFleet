@@ -27,6 +27,8 @@ type ThreadActivityStatus = {
   lastDurationMs: number | null;
 };
 
+export type ThreadHistoryRestoreState = "loading" | "failed";
+
 export type ThreadState = {
   activeThreadIdByWorkspace: Record<string, string | null>;
   itemsByThread: Record<string, ConversationItem[]>;
@@ -36,6 +38,8 @@ export type ThreadState = {
   threadParentById: Record<string, string>;
   threadStatusById: Record<string, ThreadActivityStatus>;
   threadResumeLoadingById: Record<string, boolean>;
+  threadHistoryRestoreStateById: Record<string, ThreadHistoryRestoreState>;
+  threadHistoryRecoveryAnchorThreadId: string | null;
   threadListLoadingByWorkspace: Record<string, boolean>;
   threadListPagingByWorkspace: Record<string, boolean>;
   threadListCursorByWorkspace: Record<string, string | null>;
@@ -182,6 +186,13 @@ export type ThreadAction =
       isLoading: boolean;
     }
   | {
+      type: "setThreadHistoryRestoreState";
+      threadId: string;
+      state: ThreadHistoryRestoreState | null;
+    }
+  | { type: "setThreadHistoryRecoveryAnchor"; threadId: string }
+  | { type: "clearThreadHistoryRecoveryAnchor"; threadId: string }
+  | {
       type: "setThreadListPaging";
       workspaceId: string;
       isLoading: boolean;
@@ -275,6 +286,8 @@ export const initialState: ThreadState = {
   threadParentById: {},
   threadStatusById: {},
   threadResumeLoadingById: {},
+  threadHistoryRestoreStateById: {},
+  threadHistoryRecoveryAnchorThreadId: null,
   threadListLoadingByWorkspace: {},
   threadListPagingByWorkspace: {},
   threadListCursorByWorkspace: {},

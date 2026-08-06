@@ -631,6 +631,79 @@ describe("useThreads UX integration", () => {
     });
   });
 
+  it("keeps the latest failed thread resident across later thread switches", async () => {
+    vi.mocked(readThread).mockImplementation(async (_workspaceId, threadId) => ({
+      result: {
+        thread: {
+          id: threadId,
+          turns: [
+            {
+              items: [
+                {
+                  type: "agentMessage",
+                  id: `message-${threadId}`,
+                  text: `history for ${threadId}`,
+                },
+              ],
+            },
+          ],
+        },
+      },
+    }) as Awaited<ReturnType<typeof readThread>>);
+    const { result } = renderHook(() =>
+      useThreads({ activeWorkspace: workspace, onWorkspaceConnected: vi.fn() }),
+    );
+
+    act(() => {
+      result.current.setActiveThreadId("thread-failed");
+    });
+    await waitFor(() => {
+      expect(result.current.activeItems.some((item) => item.id === "message-thread-failed"))
+        .toBe(true);
+    });
+    act(() => {
+      handlers?.onTurnStarted?.("ws-1", "thread-failed", "turn-failed");
+      handlers?.onTurnError?.("ws-1", "thread-failed", "turn-failed", {
+        message: "request failed",
+        willRetry: false,
+      });
+    });
+
+    for (const threadId of ["thread-other-1", "thread-other-2", "thread-other-3"]) {
+      act(() => {
+        result.current.setActiveThreadId(threadId);
+      });
+      await waitFor(() => {
+        expect(result.current.activeItems.some((item) => item.id === `message-${threadId}`))
+          .toBe(true);
+      });
+    }
+
+    await waitFor(() => {
+      expect(Object.keys(result.current.itemsByThread)).toHaveLength(
+        MAX_RESIDENT_THREAD_HISTORIES + 1,
+      );
+    });
+    expect(result.current.itemsByThread["thread-failed"]).toBeDefined();
+    expect(result.current.threadHistoryRecoveryAnchorThreadId).toBe("thread-failed");
+
+    const failedReadCountBeforeReselect = vi.mocked(readThread).mock.calls.filter(
+      ([workspaceId, threadId]) =>
+        workspaceId === "ws-1" && threadId === "thread-failed",
+    ).length;
+    act(() => {
+      result.current.setActiveThreadId("thread-failed");
+    });
+    expect(result.current.activeItems.some((item) => item.id === "message-thread-failed"))
+      .toBe(true);
+    expect(
+      vi.mocked(readThread).mock.calls.filter(
+        ([workspaceId, threadId]) =>
+          workspaceId === "ws-1" && threadId === "thread-failed",
+      ),
+    ).toHaveLength(failedReadCountBeforeReselect);
+  });
+
   it("does not reactivate a first-send thread after the user switches away", async () => {
     let resolveStart!: (value: Awaited<ReturnType<typeof startThread>>) => void;
     vi.mocked(startThread).mockReturnValue(

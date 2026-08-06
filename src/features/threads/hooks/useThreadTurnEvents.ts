@@ -502,6 +502,7 @@ export function useThreadTurnEvents({
         workspaceId,
         threadId,
       });
+      dispatch({ type: "clearThreadHistoryRecoveryAnchor", threadId });
       dispatch({ type: "setThreadTurnDiff", threadId, diff: "" });
       if (turnId) {
         clearTerminalPlanStaleTimer(threadId);
@@ -565,6 +566,11 @@ export function useThreadTurnEvents({
       }
       const terminalTurnId = turnId || lastExecutionTurnIdByThreadRef.current[threadId];
       finalizeTerminalTurn(workspaceId, threadId, terminalTurnId, status);
+      if (status === "failed") {
+        dispatch({ type: "setThreadHistoryRecoveryAnchor", threadId });
+      } else if (status === "completed") {
+        dispatch({ type: "clearThreadHistoryRecoveryAnchor", threadId });
+      }
       continuationPendingByThreadRef.current[threadId] = false;
       markProcessing(threadId, false);
       resetThreadTurnState(
@@ -579,6 +585,7 @@ export function useThreadTurnEvents({
       reconcileTerminalPlan(workspaceId, threadId, turnId);
     },
     [
+      dispatch,
       finalizeTerminalTurn,
       getLatestKnownActiveTurnId,
       markProcessing,
@@ -631,6 +638,9 @@ export function useThreadTurnEvents({
         statusType === "notloaded" ||
         statusType === "systemerror"
       ) {
+        if (statusType === "systemerror") {
+          dispatch({ type: "setThreadHistoryRecoveryAnchor", threadId });
+        }
         if (!continuationPendingByThreadRef.current[threadId]) {
           finalizeTerminalTurn(
             workspaceId,
@@ -657,6 +667,7 @@ export function useThreadTurnEvents({
       }
     },
     [
+      dispatch,
       finalizeTerminalTurn,
       getLatestKnownActiveTurnId,
       markProcessing,
@@ -674,6 +685,7 @@ export function useThreadTurnEvents({
       const terminalTurnId =
         activeTurnId ?? lastExecutionTurnIdByThreadRef.current[threadId] ?? "";
       finalizeTerminalTurn(workspaceId, threadId, terminalTurnId, "failed");
+      dispatch({ type: "setThreadHistoryRecoveryAnchor", threadId });
       continuationPendingByThreadRef.current[threadId] = false;
       setThreadLoaded(threadId, false);
       markProcessing(threadId, false);
@@ -697,6 +709,7 @@ export function useThreadTurnEvents({
       }
     },
     [
+      dispatch,
       finalizeTerminalTurn,
       getLatestKnownActiveTurnId,
       markProcessing,
@@ -824,6 +837,7 @@ export function useThreadTurnEvents({
       }
       const terminalTurnId = turnId || lastExecutionTurnIdByThreadRef.current[threadId];
       finalizeTerminalTurn(workspaceId, threadId, terminalTurnId, "failed");
+      dispatch({ type: "setThreadHistoryRecoveryAnchor", threadId });
       continuationPendingByThreadRef.current[threadId] = false;
       dispatch({ type: "ensureThread", workspaceId, threadId });
       markProcessing(threadId, false);

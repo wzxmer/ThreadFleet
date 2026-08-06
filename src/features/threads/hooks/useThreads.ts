@@ -1071,6 +1071,9 @@ export function useThreads({
     safeMessageActivity,
   });
 
+  const residentHistoryRuntimeContext = getThreadListRuntimeContext();
+  const residentHistoryRuntimeKey = `${residentHistoryRuntimeContext.sourceId ?? ""}:${residentHistoryRuntimeContext.runtimeGeneration}`;
+
   const { isThreadHistoryEvicted, restoreThreadHistory } =
     useResidentThreadHistory({
       activeThreadId,
@@ -1078,6 +1081,9 @@ export function useThreads({
       itemsByThreadRef,
       threadStatusById: state.threadStatusById,
       threadResumeLoadingById: state.threadResumeLoadingById,
+      threadHistoryRestoreStateById: state.threadHistoryRestoreStateById,
+      threadHistoryRecoveryAnchorThreadId:
+        state.threadHistoryRecoveryAnchorThreadId,
       activeTurnIdByThread: state.activeTurnIdByThread,
       approvals: state.approvals,
       userInputRequests: state.userInputRequests,
@@ -1085,6 +1091,7 @@ export function useThreads({
         state.pendingUserMessageReplacementByThread,
       loadedThreadsRef,
       loadedThreadRuntimeKeyRef,
+      runtimeKey: residentHistoryRuntimeKey,
       dispatch,
       readThreadForWorkspace,
     });
@@ -1612,6 +1619,9 @@ export function useThreads({
     threadStatusById: state.threadStatusById,
     pendingTurnStartByThread,
     threadResumeLoadingById: state.threadResumeLoadingById,
+    threadHistoryRestoreStateById: state.threadHistoryRestoreStateById,
+    threadHistoryRecoveryAnchorThreadId:
+      state.threadHistoryRecoveryAnchorThreadId,
     threadListLoadingByWorkspace: state.threadListLoadingByWorkspace,
     threadListPagingByWorkspace: state.threadListPagingByWorkspace,
     threadListCursorByWorkspace: state.threadListCursorByWorkspace,

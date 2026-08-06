@@ -210,6 +210,10 @@ export function reduceThreadLifecycle(
           ...state.activeThreadIdByWorkspace,
           [action.workspaceId]: nextActive,
         },
+        threadHistoryRecoveryAnchorThreadId:
+          state.threadHistoryRecoveryAnchorThreadId === action.threadId
+            ? null
+            : state.threadHistoryRecoveryAnchorThreadId,
       };
     }
     case "removeThread": {
@@ -239,6 +243,10 @@ export function reduceThreadLifecycle(
         [action.threadId]: ___________,
         ...restCompletedContextCompactionIds
       } = state.completedContextCompactionIdsByThread;
+      const {
+        [action.threadId]: ____________,
+        ...restHistoryRestoreStates
+      } = state.threadHistoryRestoreStateById;
       return {
         ...state,
         threadsByWorkspace: {
@@ -257,6 +265,11 @@ export function reduceThreadLifecycle(
         pendingUserMessageReplacementByThread: restPendingUserMessageReplacement,
         completedContextCompactionIdsByThread:
           restCompletedContextCompactionIds,
+        threadHistoryRestoreStateById: restHistoryRestoreStates,
+        threadHistoryRecoveryAnchorThreadId:
+          state.threadHistoryRecoveryAnchorThreadId === action.threadId
+            ? null
+            : state.threadHistoryRecoveryAnchorThreadId,
         activeThreadIdByWorkspace: {
           ...state.activeThreadIdByWorkspace,
           [action.workspaceId]: nextActive,
@@ -635,6 +648,7 @@ export function reduceThreadLifecycle(
 
       const activeThreadId = state.activeThreadIdByWorkspace[action.workspaceId];
       appendExistingAnchor(activeThreadId);
+      appendExistingAnchor(state.threadHistoryRecoveryAnchorThreadId);
       existingThreads.forEach((thread) => {
         if (state.threadStatusById[thread.id]?.isProcessing) {
           appendExistingAnchor(thread.id);
@@ -655,6 +669,9 @@ export function reduceThreadLifecycle(
       const anchorIds = new Set<string>();
       if (activeThreadId) {
         anchorIds.add(activeThreadId);
+      }
+      if (state.threadHistoryRecoveryAnchorThreadId) {
+        anchorIds.add(state.threadHistoryRecoveryAnchorThreadId);
       }
       existingThreads.forEach((thread) => {
         if (
@@ -715,6 +732,35 @@ export function reduceThreadLifecycle(
           [action.threadId]: action.isLoading,
         },
       };
+    case "setThreadHistoryRestoreState": {
+      const current = state.threadHistoryRestoreStateById[action.threadId];
+      if (action.state === null) {
+        if (!current) {
+          return state;
+        }
+        const { [action.threadId]: _, ...rest } =
+          state.threadHistoryRestoreStateById;
+        return { ...state, threadHistoryRestoreStateById: rest };
+      }
+      if (current === action.state) {
+        return state;
+      }
+      return {
+        ...state,
+        threadHistoryRestoreStateById: {
+          ...state.threadHistoryRestoreStateById,
+          [action.threadId]: action.state,
+        },
+      };
+    }
+    case "setThreadHistoryRecoveryAnchor":
+      return state.threadHistoryRecoveryAnchorThreadId === action.threadId
+        ? state
+        : { ...state, threadHistoryRecoveryAnchorThreadId: action.threadId };
+    case "clearThreadHistoryRecoveryAnchor":
+      return state.threadHistoryRecoveryAnchorThreadId === action.threadId
+        ? { ...state, threadHistoryRecoveryAnchorThreadId: null }
+        : state;
     case "setThreadListPaging":
       return {
         ...state,
@@ -775,6 +821,9 @@ export function reduceThreadLifecycle(
       const activeThreadId = state.activeThreadIdByWorkspace[action.workspaceId];
       if (activeThreadId) {
         anchorThreadIds.add(activeThreadId);
+      }
+      if (state.threadHistoryRecoveryAnchorThreadId) {
+        anchorThreadIds.add(state.threadHistoryRecoveryAnchorThreadId);
       }
       threads.forEach((thread) => {
         const status = state.threadStatusById[thread.id];
@@ -841,6 +890,10 @@ export function reduceThreadLifecycle(
         ),
         threadResumeLoadingById: omitThreadKeys(
           state.threadResumeLoadingById,
+          omittedThreadIds,
+        ),
+        threadHistoryRestoreStateById: omitThreadKeys(
+          state.threadHistoryRestoreStateById,
           omittedThreadIds,
         ),
         lastAgentMessageByThread: omitThreadKeys(

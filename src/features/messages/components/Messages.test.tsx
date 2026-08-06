@@ -78,6 +78,43 @@ describe("Messages", () => {
     exportMarkdownFileMock.mockReset();
   });
 
+  it("shows history recovery failure separately from an empty thread and retries", () => {
+    const onRetryHistory = vi.fn();
+    const { container, rerender } = render(
+      <Messages
+        items={[]}
+        threadId="thread-history-failed"
+        workspaceId="ws-1"
+        isThinking={false}
+        historyLoadFailed
+        onRetryHistory={onRetryHistory}
+        openTargets={[]}
+        selectedOpenAppId=""
+      />,
+    );
+
+    expect(screen.getByText("会话记录加载失败。")).toBeTruthy();
+    expect(screen.queryByText("发送提示词给 Agent。")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "重新加载" }));
+    expect(onRetryHistory).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <Messages
+        items={[]}
+        threadId="thread-history-failed"
+        workspaceId="ws-1"
+        isThinking={false}
+        isLoadingMessages
+        historyLoadFailed
+        onRetryHistory={onRetryHistory}
+        openTargets={[]}
+        selectedOpenAppId=""
+      />,
+    );
+    expect(container.querySelector(".messages-loading-indicator")).toBeTruthy();
+    expect(screen.queryByText("会话记录加载失败。")).toBeNull();
+  });
+
   it("shows the global assistant identity with animated icons and one running state", () => {
     const createdAt = new Date("2026-07-30T14:28:00").getTime();
     const summary: TurnExecutionSummary = {

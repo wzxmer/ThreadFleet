@@ -88,6 +88,7 @@ type UseMainAppLayoutSurfacesArgs = {
   setThreadAutoContinueEnabled: (threadId: string, enabled: boolean) => void;
   setWorkspaceAutoContinueEnabled: (workspaceId: string, enabled: boolean) => void;
   threadResumeLoadingById: Record<string, boolean>;
+  threadHistoryRestoreStateById: ThreadState["threadHistoryRestoreStateById"];
   threadListLoadingByWorkspace: SidebarProps["threadListLoadingByWorkspace"];
   threadListPagingByWorkspace: SidebarProps["threadListPagingByWorkspace"];
   threadListCursorByWorkspace: SidebarProps["threadListCursorByWorkspace"];
@@ -338,6 +339,7 @@ function buildPrimarySurface({
   setThreadAutoContinueEnabled,
   setWorkspaceAutoContinueEnabled,
   threadResumeLoadingById,
+  threadHistoryRestoreStateById,
   threadListLoadingByWorkspace,
   threadListPagingByWorkspace,
   threadListCursorByWorkspace,
@@ -736,8 +738,20 @@ function buildPrimarySurface({
         ),
       activityState: modelActivityState,
       isLoadingMessages: activeThreadId
-        ? threadResumeLoadingById[activeThreadId] ?? false
+        ? (threadResumeLoadingById[activeThreadId] ?? false) ||
+          threadHistoryRestoreStateById[activeThreadId] === "loading"
         : false,
+      historyLoadFailed: activeThreadId
+        ? threadHistoryRestoreStateById[activeThreadId] === "failed"
+        : false,
+      onRetryHistory:
+        activeWorkspaceId && activeThreadId
+          ? () =>
+              threadNavigation.setActiveThreadId(
+                activeThreadId,
+                activeWorkspaceId,
+              )
+          : undefined,
       hasOlderHistory: activeThreadId
         ? threadHistoryPageByThread[activeThreadId]?.hasMore ?? false
         : false,
@@ -1417,6 +1431,7 @@ export function useMainAppLayoutSurfaces({
   setThreadAutoContinueEnabled,
   setWorkspaceAutoContinueEnabled,
   threadResumeLoadingById,
+  threadHistoryRestoreStateById,
   threadListLoadingByWorkspace,
   threadListPagingByWorkspace,
   threadListCursorByWorkspace,
@@ -1657,6 +1672,7 @@ export function useMainAppLayoutSurfaces({
     setThreadAutoContinueEnabled,
     setWorkspaceAutoContinueEnabled,
     threadResumeLoadingById,
+    threadHistoryRestoreStateById,
     threadListLoadingByWorkspace,
     threadListPagingByWorkspace,
     threadListCursorByWorkspace,

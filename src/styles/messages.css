@@ -884,6 +884,29 @@
   letter-spacing: 0.02em;
 }
 
+.messages-history-load-failed {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.messages-history-retry {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
+.messages-history-retry svg {
+  width: 14px;
+  height: 14px;
+}
+
 .thinking {
   padding: 0;
   font-size: 12px;

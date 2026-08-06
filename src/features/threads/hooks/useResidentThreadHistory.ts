@@ -4,6 +4,7 @@ import type { ApprovalRequest, RequestUserInputRequest } from "@/types";
 import type { ThreadAction, ThreadState } from "./useThreadsReducer";
 
 export const MAX_RESIDENT_THREAD_HISTORIES = 2;
+export const THREAD_HISTORY_RESTORE_RETRY_DELAYS_MS = [300, 1000] as const;
 
 type ReadThreadForWorkspace = (
   workspaceId: string,
@@ -18,12 +19,15 @@ type UseResidentThreadHistoryOptions = {
   itemsByThreadRef: MutableRefObject<ThreadState["itemsByThread"]>;
   threadStatusById: ThreadState["threadStatusById"];
   threadResumeLoadingById: ThreadState["threadResumeLoadingById"];
+  threadHistoryRestoreStateById: ThreadState["threadHistoryRestoreStateById"];
+  threadHistoryRecoveryAnchorThreadId: string | null;
   activeTurnIdByThread: ThreadState["activeTurnIdByThread"];
   approvals: ApprovalRequest[];
   userInputRequests: RequestUserInputRequest[];
   pendingUserMessageReplacementByThread: ThreadState["pendingUserMessageReplacementByThread"];
   loadedThreadsRef: MutableRefObject<Record<string, boolean>>;
   loadedThreadRuntimeKeyRef: MutableRefObject<Record<string, string>>;
+  runtimeKey: string;
   dispatch: Dispatch<ThreadAction>;
   readThreadForWorkspace: ReadThreadForWorkspace;
 };
@@ -48,6 +52,8 @@ export function getProtectedResidentThreadIds({
   activeThreadId,
   threadStatusById,
   threadResumeLoadingById,
+  threadHistoryRestoreStateById,
+  threadHistoryRecoveryAnchorThreadId,
   activeTurnIdByThread,
   approvals,
   userInputRequests,
@@ -57,6 +63,8 @@ export function getProtectedResidentThreadIds({
   | "activeThreadId"
   | "threadStatusById"
   | "threadResumeLoadingById"
+  | "threadHistoryRestoreStateById"
+  | "threadHistoryRecoveryAnchorThreadId"
   | "activeTurnIdByThread"
   | "approvals"
   | "userInputRequests"
@@ -76,6 +84,14 @@ export function getProtectedResidentThreadIds({
       protectedThreadIds.add(threadId);
     }
   });
+  Object.entries(threadHistoryRestoreStateById).forEach(([threadId, state]) => {
+    if (state === "loading") {
+      protectedThreadIds.add(threadId);
+    }
+  });
+  if (threadHistoryRecoveryAnchorThreadId) {
+    protectedThreadIds.add(threadHistoryRecoveryAnchorThreadId);
+  }
   Object.entries(activeTurnIdByThread).forEach(([threadId, turnId]) => {
     if (turnId) {
       protectedThreadIds.add(threadId);
@@ -116,17 +132,23 @@ export function useResidentThreadHistory({
   itemsByThreadRef,
   threadStatusById,
   threadResumeLoadingById,
+  threadHistoryRestoreStateById,
+  threadHistoryRecoveryAnchorThreadId,
   activeTurnIdByThread,
   approvals,
   userInputRequests,
   pendingUserMessageReplacementByThread,
   loadedThreadsRef,
   loadedThreadRuntimeKeyRef,
+  runtimeKey,
   dispatch,
   readThreadForWorkspace,
 }: UseResidentThreadHistoryOptions) {
   const recentThreadIdsRef = useRef<string[]>([]);
   const evictedThreadIdsRef = useRef<Set<string>>(new Set());
+  const restoreInFlightByThreadRef = useRef<Map<string, Promise<string | null>>>(
+    new Map(),
+  );
 
   useEffect(() => {
     const residentThreadIds = Object.keys(itemsByThread);
@@ -148,10 +170,27 @@ export function useResidentThreadHistory({
       recentThreadIds.push(activeThreadId);
     }
 
+    const anchorRuntimeKey = threadHistoryRecoveryAnchorThreadId
+      ? loadedThreadRuntimeKeyRef.current[threadHistoryRecoveryAnchorThreadId]
+      : null;
+    const recoveryAnchorThreadId =
+      threadHistoryRecoveryAnchorThreadId &&
+      (!anchorRuntimeKey || anchorRuntimeKey === runtimeKey)
+        ? threadHistoryRecoveryAnchorThreadId
+        : null;
+    if (threadHistoryRecoveryAnchorThreadId && !recoveryAnchorThreadId) {
+      dispatch({
+        type: "clearThreadHistoryRecoveryAnchor",
+        threadId: threadHistoryRecoveryAnchorThreadId,
+      });
+    }
+
     const protectedThreadIds = getProtectedResidentThreadIds({
       activeThreadId,
       threadStatusById,
       threadResumeLoadingById,
+      threadHistoryRestoreStateById,
+      threadHistoryRecoveryAnchorThreadId: recoveryAnchorThreadId,
       activeTurnIdByThread,
       approvals,
       userInputRequests,
@@ -189,6 +228,9 @@ export function useResidentThreadHistory({
     loadedThreadRuntimeKeyRef,
     loadedThreadsRef,
     pendingUserMessageReplacementByThread,
+    runtimeKey,
+    threadHistoryRecoveryAnchorThreadId,
+    threadHistoryRestoreStateById,
     threadResumeLoadingById,
     threadStatusById,
     userInputRequests,
@@ -200,20 +242,64 @@ export function useResidentThreadHistory({
   );
 
   const restoreThreadHistory = useCallback(
-    async (workspaceId: string, threadId: string) => {
-      const replaceLocal = evictedThreadIdsRef.current.has(threadId);
-      const restoredThreadId = await readThreadForWorkspace(
-        workspaceId,
-        threadId,
-        false,
-        replaceLocal,
-      );
-      if (restoredThreadId) {
-        evictedThreadIdsRef.current.delete(threadId);
+    (workspaceId: string, threadId: string) => {
+      const restoreKey = `${workspaceId}:${threadId}`;
+      const existingRestore = restoreInFlightByThreadRef.current.get(restoreKey);
+      if (existingRestore) {
+        return existingRestore;
       }
-      return restoredThreadId;
+
+      const restorePromise = (async () => {
+        dispatch({
+          type: "setThreadHistoryRestoreState",
+          threadId,
+          state: "loading",
+        });
+        const replaceLocal = evictedThreadIdsRef.current.has(threadId);
+        for (
+          let attempt = 0;
+          attempt <= THREAD_HISTORY_RESTORE_RETRY_DELAYS_MS.length;
+          attempt += 1
+        ) {
+          const restoredThreadId = await readThreadForWorkspace(
+            workspaceId,
+            threadId,
+            attempt > 0,
+            replaceLocal,
+          );
+          if (restoredThreadId) {
+            evictedThreadIdsRef.current.delete(threadId);
+            dispatch({
+              type: "setThreadHistoryRestoreState",
+              threadId,
+              state: null,
+            });
+            return restoredThreadId;
+          }
+          const retryDelay = THREAD_HISTORY_RESTORE_RETRY_DELAYS_MS[attempt];
+          if (retryDelay !== undefined) {
+            await new Promise<void>((resolve) => {
+              setTimeout(resolve, retryDelay);
+            });
+          }
+        }
+        dispatch({
+          type: "setThreadHistoryRestoreState",
+          threadId,
+          state: "failed",
+        });
+        return null;
+      })();
+
+      restoreInFlightByThreadRef.current.set(restoreKey, restorePromise);
+      void restorePromise.finally(() => {
+        if (restoreInFlightByThreadRef.current.get(restoreKey) === restorePromise) {
+          restoreInFlightByThreadRef.current.delete(restoreKey);
+        }
+      });
+      return restorePromise;
     },
-    [readThreadForWorkspace],
+    [dispatch, readThreadForWorkspace],
   );
 
   return { isThreadHistoryEvicted, restoreThreadHistory };
