@@ -1489,18 +1489,31 @@ export function useThreads({
     [getThreadListRuntimeContext, itemsByThreadRef, loadedThreadRuntimeKeyRef, loadedThreadsRef],
   );
 
-  const startupHistoryRestoreAttemptedRef = useRef(new Set<string>());
+  const observedActiveThreadIdByWorkspaceRef = useRef<ActiveThreadSelectionMap>({
+    ...state.activeThreadIdByWorkspace,
+  });
+  const activeHistoryRestoreAttemptedRef = useRef(new Set<string>());
   useEffect(() => {
     const workspaceId = activeWorkspaceId;
     const threadId = activeThreadId;
+    const previousThreadId = workspaceId
+      ? observedActiveThreadIdByWorkspaceRef.current[workspaceId] ?? null
+      : null;
+    if (workspaceId) {
+      observedActiveThreadIdByWorkspaceRef.current[workspaceId] = threadId;
+    }
     const persistedThreadId = workspaceId
       ? initialActiveThreadSelectionsRef.current?.[workspaceId] ?? null
       : null;
+    const shouldRestoreHistory =
+      threadId === persistedThreadId ||
+      (previousThreadId !== null && previousThreadId !== threadId);
     if (
       !workspaceId ||
       !threadId ||
-      threadId !== persistedThreadId ||
-      state.threadsByWorkspace[workspaceId] === undefined
+      !shouldRestoreHistory ||
+      state.threadsByWorkspace[workspaceId] === undefined ||
+      state.threadResumeLoadingById[threadId]
     ) {
       return;
     }
@@ -1511,10 +1524,10 @@ export function useThreads({
       runtimeContext.sourceId ?? "",
       runtimeContext.runtimeGeneration,
     ].join(":");
-    if (startupHistoryRestoreAttemptedRef.current.has(restoreKey)) {
+    if (activeHistoryRestoreAttemptedRef.current.has(restoreKey)) {
       return;
     }
-    startupHistoryRestoreAttemptedRef.current.add(restoreKey);
+    activeHistoryRestoreAttemptedRef.current.add(restoreKey);
     if (
       hasLocalThreadSnapshot(threadId) &&
       !isThreadHistoryEvicted(threadId)
@@ -1531,6 +1544,7 @@ export function useThreads({
     isThreadHistoryEvicted,
     loadedThreadsRef,
     restoreThreadHistory,
+    state.threadResumeLoadingById,
     state.threadsByWorkspace,
   ]);
 

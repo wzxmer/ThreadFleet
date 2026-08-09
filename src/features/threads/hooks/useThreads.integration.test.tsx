@@ -374,6 +374,77 @@ describe("useThreads UX integration", () => {
     }
   });
 
+  it("loads the next thread after archiving the active thread", async () => {
+    vi.mocked(listThreads).mockResolvedValue({
+      result: {
+        data: [
+          {
+            id: "thread-archive",
+            preview: "Archive me",
+            updated_at: 2000,
+            cwd: workspace.path,
+          },
+          {
+            id: "thread-next",
+            preview: "Load me next",
+            updated_at: 1000,
+            cwd: workspace.path,
+          },
+        ],
+        nextCursor: null,
+      },
+    });
+    vi.mocked(readThread).mockImplementation(async (_workspaceId, threadId) => ({
+      result: {
+        thread: {
+          id: threadId,
+          turns: [
+            {
+              items: [
+                {
+                  type: "agentMessage",
+                  id: `message-${threadId}`,
+                  text: `Loaded ${threadId}`,
+                },
+              ],
+            },
+          ],
+        },
+      },
+    }));
+    vi.mocked(archiveThread).mockResolvedValue({});
+
+    const { result } = renderHook(() =>
+      useThreads({
+        activeWorkspace: workspace,
+        onWorkspaceConnected: vi.fn(),
+      }),
+    );
+
+    await act(async () => {
+      await result.current.listThreadsForWorkspace(workspace);
+    });
+    act(() => {
+      result.current.setActiveThreadId("thread-archive");
+    });
+    await waitFor(() => {
+      expect(readThread).toHaveBeenCalledWith("ws-1", "thread-archive");
+    });
+    vi.mocked(readThread).mockClear();
+
+    act(() => {
+      result.current.removeThread("ws-1", "thread-archive");
+    });
+
+    await waitFor(() => {
+      expect(result.current.activeThreadId).toBe("thread-next");
+      expect(readThread).toHaveBeenCalledWith("ws-1", "thread-next");
+      expect(result.current.activeItems).toEqual([
+        expect.objectContaining({ id: "message-thread-next" }),
+      ]);
+    });
+  });
+
   it("does not let window focus reconcile an active turn from history", async () => {
     vi.mocked(readThread).mockResolvedValue({
       result: {
