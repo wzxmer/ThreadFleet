@@ -110,6 +110,7 @@ type UseMainAppModalsArgs = {
     handleToggleAutomaticAppUpdateChecks: () => void;
     updater: NonNullable<SettingsViewProps["updater"]>;
     windowsUiUpdater: NonNullable<SettingsViewProps["windowsUiUpdater"]>;
+    codexCliUpdater: NonNullable<SettingsViewProps["codexCliUpdater"]>;
     doctor: (
       codexBin: string | null,
       codexArgs: string | null,
@@ -190,6 +191,7 @@ function buildSettingsViewProps({
       settings.handleToggleAutomaticAppUpdateChecks,
     updater: settings.updater,
     windowsUiUpdater: settings.windowsUiUpdater,
+    codexCliUpdater: settings.codexCliUpdater,
     onRunDoctor: settings.doctor,
     onRunCodexUpdate: settings.codexUpdate,
     onUpdateWorkspaceSettings: async (id, nextSettings) => {

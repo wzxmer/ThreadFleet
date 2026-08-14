@@ -943,6 +943,7 @@ export type AppSettings = {
   autoDeleteArchivedThreadsEnabled: boolean;
   autoDeleteArchivedThreadsDays: 30 | 60 | 90 | 180;
   automaticAppUpdateChecksEnabled: boolean;
+  automaticCodexCliUpdateChecksEnabled: boolean;
   automaticWindowsUiUpdateChecksEnabled: boolean;
   experimentalWindowsInstallerMigrationEnabled: boolean;
   uiFontFamily: string;
@@ -1059,6 +1060,25 @@ export type CodexDoctorResult = {
 export type InstalledManagedCodex = {
   path: string;
   version: string;
+};
+
+export type CodexCliManagedPackage = {
+  version: string;
+  fileName: string;
+  urls: string[];
+  size: number;
+  sha256: string;
+};
+
+export type CodexCliUpdateCheckResult = {
+  status: "available" | "upToDate" | "notInstalled" | "unsupported";
+  installed: boolean;
+  currentVersion: string | null;
+  latestVersion: string | null;
+  platform: string;
+  source: "tencent" | "aliyun" | "github" | string | null;
+  package: CodexCliManagedPackage | null;
+  reasonCode: string | null;
 };
 
 export type CodexStatus = {

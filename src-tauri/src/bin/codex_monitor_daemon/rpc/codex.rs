@@ -961,6 +961,10 @@ pub(super) async fn try_handle(
             let codex_args = parse_optional_string(params, "codexArgs");
             Some(state.codex_doctor(codex_bin, codex_args).await)
         }
+        "check_codex_cli_update" => {
+            let codex_bin = parse_optional_string(params, "codexBin");
+            Some(state.check_codex_cli_update(codex_bin).await)
+        }
         "generate_run_metadata" => {
             let workspace_id = match parse_string(params, "workspaceId") {
                 Ok(value) => value,

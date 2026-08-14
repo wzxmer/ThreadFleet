@@ -441,6 +441,7 @@ function buildDefaultSettings(): AppSettings {
     autoDeleteArchivedThreadsEnabled: false,
     autoDeleteArchivedThreadsDays: 30,
     automaticAppUpdateChecksEnabled: true,
+    automaticCodexCliUpdateChecksEnabled: true,
     automaticWindowsUiUpdateChecksEnabled: true,
     experimentalWindowsInstallerMigrationEnabled: false,
     uiFontFamily: DEFAULT_UI_FONT_FAMILY,
@@ -658,6 +659,8 @@ function normalizeAppSettings(settings: AppSettings): AppSettings {
     )
       ? settings.autoDeleteArchivedThreadsDays
       : 30,
+    automaticCodexCliUpdateChecksEnabled:
+      settings.automaticCodexCliUpdateChecksEnabled !== false,
     automaticWindowsUiUpdateChecksEnabled:
       settings.automaticWindowsUiUpdateChecksEnabled !== false,
     experimentalWindowsInstallerMigrationEnabled:

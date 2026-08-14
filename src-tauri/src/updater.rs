@@ -218,7 +218,7 @@ pub async fn install_windows_ui_update(
 
 #[tauri::command]
 pub fn managed_codex_platform() -> String {
-    format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH)
+    crate::shared::codex_cli_update_core::managed_codex_platform()
 }
 
 fn resolve_release_architecture(
@@ -409,6 +409,7 @@ async fn download_release_asset_impl(
 #[tauri::command]
 pub async fn install_managed_codex(
     app_handle: tauri::AppHandle,
+    state: State<'_, AppState>,
     urls: Vec<String>,
     file_name: String,
     request_id: String,
@@ -416,6 +417,11 @@ pub async fn install_managed_codex(
     expected_size: u64,
     expected_sha256: String,
 ) -> Result<InstalledManagedCodex, String> {
+    if matches!(state.app_settings.lock().await.backend_mode, BackendMode::Remote) {
+        return Err(
+            "Managed Codex installation must run on the remote execution host.".to_string(),
+        );
+    }
     if urls.is_empty() {
         return Err("No Codex CLI download URL was provided.".to_string());
     }

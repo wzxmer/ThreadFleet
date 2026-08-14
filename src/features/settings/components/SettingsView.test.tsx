@@ -199,6 +199,7 @@ const baseSettings: AppSettings = {
   autoDeleteArchivedThreadsEnabled: false,
   autoDeleteArchivedThreadsDays: 30,
   automaticAppUpdateChecksEnabled: true,
+  automaticCodexCliUpdateChecksEnabled: true,
   automaticWindowsUiUpdateChecksEnabled: true,
   experimentalWindowsInstallerMigrationEnabled: false,
   uiFontFamily:
@@ -388,6 +389,9 @@ const renderCodexSection = (
     windowsUiUpdater?: Partial<
       NonNullable<ComponentProps<typeof SettingsView>["windowsUiUpdater"]>
     >;
+    codexCliUpdater?: Partial<
+      NonNullable<ComponentProps<typeof SettingsView>["codexCliUpdater"]>
+    >;
   } = {},
 ) => {
   cleanup();
@@ -400,6 +404,15 @@ const renderCodexSection = (
     startInstall: vi.fn(),
     dismiss: vi.fn(),
     ...options.windowsUiUpdater,
+  };
+  const codexCliUpdater = {
+    enabled: true,
+    installEnabled: true,
+    state: { stage: "idle" as const },
+    checkForUpdates: vi.fn(),
+    startInstall: vi.fn(),
+    dismiss: vi.fn(),
+    ...options.codexCliUpdater,
   };
   const props: ComponentProps<typeof SettingsView> = {
     reduceTransparency: false,
@@ -430,6 +443,7 @@ const renderCodexSection = (
     onRemoveDictationModel: vi.fn(),
     providerSessionDiagnostics: options.providerSessionDiagnostics,
     windowsUiUpdater,
+    codexCliUpdater,
     initialSection: options.initialSection ?? "codex",
   };
 
@@ -1424,6 +1438,24 @@ describe("SettingsView Environments", () => {
 });
 
 describe("SettingsView Codex section", () => {
+  it("toggles automatic Codex CLI update checks", async () => {
+    const onUpdateAppSettings = vi.fn().mockResolvedValue(undefined);
+    renderCodexSection({
+      appSettings: { automaticCodexCliUpdateChecksEnabled: false },
+      onUpdateAppSettings,
+    });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "启动时检查 Codex CLI 更新" }),
+    );
+
+    await waitFor(() => {
+      expect(onUpdateAppSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ automaticCodexCliUpdateChecksEnabled: true }),
+      );
+    });
+  });
+
   it("toggles automatic windows-ui update checks", async () => {
     const onUpdateAppSettings = vi.fn().mockResolvedValue(undefined);
     renderCodexSection({

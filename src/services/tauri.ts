@@ -14,6 +14,7 @@ import type {
   CredentialSelection,
   CodexSyncDiagnostics,
   CodexStatus,
+  CodexCliUpdateCheckResult,
   CodexUpdateResult,
   CodexDoctorResult,
   InstalledManagedCodex,
@@ -1646,6 +1647,12 @@ export async function runCodexDoctor(
   codexArgs: string | null,
 ): Promise<CodexDoctorResult> {
   return invoke<CodexDoctorResult>("codex_doctor", { codexBin, codexArgs });
+}
+
+export async function checkCodexCliUpdate(
+  codexBin: string | null,
+): Promise<CodexCliUpdateCheckResult> {
+  return invoke<CodexCliUpdateCheckResult>("check_codex_cli_update", { codexBin });
 }
 
 export async function runCodexUpdate(

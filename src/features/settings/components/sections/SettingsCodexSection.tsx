@@ -31,7 +31,10 @@ import {
   resolveCodexProviderBaseUrl,
 } from "@/utils/providerProfiles";
 import type { ProviderSessionDiagnostics } from "@settings/utils/providerSessionDiagnostics";
-import type { SettingsWindowsUiUpdaterControls } from "../SettingsView";
+import type {
+  SettingsCodexCliUpdaterControls,
+  SettingsWindowsUiUpdaterControls,
+} from "../SettingsView";
 import { WindowsUiUpdatePrompt } from "@/features/update/components/WindowsUiUpdatePrompt";
 import { CodexSessionSharingStatus } from "./CodexSessionSharingStatus";
 
@@ -86,6 +89,7 @@ type SettingsCodexSectionProps = {
     workspaceName: string | null;
   };
   windowsUiUpdater?: SettingsWindowsUiUpdaterControls;
+  codexCliUpdater?: SettingsCodexCliUpdaterControls;
   globalAgentsMeta: string;
   globalAgentsError: string | null;
   globalAgentsContent: string;
@@ -126,6 +130,14 @@ const DEFAULT_CODEX_KEY_ENV_VAR = "OPENAI_API_KEY";
 const DEFAULT_CODEX_BASE_URL_ENV_VAR = "OPENAI_BASE_URL";
 const DISABLED_WINDOWS_UI_UPDATER: SettingsWindowsUiUpdaterControls = {
   enabled: false,
+  state: { stage: "idle" },
+  checkForUpdates: () => undefined,
+  startInstall: () => undefined,
+  dismiss: () => undefined,
+};
+const DISABLED_CODEX_CLI_UPDATER: SettingsCodexCliUpdaterControls = {
+  enabled: false,
+  installEnabled: false,
   state: { stage: "idle" },
   checkForUpdates: () => undefined,
   startInstall: () => undefined,
@@ -282,6 +294,7 @@ export function SettingsCodexSection({
   mcpStatusState,
   computerControlStatusState,
   windowsUiUpdater = DISABLED_WINDOWS_UI_UPDATER,
+  codexCliUpdater = DISABLED_CODEX_CLI_UPDATER,
   globalAgentsMeta,
   globalAgentsError,
   globalAgentsContent,
@@ -1898,6 +1911,97 @@ export function SettingsCodexSection({
               </div>
             </>
           )}
+          <div className="settings-windows-ui-update">
+            <SettingsToggleRow
+              className="settings-computer-control-toggle"
+              title={t("settings.codex.codexCliAutoCheck")}
+              subtitle={t("settings.codex.codexCliAutoCheckHelp")}
+            >
+              <SettingsToggleSwitch
+                pressed={appSettings.automaticCodexCliUpdateChecksEnabled}
+                aria-label={t("settings.codex.codexCliAutoCheck")}
+                onClick={() =>
+                  void onUpdateAppSettings({
+                    ...appSettings,
+                    automaticCodexCliUpdateChecksEnabled:
+                      !appSettings.automaticCodexCliUpdateChecksEnabled,
+                  })
+                }
+              />
+            </SettingsToggleRow>
+            <div className="settings-windows-ui-update-row">
+              <div className="settings-windows-ui-update-summary">
+                <div className="settings-field-label">
+                  {t("settings.codex.codexCliAutoCheck")}
+                </div>
+                <div
+                  className={`settings-help${
+                    codexCliUpdater.state.stage === "error"
+                      ? " settings-help-error"
+                      : ""
+                  }`}
+                >
+                  {codexCliUpdater.state.stage === "idle"
+                    ? t("settings.codex.codexCliUpdateIdle")
+                    : codexCliUpdater.state.stage === "checking"
+                      ? t("settings.codex.codexCliUpdateChecking")
+                      : codexCliUpdater.state.stage === "upToDate"
+                        ? `${t("settings.codex.codexCliUpdateCurrent")} ${codexCliUpdater.state.check?.currentVersion ?? "-"} · ${t("settings.codex.codexCliUpdateLatest")}`
+                        : codexCliUpdater.state.stage === "available"
+                          ? `${t("settings.codex.codexCliUpdateCurrent")} ${codexCliUpdater.state.check?.currentVersion ?? "-"} · ${t("settings.codex.codexCliUpdateAvailable")} ${codexCliUpdater.state.check?.latestVersion ?? "-"}`
+                          : codexCliUpdater.state.stage === "unsupported"
+                            ? t("settings.codex.codexCliUpdateUnsupported")
+                            : codexCliUpdater.state.stage === "notInstalled"
+                              ? t("settings.codex.missing")
+                              : codexCliUpdater.state.stage === "downloading"
+                                ? `${t("codexUpdate.downloading")} ${
+                                    codexCliUpdater.state.progress?.totalBytes
+                                      ? `${Math.round(
+                                          (codexCliUpdater.state.progress.downloadedBytes /
+                                            codexCliUpdater.state.progress.totalBytes) *
+                                            100,
+                                        )}%`
+                                      : ""
+                                  }`
+                                : codexCliUpdater.state.stage === "installing"
+                                  ? t("codexUpdate.installing")
+                                  : codexCliUpdater.state.stage === "restartRequired"
+                                    ? `${t("settings.codex.updated")} ${codexCliUpdater.state.installedVersion ?? ""}`
+                                    : codexCliUpdater.state.stage === "error"
+                                      ? `${t("settings.codex.codexCliUpdateFailed")}: ${codexCliUpdater.state.error ?? unknownLabel}`
+                                      : t("settings.codex.codexCliUpdateIdle")}
+                </div>
+              </div>
+              <div className="settings-windows-ui-update-actions">
+                {codexCliUpdater.state.stage === "available" && codexCliUpdater.installEnabled ? (
+                  <button
+                    type="button"
+                    className="primary settings-button-compact"
+                    onClick={() => void codexCliUpdater.startInstall()}
+                  >
+                    {t("settings.codex.codexCliUpdateInstall")}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="ghost settings-button-compact"
+                    disabled={
+                      !codexCliUpdater.enabled ||
+                      codexCliUpdater.state.stage === "checking" ||
+                      codexCliUpdater.state.stage === "available" ||
+                      codexCliUpdater.state.stage === "downloading" ||
+                      codexCliUpdater.state.stage === "installing"
+                    }
+                    onClick={() => void codexCliUpdater.checkForUpdates()}
+                  >
+                    {codexCliUpdater.state.stage === "checking"
+                      ? t("settings.codex.codexCliUpdateChecking")
+                      : t("settings.codex.codexCliUpdateCheck")}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
           <div className="settings-windows-ui-update">
             <SettingsToggleRow
               className="settings-computer-control-toggle"

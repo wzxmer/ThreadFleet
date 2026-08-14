@@ -1333,6 +1333,11 @@ pub(crate) struct AppSettings {
     )]
     pub(crate) automatic_app_update_checks_enabled: bool,
     #[serde(
+        default = "default_automatic_codex_cli_update_checks_enabled",
+        rename = "automaticCodexCliUpdateChecksEnabled"
+    )]
+    pub(crate) automatic_codex_cli_update_checks_enabled: bool,
+    #[serde(
         default = "default_automatic_windows_ui_update_checks_enabled",
         rename = "automaticWindowsUiUpdateChecksEnabled"
     )]
@@ -1645,6 +1650,10 @@ fn default_auto_delete_archived_threads_days() -> u32 {
 }
 
 fn default_automatic_app_update_checks_enabled() -> bool {
+    true
+}
+
+fn default_automatic_codex_cli_update_checks_enabled() -> bool {
     true
 }
 
@@ -2216,6 +2225,7 @@ impl Default for AppSettings {
             auto_delete_archived_threads_enabled: false,
             auto_delete_archived_threads_days: default_auto_delete_archived_threads_days(),
             automatic_app_update_checks_enabled: true,
+            automatic_codex_cli_update_checks_enabled: true,
             automatic_windows_ui_update_checks_enabled: true,
             experimental_windows_installer_migration_enabled: false,
             ui_font_family: default_ui_font_family(),
@@ -2414,6 +2424,7 @@ mod tests {
         assert_eq!(settings.chat_history_scrollback_items, Some(200));
         assert!(settings.thread_title_autogeneration_enabled);
         assert!(settings.automatic_app_update_checks_enabled);
+        assert!(settings.automatic_codex_cli_update_checks_enabled);
         assert!(settings.automatic_windows_ui_update_checks_enabled);
         assert!(!settings.experimental_windows_installer_migration_enabled);
         assert!(settings.ui_font_family.contains("system-ui"));

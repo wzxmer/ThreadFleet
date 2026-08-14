@@ -87,9 +87,10 @@ use shared::session_manager_core::runtime::{
 };
 use shared::session_manager_core::service::SessionManagerRuntime;
 use shared::{
-    agents_config_core, codex_aux_core, codex_core, computer_control_core, files_core, git_core,
-    git_ui_core, knowledge_adapter_core, local_usage_core, provider_profiles_core, settings_core,
-    workflow_gate_adapter_core, workflow_preflight_core, workspaces_core, worktree_core,
+    agents_config_core, codex_aux_core, codex_cli_update_core, codex_core,
+    computer_control_core, files_core, git_core, git_ui_core, knowledge_adapter_core,
+    local_usage_core, provider_profiles_core, settings_core, workflow_gate_adapter_core,
+    workflow_preflight_core, workspaces_core, worktree_core,
 };
 use storage::{read_settings, read_workspaces};
 use types::{
@@ -2419,6 +2420,15 @@ impl DaemonState {
         codex_args: Option<String>,
     ) -> Result<Value, String> {
         codex_aux_core::codex_doctor_core(&self.app_settings, codex_bin, codex_args).await
+    }
+
+    async fn check_codex_cli_update(
+        &self,
+        codex_bin: Option<String>,
+    ) -> Result<Value, String> {
+        codex_cli_update_core::check_codex_cli_update_core(&self.app_settings, codex_bin)
+            .await
+            .and_then(|value| serde_json::to_value(value).map_err(|error| error.to_string()))
     }
 
     async fn generate_commit_message(

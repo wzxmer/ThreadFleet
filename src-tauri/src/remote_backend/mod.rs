@@ -234,6 +234,8 @@ fn can_retry_after_disconnect(method: &str) -> bool {
             | "collaboration_mode_list"
             | "computer_control_status"
             | "computer_control_preflight"
+            | "check_codex_cli_update"
+            | "codex_doctor"
             | "connect_workspace"
             | "experimental_feature_list"
             | "set_workspace_runtime_codex_args"
@@ -381,6 +383,8 @@ mod tests {
     fn retries_only_retry_safe_methods_after_disconnect() {
         assert!(can_retry_after_disconnect("resume_thread"));
         assert!(can_retry_after_disconnect("get_thread_token_usage"));
+        assert!(can_retry_after_disconnect("check_codex_cli_update"));
+        assert!(can_retry_after_disconnect("codex_doctor"));
         assert!(can_retry_after_disconnect("list_threads"));
         assert!(can_retry_after_disconnect("list_session_sources"));
         assert!(can_retry_after_disconnect("verify_session_threads"));

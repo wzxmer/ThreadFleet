@@ -125,6 +125,8 @@ import {
 import { subscribeReleaseAssetDownloadProgress } from "@services/events";
 import { fetchManagedCodexPackage } from "@/features/codex/utils/managedCodex";
 import { CodexInstallPrompt } from "@/features/codex/components/CodexInstallPrompt";
+import { CodexCliUpdatePrompt } from "@/features/update/components/CodexCliUpdatePrompt";
+import { useCodexCliUpdater } from "@/features/update/hooks/useCodexCliUpdater";
 import type { ManagedSession, ManagedSessionDerivationPreview } from "@/types";
 import { SessionDerivationPrompt } from "@/features/sessions/components/SessionDerivationPrompt";
 import { loadThreadDerivations, saveThreadDerivation } from "@threads/utils/threadStorage";
@@ -310,11 +312,14 @@ export default function MainApp() {
     codexInstallCheckStartedRef.current = true;
     void doctor(appSettings.codexBin, appSettings.codexArgs).catch((error) => {
       const message = error instanceof Error ? error.message : String(error);
-      if (message.toLowerCase().includes("codex cli not found")) {
+      if (
+        appSettings.backendMode === "local" &&
+        message.toLowerCase().includes("codex cli not found")
+      ) {
         setCodexInstallPromptOpen(true);
       }
     });
-  }, [appSettings.codexArgs, appSettings.codexBin, appSettingsLoading, doctor, isMobileRuntime]);
+  }, [appSettings.backendMode, appSettings.codexArgs, appSettings.codexBin, appSettingsLoading, doctor, isMobileRuntime]);
 
   useEffect(() => subscribeReleaseAssetDownloadProgress((progress) => {
     if (progress.id !== codexInstallRequestIdRef.current) return;
@@ -1142,6 +1147,24 @@ export default function MainApp() {
       appSettings.automaticWindowsUiUpdateChecksEnabled,
     onDebug: addDebugEntry,
   });
+  const handleCodexCliUpdaterInstalled = useCallback(
+    async (path: string) => {
+      const nextSettings = { ...appSettingsRef.current, codexBin: path };
+      await queueSaveSettings(nextSettings);
+      setAppSettings((current) => ({ ...current, codexBin: path }));
+    },
+    [queueSaveSettings, setAppSettings],
+  );
+  const codexCliUpdaterEnabled = updaterEnabled;
+  const codexCliUpdater = useCodexCliUpdater({
+    enabled: codexCliUpdaterEnabled,
+    installEnabled: appSettings.backendMode === "local",
+    autoCheckOnMount:
+      !appSettingsLoading && appSettings.automaticCodexCliUpdateChecksEnabled,
+    codexBin: appSettings.codexBin,
+    onInstalled: handleCodexCliUpdaterInstalled,
+    onDebug: addDebugEntry,
+  });
   const gitState = useMainAppGitState({
     activeWorkspace: projectActiveWorkspace,
     activeWorkspaceId,
@@ -1738,6 +1761,11 @@ export default function MainApp() {
       windowsUiUpdater: {
         enabled: windowsUiUpdaterEnabled,
         ...windowsUiUpdater,
+      },
+      codexCliUpdater: {
+        enabled: codexCliUpdaterEnabled,
+        installEnabled: appSettings.backendMode === "local",
+        ...codexCliUpdater,
       },
       doctor,
       codexUpdate,
@@ -2912,6 +2940,25 @@ export default function MainApp() {
             modalActions.openSettings("codex");
           }}
           onLater={() => setCodexInstallPromptOpen(false)}
+        />
+        <CodexCliUpdatePrompt
+          open={codexCliUpdater.promptOpen}
+          check={codexCliUpdater.state.check ?? null}
+          installEnabled={appSettings.backendMode === "local"}
+          busy={
+            codexCliUpdater.state.stage === "downloading" ||
+            codexCliUpdater.state.stage === "installing"
+          }
+          progress={
+            codexCliUpdater.state.progress?.totalBytes
+              ? (codexCliUpdater.state.progress.downloadedBytes /
+                  codexCliUpdater.state.progress.totalBytes) *
+                100
+              : null
+          }
+          error={codexCliUpdater.state.error}
+          onCancel={codexCliUpdater.dismissPrompt}
+          onConfirm={() => void codexCliUpdater.startInstall()}
         />
         <SessionResumeChoicePrompt />
         {managedSessionDerivation && (

@@ -23,6 +23,7 @@ import type { SettingsWorkflowSectionProps } from "@settings/components/sections
 import type { ProviderSessionDiagnostics } from "@settings/utils/providerSessionDiagnostics";
 import type {
   SettingsUpdaterControls,
+  SettingsCodexCliUpdaterControls,
   SettingsWindowsUiUpdaterControls,
 } from "@settings/components/SettingsView";
 import {
@@ -43,6 +44,7 @@ type UseSettingsViewOrchestrationArgs = {
   onToggleAutomaticAppUpdateChecks?: () => void;
   updater?: SettingsUpdaterControls;
   windowsUiUpdater?: SettingsWindowsUiUpdaterControls;
+  codexCliUpdater?: SettingsCodexCliUpdaterControls;
   onRunDoctor: (
     codexBin: string | null,
     codexArgs: string | null,
@@ -93,6 +95,7 @@ export function useSettingsViewOrchestration({
   onToggleAutomaticAppUpdateChecks,
   updater,
   windowsUiUpdater,
+  codexCliUpdater,
   onRunDoctor,
   onRunCodexUpdate,
   onUpdateWorkspaceSettings,
@@ -306,6 +309,7 @@ export function useSettingsViewOrchestration({
       ...codexSectionProps,
       providerSessionDiagnostics,
       windowsUiUpdater,
+      codexCliUpdater,
     },
     featuresSectionProps,
   };

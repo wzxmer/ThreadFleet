@@ -260,6 +260,7 @@ pub fn run() {
             tray::set_tray_labels,
             tray::set_tray_session_usage,
             codex::codex_doctor,
+            codex::check_codex_cli_update,
             codex::codex_update,
             workspaces::list_workspaces,
             workspaces::is_workspace_path_dir,

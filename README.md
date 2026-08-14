@@ -92,6 +92,7 @@ macOS 版本当前采用完整 ad-hoc 签名，但尚未使用 Apple Developer I
 - 侧栏、右侧面板、计划面板、终端和调试面板尺寸持久化。
 - 通知声音、长任务完成系统通知（窗口聚焦或后台均显示）、更新提示、调试日志复制和清空。
 - 应用更新默认使用 GitHub；发布者配置腾讯 COS / 阿里 OSS 后，检查或下载失败会按 COS、OSS 顺序自动切换，并校验安装包大小与 SHA-256。
+- Codex CLI 可在启动时异步检查托管版本；发现更新后由用户确认，安装到应用数据目录并切换路径，不静默覆盖全局 npm、Homebrew 或自定义安装。
 - 桌面/平板/手机响应式布局，iOS 走远程后端模式。
 
 ## 环境要求
@@ -162,7 +163,9 @@ Release 工作流统一使用 `src-tauri/tauri.conf.json` 中的合法 SemVer �
 
 `*_UPDATE_BASE_URL` 是公开下载根地址，`*_UPDATE_MANIFEST_URL` 通常为该根地址下的 `latest.json`。发布流程会生成版本目录、校验值和清单，并仅在对应配置完整时上传。Release 在构建前审计两家镜像配置并写入 Actions Summary；半配置、非 HTTPS 公共地址、只有下载线路但缺少上传凭据，都会直接阻止发布，避免生成无法回退的安装包。
 
-发布流程还会从 OpenAI 官方 Codex Release 获取各平台完整 CLI package（包含相关辅助组件），重新打包为统一 ZIP，生成 `codex-cli-latest.json` 并同步到 GitHub、COS 和 OSS。客户端未检测到可运行的 `codex app-server` 时，会提示用户确认后自动下载到应用数据目录，不修改系统 PATH。
+发布流程还会从 OpenAI 官方 Codex Release 获取各平台完整 CLI package（包含相关辅助组件），重新打包为统一 ZIP，生成 `codex-cli-latest.json` 并同步到 GitHub、COS 和 OSS。客户端启动检查和托管安装共用这份清单：优先 COS、OSS，失败后回退 GitHub；请求未配置代理时直接连接，系统或环境代理存在时正常使用代理，不修改用户代理配置。未检测到 CLI 或发现托管版本更新时只提示，确认后下载到应用数据目录，不修改系统 PATH。
+
+Windows 已覆盖本机运行验证。macOS 会按 Apple Silicon、Intel 和 Rosetta 选择托管包，Linux 与远程 daemon 在各自执行主机检查版本；这些非 Windows 路径仍需对应设备的发布后反馈验证，远程模式不会在控制端替远程主机安装。
 
 ## 远程后端与 iOS
 

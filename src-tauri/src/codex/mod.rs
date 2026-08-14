@@ -148,9 +148,42 @@ pub(crate) async fn codex_doctor(
     codex_bin: Option<String>,
     codex_args: Option<String>,
     state: State<'_, AppState>,
+    app: AppHandle,
 ) -> Result<Value, String> {
+    if remote_backend::is_remote_mode(&*state).await {
+        return remote_backend::call_remote(
+            &*state,
+            app,
+            "codex_doctor",
+            json!({ "codexBin": codex_bin, "codexArgs": codex_args }),
+        )
+        .await;
+    }
     crate::shared::codex_aux_core::codex_doctor_core(&state.app_settings, codex_bin, codex_args)
         .await
+}
+
+#[tauri::command]
+pub(crate) async fn check_codex_cli_update(
+    codex_bin: Option<String>,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<Value, String> {
+    if remote_backend::is_remote_mode(&*state).await {
+        return remote_backend::call_remote(
+            &*state,
+            app,
+            "check_codex_cli_update",
+            json!({ "codexBin": codex_bin }),
+        )
+        .await;
+    }
+    crate::shared::codex_cli_update_core::check_codex_cli_update_core(
+        &state.app_settings,
+        codex_bin,
+    )
+    .await
+    .and_then(|value| serde_json::to_value(value).map_err(|error| error.to_string()))
 }
 
 #[tauri::command]

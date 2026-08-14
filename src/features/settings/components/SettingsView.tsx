@@ -23,6 +23,7 @@ import type { SettingsWorkflowSectionProps } from "./sections/SettingsWorkflowSe
 import type { ProviderSessionDiagnostics } from "@settings/utils/providerSessionDiagnostics";
 import type { UpdateState } from "@/features/update/hooks/useUpdater";
 import type { WindowsUiUpdaterState } from "@/features/update/hooks/useWindowsUiUpdater";
+import type { CodexCliUpdaterState } from "@/features/update/hooks/useCodexCliUpdater";
 
 export type SettingsUpdaterControls = {
   enabled: boolean;
@@ -35,6 +36,15 @@ export type SettingsUpdaterControls = {
 export type SettingsWindowsUiUpdaterControls = {
   enabled: boolean;
   state: WindowsUiUpdaterState;
+  checkForUpdates: () => void;
+  startInstall: () => void;
+  dismiss: () => void;
+};
+
+export type SettingsCodexCliUpdaterControls = {
+  enabled: boolean;
+  installEnabled: boolean;
+  state: CodexCliUpdaterState;
   checkForUpdates: () => void;
   startInstall: () => void;
   dismiss: () => void;
@@ -67,6 +77,7 @@ export type SettingsViewProps = {
   onToggleAutomaticAppUpdateChecks?: () => void;
   updater?: SettingsUpdaterControls;
   windowsUiUpdater?: SettingsWindowsUiUpdaterControls;
+  codexCliUpdater?: SettingsCodexCliUpdaterControls;
   onRunDoctor: (
     codexBin: string | null,
     codexArgs: string | null,
@@ -117,6 +128,7 @@ export function SettingsView({
   onToggleAutomaticAppUpdateChecks,
   updater,
   windowsUiUpdater,
+  codexCliUpdater,
   onRunDoctor,
   onRunCodexUpdate,
   onUpdateWorkspaceSettings,
@@ -184,6 +196,7 @@ export function SettingsView({
     onToggleAutomaticAppUpdateChecks,
     updater,
     windowsUiUpdater,
+    codexCliUpdater,
     onRunDoctor,
     onRunCodexUpdate,
     onUpdateWorkspaceSettings,
