@@ -1127,6 +1127,7 @@ export default function MainApp() {
       appSettings.experimentalWindowsInstallerMigrationEnabled,
     notificationSoundsEnabled: appSettings.notificationSoundsEnabled,
     systemNotificationsEnabled: appSettings.systemNotificationsEnabled,
+    computerControlNotificationsEnabled: appSettings.backendMode !== "remote",
     subagentSystemNotificationsEnabled:
       appSettings.subagentSystemNotificationsEnabled,
     isSubagentThread,

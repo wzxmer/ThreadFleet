@@ -18,6 +18,7 @@ type Params = {
   experimentalWindowsInstallerMigrationEnabled?: boolean;
   notificationSoundsEnabled: boolean;
   systemNotificationsEnabled: boolean;
+  computerControlNotificationsEnabled?: boolean;
   subagentSystemNotificationsEnabled: boolean;
   subagentCompletionNotificationsEnabled?: boolean;
   isSubagentThread?: (workspaceId: string, threadId: string) => boolean;
@@ -36,6 +37,7 @@ export function useUpdaterController({
   experimentalWindowsInstallerMigrationEnabled = false,
   notificationSoundsEnabled,
   systemNotificationsEnabled,
+  computerControlNotificationsEnabled = true,
   subagentCompletionNotificationsEnabled = false,
   isSubagentThread,
   getWorkspaceName,
@@ -152,6 +154,7 @@ export function useUpdaterController({
 
   useAgentSystemNotifications({
     enabled: systemNotificationsEnabled,
+    computerControlNotificationsEnabled,
     subagentNotificationsEnabled: subagentCompletionNotificationsEnabled,
     isSubagentThread,
     isWindowFocused,

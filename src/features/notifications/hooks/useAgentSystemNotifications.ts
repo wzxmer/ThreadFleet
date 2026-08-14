@@ -2,6 +2,7 @@ import { useCallback, useMemo, useRef } from "react";
 import type { DebugEntry } from "../../../types";
 import { sendNotification } from "../../../services/tauri";
 import { useAppServerEvents } from "../../app/hooks/useAppServerEvents";
+import { useI18n } from "../../i18n/I18nProvider";
 
 const DEFAULT_MIN_DURATION_MS = 60_000; // 1 minute
 const MAX_BODY_LENGTH = 200;
@@ -10,6 +11,7 @@ type SystemNotificationOptions = {
   enabled: boolean;
   isWindowFocused: boolean;
   minDurationMs?: number;
+  computerControlNotificationsEnabled?: boolean;
   subagentNotificationsEnabled?: boolean;
   isSubagentThread?: (workspaceId: string, threadId: string) => boolean;
   getWorkspaceName?: (workspaceId: string) => string | undefined;
@@ -34,6 +36,7 @@ function truncateText(text: string, maxLength: number): string {
 export function useAgentSystemNotifications({
   enabled,
   minDurationMs = DEFAULT_MIN_DURATION_MS,
+  computerControlNotificationsEnabled = true,
   subagentNotificationsEnabled = false,
   isSubagentThread,
   getWorkspaceName,
@@ -43,6 +46,12 @@ export function useAgentSystemNotifications({
   const turnStartByThread = useRef(new Map<string, number>());
   const lastNotifiedAtByThread = useRef(new Map<string, number>());
   const finalMessageByTurn = useRef(new Map<string, string>());
+  const computerControlByThread = useRef(
+    new Map<string, { turnId: string; taskKey: string }>(),
+  );
+  const computerControlStarted = useRef(new Set<string>());
+  const computerControlEnded = useRef(new Set<string>());
+  const { t } = useI18n();
 
   const notify = useCallback(
     async (
@@ -181,11 +190,149 @@ export function useAgentSystemNotifications({
     [],
   );
 
+  const handleComputerControlStarted = useCallback(
+    (
+      workspaceId: string,
+      threadId: string,
+      item: Record<string, unknown>,
+      eventTurnId?: string,
+    ) => {
+      if (!computerControlNotificationsEnabled || !enabled) {
+        return;
+      }
+      if (String(item.type ?? "") !== "mcpToolCall") {
+        return;
+      }
+      const server = String(item.server ?? "").trim().toLowerCase();
+      const tool = String(item.tool ?? "").trim().toLowerCase();
+      if (server !== "windows-ui" && !tool.startsWith("mcp__windows-ui__")) {
+        return;
+      }
+
+      const threadKey = buildThreadKey(workspaceId, threadId);
+      const turnId =
+        eventTurnId?.trim() || String(item.turnId ?? item.turn_id ?? "").trim();
+      const existing = computerControlByThread.current.get(threadKey);
+      const resolvedTurnId = turnId || existing?.turnId || "unknown";
+      const taskKey =
+        existing?.turnId === "unknown" && turnId
+          ? existing.taskKey
+          : buildTurnKey(workspaceId, threadId, resolvedTurnId);
+      if (computerControlStarted.current.has(taskKey)) {
+        if (existing?.turnId === "unknown" && turnId) {
+          computerControlByThread.current.set(threadKey, {
+            turnId: resolvedTurnId,
+            taskKey,
+          });
+        }
+        return;
+      }
+      computerControlByThread.current.set(threadKey, {
+        turnId: resolvedTurnId,
+        taskKey,
+      });
+      computerControlStarted.current.add(taskKey);
+      void notify(
+        t("notifications.computerControlStartedTitle"),
+        t("notifications.computerControlStartedBody"),
+        "success",
+        {
+          kind: "computer_control",
+          phase: "started",
+          workspaceId,
+          threadId,
+          turnId: resolvedTurnId,
+        },
+      );
+    },
+    [computerControlNotificationsEnabled, enabled, notify, t],
+  );
+
+  const handleComputerControlEnded = useCallback(
+    (
+      workspaceId: string,
+      threadId: string,
+      turnId: string,
+      status: "completed" | "interrupted" | "failed",
+    ) => {
+      const threadKey = buildThreadKey(workspaceId, threadId);
+      const active = computerControlByThread.current.get(threadKey);
+      if (!active) {
+        return false;
+      }
+      const resolvedTurnId = turnId.trim() || active.turnId;
+      if (
+        active.turnId !== "unknown" &&
+        turnId.trim() &&
+        active.turnId !== turnId.trim()
+      ) {
+        return false;
+      }
+      const taskKey = active.taskKey;
+      const resolvedTaskKey = buildTurnKey(
+        workspaceId,
+        threadId,
+        resolvedTurnId,
+      );
+      if (
+        computerControlEnded.current.has(taskKey) ||
+        computerControlEnded.current.has(resolvedTaskKey)
+      ) {
+        computerControlByThread.current.delete(threadKey);
+        return true;
+      }
+      computerControlEnded.current.add(taskKey);
+      computerControlEnded.current.add(resolvedTaskKey);
+      computerControlStarted.current.add(resolvedTaskKey);
+      computerControlByThread.current.delete(threadKey);
+      if (!enabled) {
+        return true;
+      }
+      const bodyKey =
+        status === "completed"
+          ? "notifications.computerControlCompletedBody"
+          : status === "interrupted"
+            ? "notifications.computerControlInterruptedBody"
+            : "notifications.computerControlFailedBody";
+      void notify(
+        t("notifications.computerControlEndedTitle"),
+        t(bodyKey),
+        status === "completed" ? "success" : "error",
+        {
+          kind: "computer_control",
+          phase: status,
+          workspaceId,
+          threadId,
+          turnId: resolvedTurnId,
+        },
+      );
+      return true;
+    },
+    [enabled, notify, t],
+  );
+
   const handleTurnCompleted = useCallback(
-    (workspaceId: string, threadId: string, turnId: string) => {
+    (
+      workspaceId: string,
+      threadId: string,
+      turnId: string,
+      status: "completed" | "interrupted" | "failed" = "completed",
+    ) => {
+      const computerControlEnded = handleComputerControlEnded(
+        workspaceId,
+        threadId,
+        turnId,
+        status,
+      );
       const durationMs = consumeDuration(workspaceId, threadId, turnId);
       const threadKey = buildThreadKey(workspaceId, threadId);
       const turnKey = turnId ? buildTurnKey(workspaceId, threadId, turnId) : null;
+      if (computerControlEnded) {
+        if (turnKey) {
+          finalMessageByTurn.current.delete(turnKey);
+        }
+        return;
+      }
       if (!shouldNotify(workspaceId, threadId, durationMs, threadKey)) {
         if (turnKey) {
           finalMessageByTurn.current.delete(turnKey);
@@ -207,7 +354,13 @@ export function useAgentSystemNotifications({
         finalMessageByTurn.current.delete(turnKey);
       }
     },
-    [consumeDuration, getNotificationContent, notify, shouldNotify],
+    [
+      consumeDuration,
+      getNotificationContent,
+      handleComputerControlEnded,
+      notify,
+      shouldNotify,
+    ],
   );
 
   const handleTurnError = useCallback(
@@ -220,9 +373,21 @@ export function useAgentSystemNotifications({
       if (payload.willRetry) {
         return;
       }
+      const computerControlEnded = handleComputerControlEnded(
+        workspaceId,
+        threadId,
+        turnId,
+        "failed",
+      );
       const durationMs = consumeDuration(workspaceId, threadId, turnId);
       const threadKey = buildThreadKey(workspaceId, threadId);
       const turnKey = turnId ? buildTurnKey(workspaceId, threadId, turnId) : null;
+      if (computerControlEnded) {
+        if (turnKey) {
+          finalMessageByTurn.current.delete(turnKey);
+        }
+        return;
+      }
       if (!shouldNotify(workspaceId, threadId, durationMs, threadKey)) {
         if (turnKey) {
           finalMessageByTurn.current.delete(turnKey);
@@ -240,14 +405,33 @@ export function useAgentSystemNotifications({
         finalMessageByTurn.current.delete(turnKey);
       }
     },
-    [consumeDuration, getWorkspaceName, notify, shouldNotify],
+    [
+      consumeDuration,
+      getWorkspaceName,
+      handleComputerControlEnded,
+      notify,
+      shouldNotify,
+    ],
   );
 
   const handleItemStarted = useCallback(
-    (workspaceId: string, threadId: string) => {
+    (
+      workspaceId: string,
+      threadId: string,
+      item: Record<string, unknown>,
+      turnId?: string,
+    ) => {
       recordStartIfMissing(workspaceId, threadId);
+      handleComputerControlStarted(workspaceId, threadId, item, turnId);
     },
-    [recordStartIfMissing],
+    [handleComputerControlStarted, recordStartIfMissing],
+  );
+
+  const handleThreadClosed = useCallback(
+    (workspaceId: string, threadId: string) => {
+      handleComputerControlEnded(workspaceId, threadId, "", "failed");
+    },
+    [handleComputerControlEnded],
   );
 
   const handleAgentMessageDelta = useCallback(
@@ -281,12 +465,14 @@ export function useAgentSystemNotifications({
       onTurnCompleted: handleTurnCompleted,
       onTurnError: handleTurnError,
       onItemStarted: handleItemStarted,
+      onThreadClosed: handleThreadClosed,
       onAgentMessageDelta: handleAgentMessageDelta,
       onAgentMessageCompleted: handleAgentMessageCompleted,
     }),
     [
       handleAgentMessageCompleted,
       handleAgentMessageDelta,
+      handleThreadClosed,
       handleItemStarted,
       handleTurnCompleted,
       handleTurnError,
