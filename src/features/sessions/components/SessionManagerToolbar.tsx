@@ -6,8 +6,14 @@ import Search from "lucide-react/dist/esm/icons/search";
 import SlidersHorizontal from "lucide-react/dist/esm/icons/sliders-horizontal";
 import X from "lucide-react/dist/esm/icons/x";
 import { useI18n } from "@/features/i18n/I18nProvider";
+import type { SessionSource } from "@/types";
 import type { SessionManagerState } from "../hooks/useSessionManager";
 import type { SessionManagerDatePreset } from "../utils/sessionManagerFilters";
+import {
+  getSessionSourceAdapterLabel,
+  getSessionSourceCapabilityLabel,
+  getSessionSourceHostLabel,
+} from "../utils/sessionSourceCapabilities";
 
 type Props = { manager: SessionManagerState };
 
@@ -48,6 +54,12 @@ export function SessionManagerToolbar({ manager }: Props) {
     none: t("sessionManager.confidenceNone"),
   })[value as "exact" | "inferred" | "ambiguous" | "none"] ?? value;
   const sourceName = manager.sources.find((source) => source.id === manager.sourceFilter)?.name ?? manager.sourceFilter;
+  const sourceOptionLabel = (source: SessionSource) => [
+    source.name,
+    getSessionSourceAdapterLabel(source, t),
+    getSessionSourceHostLabel(source, t),
+    getSessionSourceCapabilityLabel(source, t),
+  ].join(" - ");
   const chips = useMemo(() => {
     const values: Array<{ id: string; label: string; remove: () => void }> = [];
     if (manager.datePreset !== "all" || manager.dateField !== "updatedAt") values.push({ id: "date", label: `${dateFieldLabel}: ${dateLabel(manager.datePreset)}`, remove: () => { manager.setDateField("updatedAt"); manager.setDatePreset("all"); manager.setCustomDateStart(""); manager.setCustomDateEnd(""); } });
@@ -104,7 +116,7 @@ export function SessionManagerToolbar({ manager }: Props) {
         </select>
         <select value={manager.sourceFilter} onChange={(event) => manager.setSourceFilter(event.target.value)} aria-label={t("sessionManager.sourceFilter")}>
           <option value="all">{t("sessionManager.allSources")}</option>
-          {manager.sources.map((source) => <option key={source.id} value={source.id}>{source.name}</option>)}
+          {manager.sources.map((source) => <option key={source.id} value={source.id}>{sourceOptionLabel(source)}</option>)}
         </select>
         <select value={manager.sessionTypeFilter} onChange={(event) => manager.setSessionTypeFilter(event.target.value as typeof manager.sessionTypeFilter)} aria-label={t("sessionManager.sessionTypeFilter")}>
           <option value="all">{t("sessionManager.allTypes")}</option>

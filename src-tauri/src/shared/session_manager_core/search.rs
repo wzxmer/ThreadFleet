@@ -10,7 +10,7 @@ use crate::types::{
     SessionSearchResult,
 };
 
-use super::scanner::{MultiSourceSessionScanResult, SearchableSessionFile};
+use super::scanner::{IndexedSessionResource, MultiSourceSessionScanResult};
 
 const MAX_SEARCH_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_SNIPPET_CHARS: usize = 180;
@@ -156,8 +156,14 @@ fn push_summary_match(
     }
 }
 
-fn parse_search_document(file: &SearchableSessionFile) -> SearchDocument {
-    let metadata = match std::fs::metadata(&file.path) {
+fn parse_search_document(resource: &IndexedSessionResource) -> SearchDocument {
+    let Some(path) = resource.local_path() else {
+        return SearchDocument {
+            segments: Vec::new(),
+            incomplete: true,
+        };
+    };
+    let metadata = match std::fs::metadata(path) {
         Ok(metadata) => metadata,
         Err(_) => {
             return SearchDocument {
@@ -167,7 +173,7 @@ fn parse_search_document(file: &SearchableSessionFile) -> SearchDocument {
         }
     };
     let incomplete = metadata.len() > MAX_SEARCH_BYTES;
-    let file = match File::open(&file.path) {
+    let file = match File::open(path) {
         Ok(file) => file,
         Err(_) => {
             return SearchDocument {
@@ -302,7 +308,7 @@ mod tests {
 
     use super::search_scan_results;
     use crate::shared::session_manager_core::scanner::{
-        MultiSourceSessionScanResult, SearchableSessionFile,
+        IndexedSessionResource, MultiSourceSessionScanResult, SessionResourceLocator,
     };
     use crate::types::{
         ManagedSession, SessionFileConfidence, SessionFileStatus, SessionSearchMatchField,
@@ -357,11 +363,12 @@ mod tests {
             diagnostics: vec![],
             files_by_key: HashMap::from([(
                 "source-a:thread-a".into(),
-                SearchableSessionFile {
-                    path,
+                IndexedSessionResource {
+                    locator: SessionResourceLocator::LocalFile(path),
                     modified_at: Some(1),
                 },
             )]),
+            sources_by_id: HashMap::new(),
         };
         let request = |query: &str| SessionSearchRequest {
             request_id: "search-a".into(),

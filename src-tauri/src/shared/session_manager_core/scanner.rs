@@ -7,7 +7,9 @@ use std::time::UNIX_EPOCH;
 use serde_json::Value;
 use tokio::sync::Semaphore;
 
-use crate::types::{ManagedSession, SessionFileConfidence, SessionFileStatus, SessionSource};
+use crate::types::{
+    ManagedSession, SessionAdapterKind, SessionFileConfidence, SessionFileStatus, SessionSource,
+};
 
 use super::file_map::{is_path_within_root, map_session_files, SessionFileMapping};
 use super::parser::{parse_session_metadata, parse_timestamp_ms, ParsedSessionMetadata};
@@ -29,20 +31,39 @@ pub(crate) struct SourceSessionScanResult {
     pub(crate) source_id: String,
     pub(crate) sessions: Vec<ManagedSession>,
     pub(crate) diagnostics: Vec<SessionScanDiagnostic>,
-    pub(crate) files_by_key: HashMap<String, SearchableSessionFile>,
+    pub(crate) files_by_key: HashMap<String, IndexedSessionResource>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SearchableSessionFile {
-    pub(crate) path: PathBuf,
+pub(crate) enum SessionResourceLocator {
+    LocalFile(PathBuf),
+    AdapterOpaque {
+        adapter_kind: SessionAdapterKind,
+        value: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct IndexedSessionResource {
+    pub(crate) locator: SessionResourceLocator,
     pub(crate) modified_at: Option<i64>,
+}
+
+impl IndexedSessionResource {
+    pub(crate) fn local_path(&self) -> Option<&Path> {
+        match &self.locator {
+            SessionResourceLocator::LocalFile(path) => Some(path),
+            SessionResourceLocator::AdapterOpaque { .. } => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct MultiSourceSessionScanResult {
     pub(crate) sessions: Vec<ManagedSession>,
     pub(crate) diagnostics: Vec<SessionScanDiagnostic>,
-    pub(crate) files_by_key: HashMap<String, SearchableSessionFile>,
+    pub(crate) files_by_key: HashMap<String, IndexedSessionResource>,
+    pub(crate) sources_by_id: HashMap<String, SessionSource>,
 }
 
 #[derive(Debug)]
@@ -75,8 +96,17 @@ pub(crate) async fn scan_session_sources_with_archive_mode(
     let concurrency = concurrency.clamp(MIN_SCAN_CONCURRENCY, MAX_SCAN_CONCURRENCY);
     let semaphore = Arc::new(Semaphore::new(concurrency));
     let mut tasks = Vec::new();
+    let sources = sources
+        .into_iter()
+        .filter(|source| source.enabled)
+        .collect::<Vec<_>>();
+    let sources_by_id = sources
+        .iter()
+        .cloned()
+        .map(|source| (source.id.clone(), source))
+        .collect();
 
-    for source in sources.into_iter().filter(|source| source.enabled) {
+    for source in sources {
         let semaphore = semaphore.clone();
         let source_id = source.id.clone();
         tasks.push(tokio::spawn(async move {
@@ -93,7 +123,10 @@ pub(crate) async fn scan_session_sources_with_archive_mode(
         }));
     }
 
-    let mut combined = MultiSourceSessionScanResult::default();
+    let mut combined = MultiSourceSessionScanResult {
+        sources_by_id,
+        ..MultiSourceSessionScanResult::default()
+    };
     for task in tasks {
         match task.await {
             Ok((_, Ok(result))) => {
@@ -121,6 +154,13 @@ pub(crate) fn scan_session_source(source: &SessionSource) -> SourceSessionScanRe
 }
 
 pub(crate) fn scan_session_source_with_archive_mode(
+    source: &SessionSource,
+    include_archived: bool,
+) -> SourceSessionScanResult {
+    super::adapters::scan_source_with_archive_mode(source, include_archived)
+}
+
+pub(crate) fn scan_codex_session_source_with_archive_mode(
     source: &SessionSource,
     include_archived: bool,
 ) -> SourceSessionScanResult {
@@ -241,8 +281,8 @@ pub(crate) fn scan_session_source_with_archive_mode(
             if let Some(path) = mapping.path.clone() {
                 result.files_by_key.insert(
                     key.clone(),
-                    SearchableSessionFile {
-                        path,
+                    IndexedSessionResource {
+                        locator: SessionResourceLocator::LocalFile(path),
                         modified_at: candidate.modified_at,
                     },
                 );

@@ -179,6 +179,30 @@ pub(super) async fn try_handle(
                     .and_then(to_value),
             )
         }
+        "start_managed_session_cleanup" => {
+            let request = match parse_request::<types::ManagedSessionCleanupTaskRequest>(params) {
+                Ok(request) => request,
+                Err(error) => return Some(Err(error)),
+            };
+            Some(
+                state
+                    .start_managed_session_cleanup(request)
+                    .await
+                    .and_then(to_value),
+            )
+        }
+        "fetch_managed_session_cleanup_progress" => {
+            let request_id = match parse_string(params, "requestId") {
+                Ok(request_id) => request_id,
+                Err(error) => return Some(Err(error)),
+            };
+            Some(
+                state
+                    .fetch_managed_session_cleanup_progress(request_id)
+                    .await
+                    .and_then(to_value),
+            )
+        }
         "run_managed_session_cleanup_scheduler" => {
             let request =
                 match parse_request::<types::ManagedSessionCleanupSchedulerRequest>(params) {

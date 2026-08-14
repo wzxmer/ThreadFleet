@@ -9,6 +9,12 @@ import { SessionArchiveResultSummary } from "./SessionArchiveResultSummary";
 import { SessionPermanentDeletePrompt } from "./SessionPermanentDeletePrompt";
 import { SessionManagerConversation } from "./SessionManagerConversation";
 import { SessionManagerOverview } from "./SessionManagerOverview";
+import {
+  getSessionSourceAdapterLabel,
+  getSessionSourceCapabilityLabel,
+  getSessionSourceHostLabel,
+  sessionSourceSupports,
+} from "../utils/sessionSourceCapabilities";
 
 function displayTime(value: number | null) {
   return value == null ? "-" : formatLocalDateTime(value, { includeSeconds: true });
@@ -18,6 +24,11 @@ export function SessionManagerWorkspace() {
   const { t } = useI18n();
   const { manager, focusedSession, sessionPreview, sessionPreviewLoading, sessionPreviewLoadingMore, sessionPreviewError, loadEarlierSessionPreview, resumingKey, resumeSession, deriveSession, currentWorkspace, pendingPermanentDeleteSessions, pendingPermanentDeleteChildCount, requestPermanentDelete, confirmPermanentDelete, cancelPermanentDelete } = useSessionManagerContext();
   const source = focusedSession ? manager.sources.find((candidate) => candidate.id === focusedSession.sourceId) : null;
+  const canResume = sessionSourceSupports(source ?? undefined, "resumeInApp");
+  const canDerive = sessionSourceSupports(source ?? undefined, "derive");
+  const canArchive = sessionSourceSupports(source ?? undefined, "archive");
+  const canDelete = sessionSourceSupports(source ?? undefined, "delete");
+  const unavailableTitle = t("sessionManager.actionUnavailable");
   const focusedRelativeTime = focusedSession?.updatedAt ? formatRelativeTimeShort(focusedSession.updatedAt) : null;
 
   return (
@@ -47,6 +58,9 @@ export function SessionManagerWorkspace() {
               <div><span>{t("sessionManager.createdAt")}</span><strong>{displayTime(focusedSession.createdAt)}</strong></div>
               <div><span>{t("sessionManager.archivedAt")}</span><strong>{displayTime(focusedSession.archivedAt)}</strong></div>
               <div><span>{t("sessionManager.sourceFilter")}</span><strong>{source?.name ?? focusedSession.sourceId}</strong></div>
+              <div><span>{t("sessionManager.sourceAdapter")}</span><strong>{getSessionSourceAdapterLabel(source ?? undefined, t)}</strong></div>
+              <div><span>{t("sessionManager.sourceHost")}</span><strong>{getSessionSourceHostLabel(source ?? undefined, t)}</strong></div>
+              <div><span>{t("sessionManager.sourceCapabilities")}</span><strong>{getSessionSourceCapabilityLabel(source ?? undefined, t)}</strong></div>
               <div><span>{t("sessionManager.sessionType")}</span><strong>{focusedSession.isSubagent ? (focusedSession.subagentNickname ?? t("sessionManager.subagent")) : t("sessionManager.mainSession")}</strong></div>
               <div><span>{t("sessionManager.sessionId")}</span><strong>{focusedSession.threadId}</strong></div>
             </div>
@@ -55,16 +69,16 @@ export function SessionManagerWorkspace() {
               <code title={focusedSession.cwd ?? undefined}>{focusedSession.cwd ?? t("sessionManager.unknownProject")}</code>
             </div>
             <div className="session-manager-detail-actions">
-              <button type="button" className="primary" data-button-elevation="none" onClick={() => void resumeSession(focusedSession)} disabled={resumingKey === focusedSession.key} title={t("sessionManager.continueSession")}>
+              <button type="button" className="primary" data-button-elevation="none" onClick={() => void resumeSession(focusedSession)} disabled={!canResume || resumingKey === focusedSession.key} title={canResume ? t("sessionManager.continueSession") : unavailableTitle}>
                 <Play size={15} aria-hidden /><span>{resumingKey === focusedSession.key ? t("sessionManager.resuming") : t("sessionManager.resume")}</span>
               </button>
-              <button type="button" data-button-elevation="none" onClick={() => deriveSession(focusedSession)} disabled={resumingKey === focusedSession.key || !currentWorkspace} title={t("sessionManager.deriveToCurrentProject")}>
+              <button type="button" data-button-elevation="none" onClick={() => deriveSession(focusedSession)} disabled={!canDerive || resumingKey === focusedSession.key || !currentWorkspace} title={canDerive ? t("sessionManager.deriveToCurrentProject") : unavailableTitle}>
                 <GitBranch size={15} aria-hidden /><span>{t("sessionManager.derive")}</span>
               </button>
-              {!focusedSession.isArchived && <button type="button" data-button-elevation="none" onClick={() => void manager.archiveSessions([focusedSession])} disabled={manager.archivingKeys.has(focusedSession.key)} title={t("sessionManager.archive")}>
+              {!focusedSession.isArchived && <button type="button" data-button-elevation="none" onClick={() => void manager.archiveSessions([focusedSession])} disabled={!canArchive || manager.archivingKeys.has(focusedSession.key)} title={canArchive ? t("sessionManager.archive") : unavailableTitle}>
                 <Archive size={15} aria-hidden /><span>{t("sessionManager.archive")}</span>
               </button>}
-              {focusedSession.isArchived && <button type="button" className="danger" data-button-elevation="none" onClick={() => void requestPermanentDelete([focusedSession])} disabled={manager.deletingKeys.has(focusedSession.key)} title={t("sessionManager.permanentDelete")}>
+              {focusedSession.isArchived && <button type="button" className="danger" data-button-elevation="none" onClick={() => void requestPermanentDelete([focusedSession])} disabled={!canDelete || manager.deletingKeys.has(focusedSession.key)} title={canDelete ? t("sessionManager.permanentDelete") : unavailableTitle}>
                 <Trash2 size={15} aria-hidden /><span>{t("sessionManager.permanentDelete")}</span>
               </button>}
             </div>

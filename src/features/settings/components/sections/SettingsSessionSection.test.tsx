@@ -2,15 +2,13 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AppSettings } from "@/types";
-import {
-  cleanupManagedSessionsNow,
-  previewManagedSessionCleanup,
-} from "@services/tauri";
+import { previewManagedSessionCleanup, startManagedSessionCleanup } from "@services/tauri";
 import { SettingsSessionSection } from "./SettingsSessionSection";
 
 vi.mock("@services/tauri", () => ({
   previewManagedSessionCleanup: vi.fn(),
-  cleanupManagedSessionsNow: vi.fn(),
+  startManagedSessionCleanup: vi.fn(),
+  fetchManagedSessionCleanupProgress: vi.fn(),
 }));
 
 function renderSessionSection(
@@ -78,15 +76,20 @@ describe("SettingsSessionSection", () => {
         expect.objectContaining({ autoDeleteArchivedThreadsEnabled: true }),
       ),
     );
-    expect(cleanupManagedSessionsNow).not.toHaveBeenCalled();
+    expect(startManagedSessionCleanup).not.toHaveBeenCalled();
   });
 
   it("requires a fresh preview and confirmation for immediate cleanup", async () => {
     vi.mocked(previewManagedSessionCleanup).mockResolvedValue({ eligibleCount: 1 });
-    vi.mocked(cleanupManagedSessionsNow).mockResolvedValue({
-      results: [],
+    vi.mocked(startManagedSessionCleanup).mockResolvedValue({
+      requestId: "cleanup",
+      processedCount: 1,
+      totalCount: 1,
       successCount: 1,
       failureCount: 0,
+      completed: true,
+      cancelled: false,
+      error: null,
     });
     renderSessionSection({ autoDeleteArchivedThreadsEnabled: true });
 
@@ -95,7 +98,7 @@ describe("SettingsSessionSection", () => {
     fireEvent.click(screen.getByLabelText("我了解永久删除无法恢复"));
     fireEvent.click(screen.getByRole("button", { name: "确认立即清理" }));
 
-    await waitFor(() => expect(cleanupManagedSessionsNow).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(startManagedSessionCleanup).toHaveBeenCalledTimes(1));
     expect(previewManagedSessionCleanup).toHaveBeenCalledTimes(1);
     expect(screen.getByText("清理完成：成功 1，失败 0。")).toBeTruthy();
   });

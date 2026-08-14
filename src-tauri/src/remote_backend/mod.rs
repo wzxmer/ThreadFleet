@@ -167,6 +167,7 @@ fn request_timeout_for_method(method: &str) -> Duration {
             | "preview_managed_session_cleanup"
             | "fetch_managed_session_preview"
             | "cleanup_managed_sessions_now"
+            | "start_managed_session_cleanup"
             | "run_managed_session_cleanup_scheduler"
     ) {
         REMOTE_LONG_RUNNING_REQUEST_TIMEOUT

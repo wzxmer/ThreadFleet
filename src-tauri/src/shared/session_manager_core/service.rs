@@ -9,11 +9,14 @@ use tokio::sync::Mutex;
 
 use crate::shared::attachment_storage_core::validate_session_attachment_cleanup;
 use crate::shared::session_manager_core::audit::{
-    append_deletion_audit, normalized_source_path_id, DeletionAuditEntry, DeletionReason,
-    DeletionResult,
+    append_deletion_audit, append_deletion_audits, normalized_source_path_id, DeletionAuditEntry,
+    DeletionReason, DeletionResult,
 };
 use crate::shared::session_manager_core::cleanup::{
     cleanup_eligible_sessions, prepare_scheduled_cleanup,
+};
+use crate::shared::session_manager_core::compatibility::{
+    source_supports, unsupported_capability_error, SessionSourceCapability,
 };
 use crate::shared::session_manager_core::delete::delete_exact_archived_session;
 use crate::shared::session_manager_core::derivation::build_session_derivation_content;
@@ -28,30 +31,39 @@ use crate::shared::session_manager_core::search::{
     search_scan_results, SearchCacheKey, SearchDocument,
 };
 use crate::shared::session_manager_core::sources::{
-    add_session_source, remove_session_source, rename_session_source, set_session_source_enabled,
+    add_compatible_session_source, remove_session_source, rename_session_source,
+    set_session_source_enabled,
 };
 use crate::storage::write_settings;
 use crate::types::{
     AppSettings, ArchiveManagedSessionResult, ArchiveManagedSessionsRequest,
     ArchiveManagedSessionsResponse, ManagedSession, ManagedSessionCleanupPreview,
-    ManagedSessionCleanupRequest, ManagedSessionCleanupResponse,
+    ManagedSessionCleanupProgress, ManagedSessionCleanupRequest, ManagedSessionCleanupResponse,
     ManagedSessionCleanupSchedulerRequest, ManagedSessionCleanupSchedulerResponse,
-    ManagedSessionDerivationPreview, ManagedSessionPage, ManagedSessionPageRequest,
-    PermanentlyDeleteManagedSessionRequest, PermanentlyDeleteManagedSessionResponse,
-    PermanentlyDeleteManagedSessionResult, PrepareManagedSessionDerivationRequest,
-    SessionScanDiagnosticDto, SessionScanRequest, SessionScanSummary, SessionSearchProgress,
-    SessionSearchRequest, SessionSearchResponse, SessionSource, SessionSourceSnapshot,
-    SessionSourceUpdateRequest, SessionThreadPresence, SessionThreadVerification,
-    VerifySessionThreadsRequest, VerifySessionThreadsResponse,
+    ManagedSessionCleanupTaskRequest, ManagedSessionDerivationPreview, ManagedSessionPage,
+    ManagedSessionPageRequest, PermanentlyDeleteManagedSessionRequest,
+    PermanentlyDeleteManagedSessionResponse, PermanentlyDeleteManagedSessionResult,
+    PrepareManagedSessionDerivationRequest, SessionScanDiagnosticDto, SessionScanRequest,
+    SessionScanSummary, SessionSearchProgress, SessionSearchRequest, SessionSearchResponse,
+    SessionSource, SessionSourceSnapshot, SessionSourceUpdateRequest, SessionThreadPresence,
+    SessionThreadVerification, VerifySessionThreadsRequest, VerifySessionThreadsResponse,
 };
 
 const MAX_PAGE_LIMIT: usize = 500;
 const MAX_VERIFY_THREAD_IDS: usize = 256;
+const CLEANUP_COMMIT_BATCH_SIZE: usize = 64;
+const MAX_RETAINED_CLEANUP_TASKS: usize = 32;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DeleteOperationOutcome {
     success: bool,
     error: Option<String>,
+}
+
+struct CleanupScanResult {
+    eligible: Vec<ManagedSession>,
+    sources_by_id: HashMap<String, SessionSource>,
+    files_by_key: HashMap<String, PathBuf>,
 }
 
 fn execute_delete_steps<DeleteSession, DeleteAttachments>(
@@ -86,6 +98,7 @@ pub(crate) struct SessionManagerRuntime {
     cancelled_requests: Arc<Mutex<HashSet<String>>>,
     search_cache: Arc<StdMutex<HashMap<SearchCacheKey, SearchDocument>>>,
     searches: Arc<StdMutex<HashMap<String, SessionSearchResponse>>>,
+    cleanup_tasks: Arc<StdMutex<HashMap<String, ManagedSessionCleanupProgress>>>,
     confirmed_archive_times: Arc<Mutex<HashMap<String, i64>>>,
     archive_ledger_lock: Arc<Mutex<()>>,
     deletion_audit_lock: Arc<Mutex<()>>,
@@ -211,6 +224,7 @@ async fn permanently_delete_managed_session_with_reason(
         .find(|source| source.id == request.source_id.trim() && source.enabled)
         .cloned()
         .ok_or_else(|| "Session source is unavailable".to_string())?;
+    ensure_source_capability(&source, SessionSourceCapability::Delete)?;
     let source_for_scan = source.clone();
     let mut fresh = tokio::task::spawn_blocking(move || scan_session_source(&source_for_scan))
         .await
@@ -248,9 +262,13 @@ async fn permanently_delete_managed_session_with_reason(
             Path::new(&source.codex_home_path),
             &session.thread_id,
         ) {
-            Ok(attachment_cleanup) => match fresh.files_by_key.get(&session.key) {
-                Some(file) => execute_delete_steps(
-                    || delete_exact_archived_session(&source, &session, &file.path),
+            Ok(attachment_cleanup) => match fresh
+                .files_by_key
+                .get(&session.key)
+                .and_then(|resource| resource.local_path())
+            {
+                Some(path) => execute_delete_steps(
+                    || delete_exact_archived_session(&source, &session, path),
                     || attachment_cleanup.delete(),
                 ),
                 None => DeleteOperationOutcome {
@@ -322,15 +340,25 @@ async fn permanently_delete_managed_session_with_reason(
 }
 
 async fn remove_session_from_runtime(runtime: &SessionManagerRuntime, key: &str) {
+    let keys = [key.to_string()];
+    remove_sessions_from_runtime(runtime, &keys).await;
+}
+
+async fn remove_sessions_from_runtime(runtime: &SessionManagerRuntime, keys: &[String]) {
+    let keys = keys.iter().collect::<HashSet<_>>();
     if let Some(scan) = runtime.latest_scan.lock().await.as_mut() {
-        scan.sessions.retain(|session| session.key != key);
-        scan.files_by_key.remove(key);
+        scan.sessions.retain(|session| !keys.contains(&session.key));
+        scan.files_by_key.retain(|key, _| !keys.contains(key));
     }
     for scan in runtime.scans.lock().await.values_mut() {
-        scan.sessions.retain(|session| session.key != key);
-        scan.files_by_key.remove(key);
+        scan.sessions.retain(|session| !keys.contains(&session.key));
+        scan.files_by_key.retain(|key, _| !keys.contains(key));
     }
-    runtime.confirmed_archive_times.lock().await.remove(key);
+    runtime
+        .confirmed_archive_times
+        .lock()
+        .await
+        .retain(|key, _| !keys.contains(key));
 }
 
 impl SessionManagerRuntime {
@@ -353,15 +381,20 @@ async fn scan_cleanup_candidates(
     request: &ManagedSessionCleanupRequest,
     app_settings: &Mutex<AppSettings>,
     runtime: &SessionManagerRuntime,
-) -> Result<Vec<ManagedSession>, String> {
+) -> Result<CleanupScanResult, String> {
     let sources = app_settings
         .lock()
         .await
         .session_sources
         .iter()
-        .filter(|source| source.enabled)
+        .filter(|source| source.enabled && source_supports(source, SessionSourceCapability::Delete))
         .cloned()
         .collect::<Vec<_>>();
+    let sources_by_id = sources
+        .iter()
+        .cloned()
+        .map(|source| (source.id.clone(), source))
+        .collect();
     let mut scan = scan_session_sources(sources, 4).await;
     let now = current_time_ms();
     if let Some(path) = runtime.archive_ledger_path.as_deref() {
@@ -375,12 +408,22 @@ async fn scan_cleanup_candidates(
         .filter(|thread_id| !thread_id.is_empty())
         .map(str::to_string)
         .collect::<HashSet<_>>();
-    cleanup_eligible_sessions(
+    let eligible = cleanup_eligible_sessions(
         &scan.sessions,
         request.retention_days,
         now,
         &protected_thread_ids,
-    )
+    )?;
+    let files_by_key = scan
+        .files_by_key
+        .into_iter()
+        .filter_map(|(key, resource)| resource.local_path().map(|path| (key, path.to_path_buf())))
+        .collect();
+    Ok(CleanupScanResult {
+        eligible,
+        sources_by_id,
+        files_by_key,
+    })
 }
 
 pub(crate) async fn preview_managed_session_cleanup_core(
@@ -388,9 +431,9 @@ pub(crate) async fn preview_managed_session_cleanup_core(
     app_settings: &Mutex<AppSettings>,
     runtime: &SessionManagerRuntime,
 ) -> Result<ManagedSessionCleanupPreview, String> {
-    let eligible = scan_cleanup_candidates(&request, app_settings, runtime).await?;
+    let scan = scan_cleanup_candidates(&request, app_settings, runtime).await?;
     Ok(ManagedSessionCleanupPreview {
-        eligible_count: eligible.len(),
+        eligible_count: scan.eligible.len(),
     })
 }
 
@@ -399,8 +442,106 @@ pub(crate) async fn cleanup_managed_sessions_now_core(
     app_settings: &Mutex<AppSettings>,
     runtime: &SessionManagerRuntime,
 ) -> Result<ManagedSessionCleanupResponse, String> {
-    cleanup_managed_sessions_with_reason(request, app_settings, runtime, DeletionReason::Manual)
+    cleanup_managed_sessions_with_reason(
+        request,
+        app_settings,
+        runtime,
+        DeletionReason::Manual,
+        None,
+    )
+    .await
+}
+
+pub(crate) async fn start_managed_session_cleanup_core(
+    request: ManagedSessionCleanupTaskRequest,
+    app_settings: AppSettings,
+    runtime: SessionManagerRuntime,
+) -> Result<ManagedSessionCleanupProgress, String> {
+    let request_id = request.request_id.trim().to_string();
+    if request_id.is_empty() {
+        return Err("Session cleanup request id is required".to_string());
+    }
+    let initial = ManagedSessionCleanupProgress {
+        request_id: request_id.clone(),
+        processed_count: 0,
+        total_count: None,
+        success_count: 0,
+        failure_count: 0,
+        completed: false,
+        cancelled: false,
+        error: None,
+    };
+    runtime.cancelled_requests.lock().await.remove(&request_id);
+    register_cleanup_task(&runtime, initial.clone())?;
+    let cleanup_request = ManagedSessionCleanupRequest {
+        retention_days: request.retention_days,
+        protected_thread_ids: request.protected_thread_ids,
+    };
+    tokio::spawn(async move {
+        let settings = Mutex::new(app_settings);
+        if let Err(error) = cleanup_managed_sessions_with_reason(
+            cleanup_request,
+            &settings,
+            &runtime,
+            DeletionReason::Manual,
+            Some(request_id.clone()),
+        )
         .await
+        {
+            let mut tasks = runtime
+                .cleanup_tasks
+                .lock()
+                .unwrap_or_else(|lock_error| lock_error.into_inner());
+            if let Some(progress) = tasks.get_mut(&request_id) {
+                progress.completed = true;
+                progress.error = Some(error);
+            }
+        }
+    });
+    Ok(initial)
+}
+
+fn register_cleanup_task(
+    runtime: &SessionManagerRuntime,
+    initial: ManagedSessionCleanupProgress,
+) -> Result<(), String> {
+    let mut tasks = runtime
+        .cleanup_tasks
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    if tasks.contains_key(&initial.request_id) {
+        return Err("Session cleanup request id is already in use".to_string());
+    }
+    if tasks.len() >= MAX_RETAINED_CLEANUP_TASKS {
+        let remove_count = tasks.len() + 1 - MAX_RETAINED_CLEANUP_TASKS;
+        let completed_ids = tasks
+            .iter()
+            .filter(|(_, progress)| progress.completed || progress.cancelled)
+            .map(|(request_id, _)| request_id.clone())
+            .take(remove_count)
+            .collect::<Vec<_>>();
+        for request_id in completed_ids {
+            tasks.remove(&request_id);
+        }
+    }
+    if tasks.len() >= MAX_RETAINED_CLEANUP_TASKS {
+        return Err("Too many session cleanup tasks are active".to_string());
+    }
+    tasks.insert(initial.request_id.clone(), initial);
+    Ok(())
+}
+
+pub(crate) fn fetch_managed_session_cleanup_progress_core(
+    request_id: String,
+    runtime: &SessionManagerRuntime,
+) -> Result<ManagedSessionCleanupProgress, String> {
+    runtime
+        .cleanup_tasks
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .get(request_id.trim())
+        .cloned()
+        .ok_or_else(|| "Session cleanup task not found".to_string())
 }
 
 async fn cleanup_managed_sessions_with_reason(
@@ -408,41 +549,163 @@ async fn cleanup_managed_sessions_with_reason(
     app_settings: &Mutex<AppSettings>,
     runtime: &SessionManagerRuntime,
     reason: DeletionReason,
+    task_request_id: Option<String>,
 ) -> Result<ManagedSessionCleanupResponse, String> {
-    let eligible = scan_cleanup_candidates(&request, app_settings, runtime).await?;
-    let mut results = Vec::with_capacity(eligible.len());
-    for session in eligible {
+    let scan = scan_cleanup_candidates(&request, app_settings, runtime).await?;
+    if let Some(request_id) = task_request_id.as_deref() {
+        if let Some(progress) = runtime
+            .cleanup_tasks
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .get_mut(request_id)
+        {
+            progress.total_count = Some(scan.eligible.len());
+        }
+    }
+    let deleted_at = current_time_ms();
+    let mut results = Vec::with_capacity(scan.eligible.len());
+    let mut audits = Vec::with_capacity(scan.eligible.len());
+    let mut deleted_keys = Vec::new();
+    let mut batch_start = 0;
+    for session in scan.eligible {
+        if let Some(request_id) = task_request_id.as_deref() {
+            if runtime.cancelled_requests.lock().await.contains(request_id) {
+                break;
+            }
+        }
         let archived_at = session
             .archived_at
             .ok_or_else(|| "Cleanup candidate is missing archive time".to_string())?;
-        match permanently_delete_managed_session_with_reason(
-            PermanentlyDeleteManagedSessionRequest {
-                source_id: session.source_id.clone(),
-                thread_id: session.thread_id.clone(),
-                archived_at,
-                cascade_requested: false,
+        let source = scan.sources_by_id.get(&session.source_id);
+        let path = scan.files_by_key.get(&session.key);
+        let outcome = match (source, path) {
+            (Some(source), Some(path)) => match validate_session_attachment_cleanup(
+                Path::new(&source.codex_home_path),
+                &session.thread_id,
+            ) {
+                Ok(attachment_cleanup) => execute_delete_steps(
+                    || delete_exact_archived_session(source, &session, path),
+                    || attachment_cleanup.delete(),
+                ),
+                Err(error) => DeleteOperationOutcome {
+                    success: false,
+                    error: Some(format!("Session attachment prevalidation failed: {error}")),
+                },
             },
-            app_settings,
-            runtime,
-            reason,
-        )
-        .await
-        {
-            Ok(response) => results.extend(response.results),
-            Err(error) => results.push(PermanentlyDeleteManagedSessionResult {
-                source_id: session.source_id,
-                thread_id: session.thread_id,
+            (None, _) => DeleteOperationOutcome {
                 success: false,
-                error: Some(error),
-            }),
+                error: Some("Session source is unavailable".to_string()),
+            },
+            (_, None) => DeleteOperationOutcome {
+                success: false,
+                error: Some("Managed session does not have an exact verified file".to_string()),
+            },
+        };
+        let result = PermanentlyDeleteManagedSessionResult {
+            source_id: session.source_id.clone(),
+            thread_id: session.thread_id.clone(),
+            success: outcome.success,
+            error: outcome.error,
+        };
+        if result.success {
+            deleted_keys.push(session.key.clone());
+        }
+        if let Some(source) = source {
+            audits.push(DeletionAuditEntry {
+                source_id: source.id.clone(),
+                source_path_id: normalized_source_path_id(&source.codex_home_path),
+                thread_id: session.thread_id,
+                archived_at,
+                deleted_at,
+                reason,
+                result: if result.success {
+                    DeletionResult::Success
+                } else {
+                    DeletionResult::Failure
+                },
+                error_summary: result.error.clone(),
+                cascade_requested: false,
+            });
+        }
+        results.push(result);
+        if let Some(request_id) = task_request_id.as_deref() {
+            if let Some(progress) = runtime
+                .cleanup_tasks
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .get_mut(request_id)
+            {
+                progress.processed_count = results.len();
+                progress.success_count = results.iter().filter(|result| result.success).count();
+                progress.failure_count = results.len() - progress.success_count;
+            }
+        }
+        if results.len() - batch_start >= CLEANUP_COMMIT_BATCH_SIZE {
+            commit_cleanup_batch(runtime, &mut results[batch_start..], &audits, &deleted_keys)
+                .await;
+            audits.clear();
+            deleted_keys.clear();
+            batch_start = results.len();
         }
     }
+    commit_cleanup_batch(runtime, &mut results[batch_start..], &audits, &deleted_keys).await;
     let success_count = results.iter().filter(|result| result.success).count();
+    if let Some(request_id) = task_request_id.as_deref() {
+        let cancelled = runtime.cancelled_requests.lock().await.remove(request_id);
+        if let Some(progress) = runtime
+            .cleanup_tasks
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .get_mut(request_id)
+        {
+            progress.processed_count = results.len();
+            progress.success_count = success_count;
+            progress.failure_count = results.len() - success_count;
+            progress.completed = !cancelled;
+            progress.cancelled = cancelled;
+        }
+    }
     Ok(ManagedSessionCleanupResponse {
         failure_count: results.len() - success_count,
         success_count,
         results,
     })
+}
+
+async fn commit_cleanup_batch(
+    runtime: &SessionManagerRuntime,
+    results: &mut [PermanentlyDeleteManagedSessionResult],
+    audits: &[DeletionAuditEntry],
+    deleted_keys: &[String],
+) {
+    if results.is_empty() {
+        return;
+    }
+    if let Some(path) = runtime.deletion_audit_path() {
+        let _audit_guard = runtime.deletion_audit_lock.lock().await;
+        if let Err(error) = append_deletion_audits(path, audits) {
+            let summary = format!("Deletion audit write failed: {error}");
+            for result in results.iter_mut() {
+                result.error = Some(match result.error.take() {
+                    Some(existing) => format!("{existing}; {summary}"),
+                    None => summary.clone(),
+                });
+            }
+        }
+    }
+    remove_sessions_from_runtime(runtime, &deleted_keys).await;
+    if let Some(path) = runtime.archive_ledger_path.as_deref() {
+        let _ledger_guard = runtime.archive_ledger_lock.lock().await;
+        if let Err(error) = remove_archive_times(path, deleted_keys) {
+            let summary = format!("Archive ledger cleanup failed: {error}");
+            for result in results.iter_mut().filter(|result| result.success) {
+                result.error = Some(match result.error.take() {
+                    Some(existing) => format!("{existing}; {summary}"),
+                    None => summary.clone(),
+                });
+            }
+        }
+    }
 }
 
 pub(crate) async fn run_managed_session_cleanup_scheduler_core(
@@ -510,6 +773,7 @@ pub(crate) async fn run_managed_session_cleanup_scheduler_core(
         app_settings,
         runtime,
         DeletionReason::Automatic,
+        None,
     )
     .await?;
     Ok(ManagedSessionCleanupSchedulerResponse {
@@ -537,12 +801,13 @@ pub(crate) async fn update_session_source_core(
             let path = request
                 .path
                 .as_deref()
-                .map(Path::new)
                 .ok_or_else(|| "Session source path is required".to_string())?;
-            settings.session_sources = add_session_source(
+            settings.session_sources = add_compatible_session_source(
                 settings.session_sources,
                 request.name.as_deref().unwrap_or_default(),
                 path,
+                request.adapter_kind.unwrap_or_default(),
+                request.host.clone().unwrap_or_default(),
                 current_time_ms(),
             )?;
         }
@@ -805,30 +1070,34 @@ pub(crate) async fn search_managed_sessions_core(
         return Err("Session search query must contain at least two characters".to_string());
     }
     runtime.cancelled_requests.lock().await.remove(&request_id);
-    let scan = runtime
+    let mut scan = runtime
         .latest_scan
         .lock()
         .await
         .clone()
         .ok_or_else(|| "Session scan result not found".to_string())?;
-    let source_ids = scan
+    let selected_sources = scan
+        .sources_by_id
+        .values()
+        .filter(|source| request.source_ids.is_empty() || request.source_ids.contains(&source.id))
+        .collect::<Vec<_>>();
+    let source_ids = selected_sources
+        .iter()
+        .filter(|source| source_supports(source, SessionSourceCapability::Search))
+        .map(|source| source.id.clone())
+        .collect::<HashSet<_>>();
+    let skipped_source_count = selected_sources.len().saturating_sub(source_ids.len());
+    scan.sessions
+        .retain(|session| source_ids.contains(&session.source_id));
+    let searchable_keys = scan
         .sessions
         .iter()
-        .filter(|session| {
-            request.source_ids.is_empty() || request.source_ids.contains(&session.source_id)
-        })
-        .map(|session| session.source_id.clone())
+        .map(|session| session.key.as_str())
         .collect::<HashSet<_>>();
+    scan.files_by_key
+        .retain(|key, _| searchable_keys.contains(key.as_str()));
     let total_sources = source_ids.len();
-    let total_files = scan
-        .files_by_key
-        .keys()
-        .filter(|key| {
-            scan.sessions
-                .iter()
-                .any(|session| &session.key == *key && source_ids.contains(&session.source_id))
-        })
-        .count();
+    let total_files = scan.files_by_key.len();
     let initial = SessionSearchProgress {
         request_id: request_id.clone(),
         scanned_sources: 0,
@@ -837,7 +1106,7 @@ pub(crate) async fn search_managed_sessions_core(
         total_files: Some(total_files),
         completed: false,
         cancelled: false,
-        incomplete: false,
+        incomplete: skipped_source_count > 0,
     };
     runtime
         .searches
@@ -928,7 +1197,10 @@ pub(crate) async fn resolve_managed_session_core(
     app_settings: &Mutex<AppSettings>,
     runtime: &SessionManagerRuntime,
 ) -> Result<(SessionSource, ManagedSession), String> {
-    resolve_indexed_managed_session(source_id, thread_id, app_settings, runtime, false).await
+    let resolved =
+        resolve_indexed_managed_session(source_id, thread_id, app_settings, runtime, false).await?;
+    ensure_source_capability(&resolved.0, SessionSourceCapability::ResumeInApp)?;
+    Ok(resolved)
 }
 
 pub(crate) async fn fetch_managed_session_preview_core(
@@ -936,7 +1208,7 @@ pub(crate) async fn fetch_managed_session_preview_core(
     app_settings: &Mutex<AppSettings>,
     runtime: &SessionManagerRuntime,
 ) -> Result<crate::types::ManagedSessionPreviewResponse, String> {
-    let (_, session) = resolve_indexed_managed_session(
+    let (source, session) = resolve_indexed_managed_session(
         &request.source_id,
         &request.thread_id,
         app_settings,
@@ -944,13 +1216,15 @@ pub(crate) async fn fetch_managed_session_preview_core(
         false,
     )
     .await?;
+    ensure_source_capability(&source, SessionSourceCapability::Preview)?;
     let path = runtime
         .latest_scan
         .lock()
         .await
         .as_ref()
         .and_then(|scan| scan.files_by_key.get(&session.key))
-        .map(|file| file.path.clone())
+        .and_then(|resource| resource.local_path())
+        .map(Path::to_path_buf)
         .ok_or_else(|| "Managed session preview file is unavailable".to_string())?;
     let full = request.full;
     let cursor = request.cursor;
@@ -1059,7 +1333,12 @@ where
                 Ok((_source, managed)) if managed.is_archived => {
                     Err("Managed session is already archived".to_string())
                 }
-                Ok((source, managed)) => archive_session(source, managed).await,
+                Ok((source, managed)) => {
+                    match ensure_source_capability(&source, SessionSourceCapability::Archive) {
+                        Ok(()) => archive_session(source, managed).await,
+                        Err(error) => Err(error),
+                    }
+                }
                 Err(error) => Err(error),
             }
         };
@@ -1106,16 +1385,18 @@ pub(crate) async fn prepare_managed_session_derivation_core(
         false,
     )
     .await?;
+    ensure_source_capability(&source, SessionSourceCapability::Derive)?;
     let file = runtime
         .latest_scan
         .lock()
         .await
         .as_ref()
         .and_then(|scan| scan.files_by_key.get(&session.key))
-        .cloned()
+        .and_then(|resource| resource.local_path())
+        .map(Path::to_path_buf)
         .ok_or_else(|| "Managed session does not have an exact verified file".to_string())?;
     let content = build_session_derivation_content(
-        &file.path,
+        &file,
         &session.title,
         &session.key,
         session.cwd.as_deref(),
@@ -1168,6 +1449,15 @@ fn mark_scan_session_archived(
     }
 }
 
+fn ensure_source_capability(
+    source: &SessionSource,
+    capability: SessionSourceCapability,
+) -> Result<(), String> {
+    source_supports(source, capability)
+        .then_some(())
+        .ok_or_else(|| unsupported_capability_error(source, capability))
+}
+
 fn required_source_id(request: &SessionSourceUpdateRequest) -> Result<&str, String> {
     request
         .source_id
@@ -1198,9 +1488,10 @@ mod tests {
         execute_delete_steps, fetch_managed_session_preview_core, fetch_managed_sessions_page_core,
         fetch_session_search_results_core, permanently_delete_managed_session_core,
         prepare_managed_session_derivation_core, preview_managed_session_cleanup_core,
-        resolve_managed_session_core, run_managed_session_cleanup_scheduler_core,
-        scan_managed_sessions_core, search_managed_sessions_core, update_session_source_core,
-        verify_session_threads_core, SessionManagerRuntime,
+        register_cleanup_task, resolve_managed_session_core,
+        run_managed_session_cleanup_scheduler_core, scan_managed_sessions_core,
+        search_managed_sessions_core, update_session_source_core, verify_session_threads_core,
+        SessionManagerRuntime, MAX_RETAINED_CLEANUP_TASKS,
     };
     use crate::shared::attachment_storage_core::session_attachment_dir;
     use crate::shared::session_manager_core::ledger::{
@@ -1208,12 +1499,154 @@ mod tests {
     };
     use crate::types::{
         AppSettings, ArchiveManagedSessionItem, ArchiveManagedSessionsRequest,
-        ManagedSessionCleanupRequest, ManagedSessionCleanupSchedulerRequest,
-        ManagedSessionPageRequest, ManagedSessionPreviewRequest,
-        PermanentlyDeleteManagedSessionRequest, PrepareManagedSessionDerivationRequest,
-        SessionScanRequest, SessionSearchRequest, SessionSourceUpdateRequest,
-        SessionThreadPresence, VerifySessionThreadsRequest,
+        ManagedSessionCleanupProgress, ManagedSessionCleanupRequest,
+        ManagedSessionCleanupSchedulerRequest, ManagedSessionPageRequest,
+        ManagedSessionPreviewRequest, PermanentlyDeleteManagedSessionRequest,
+        PrepareManagedSessionDerivationRequest, SessionAdapterKind, SessionHost, SessionHostKind,
+        SessionPlatform, SessionScanRequest, SessionSearchRequest, SessionSourceStatus,
+        SessionSourceUpdateRequest, SessionThreadPresence, VerifySessionThreadsRequest,
     };
+
+    fn cleanup_progress(
+        request_id: impl Into<String>,
+        completed: bool,
+    ) -> ManagedSessionCleanupProgress {
+        ManagedSessionCleanupProgress {
+            request_id: request_id.into(),
+            processed_count: usize::from(completed),
+            total_count: Some(1),
+            success_count: usize::from(completed),
+            failure_count: 0,
+            completed,
+            cancelled: false,
+            error: None,
+        }
+    }
+
+    #[test]
+    fn cleanup_task_registry_rejects_duplicate_request_ids() {
+        let runtime = SessionManagerRuntime::default();
+        register_cleanup_task(&runtime, cleanup_progress("cleanup-a", false)).unwrap();
+
+        let error =
+            register_cleanup_task(&runtime, cleanup_progress("cleanup-a", false)).unwrap_err();
+
+        assert!(error.contains("already in use"));
+    }
+
+    #[test]
+    fn cleanup_task_registry_prunes_completed_records_at_its_limit() {
+        let runtime = SessionManagerRuntime::default();
+        for index in 0..MAX_RETAINED_CLEANUP_TASKS {
+            register_cleanup_task(&runtime, cleanup_progress(format!("cleanup-{index}"), true))
+                .unwrap();
+        }
+
+        register_cleanup_task(&runtime, cleanup_progress("cleanup-new", false)).unwrap();
+
+        let tasks = runtime
+            .cleanup_tasks
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        assert_eq!(tasks.len(), MAX_RETAINED_CLEANUP_TASKS);
+        assert!(tasks.contains_key("cleanup-new"));
+    }
+
+    #[test]
+    fn registers_unavailable_wsl_sources_without_touching_linux_paths() {
+        let runtime_executor = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime_executor.block_on(async {
+            let root =
+                std::env::temp_dir().join(format!("codex-monitor-wsl-source-{}", Uuid::new_v4()));
+            fs::create_dir_all(&root).unwrap();
+            let settings = Mutex::new(AppSettings::default());
+            let runtime = SessionManagerRuntime::default();
+            let sources = update_session_source_core(
+                SessionSourceUpdateRequest {
+                    action: "add".to_string(),
+                    source_id: None,
+                    name: Some("WSL Ubuntu".to_string()),
+                    path: Some("/home/test/.codex".to_string()),
+                    enabled: None,
+                    adapter_kind: Some(SessionAdapterKind::Codex),
+                    host: Some(SessionHost {
+                        kind: SessionHostKind::Wsl,
+                        id: Some("Ubuntu".to_string()),
+                        platform: SessionPlatform::Linux,
+                    }),
+                },
+                &settings,
+                &root.join("settings.json"),
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(sources[0].native_root, "/home/test/.codex");
+            assert!(matches!(
+                sources[0].status,
+                SessionSourceStatus::Unsupported
+            ));
+            assert!(!sources[0].capabilities.browse);
+
+            let summary = scan_managed_sessions_core(
+                SessionScanRequest {
+                    request_id: "wsl-scan".to_string(),
+                    source_ids: vec![sources[0].id.clone()],
+                    include_archived: None,
+                },
+                &settings,
+                &runtime,
+            )
+            .await
+            .unwrap();
+            assert_eq!(summary.total_sessions, 0);
+            assert_eq!(summary.diagnostic_count, 1);
+            let page = fetch_managed_sessions_page_core(
+                ManagedSessionPageRequest {
+                    request_id: "wsl-scan".to_string(),
+                    offset: 0,
+                    limit: 10,
+                },
+                &runtime,
+            )
+            .await
+            .unwrap();
+            assert!(page.diagnostics[0].error.contains("wsl:Ubuntu"));
+
+            let search = search_managed_sessions_core(
+                SessionSearchRequest {
+                    request_id: "wsl-search".to_string(),
+                    query: "thread".to_string(),
+                    source_ids: vec![sources[0].id.clone()],
+                    include_archived: true,
+                    include_subagents: true,
+                },
+                &runtime,
+            )
+            .await
+            .unwrap();
+            assert_eq!(search.total_sources, 0);
+            assert!(search.incomplete);
+
+            let delete_error = permanently_delete_managed_session_core(
+                PermanentlyDeleteManagedSessionRequest {
+                    source_id: sources[0].id.clone(),
+                    thread_id: "thread-a".to_string(),
+                    archived_at: 1,
+                    cascade_requested: false,
+                },
+                &settings,
+                &runtime,
+            )
+            .await
+            .unwrap_err();
+            assert!(delete_error.contains("does not support Delete"));
+            let _ = fs::remove_dir_all(root);
+        });
+    }
 
     #[test]
     fn verifies_bounded_thread_presence_with_stable_source_generations() {
@@ -1243,6 +1676,8 @@ mod tests {
                     name: Some("Fixture".to_string()),
                     path: Some(codex_home.to_string_lossy().to_string()),
                     enabled: None,
+                    adapter_kind: None,
+                    host: None,
                 },
                 &settings,
                 &root.join("settings.json"),
@@ -1340,6 +1775,8 @@ mod tests {
                     name: Some("Missing".to_string()),
                     path: Some(root.join("missing-home").to_string_lossy().to_string()),
                     enabled: None,
+                    adapter_kind: None,
+                    host: None,
                 },
                 &settings,
                 &root.join("settings.json"),
@@ -1391,6 +1828,8 @@ mod tests {
                     name: Some("Fixture".to_string()),
                     path: Some(codex_home.to_string_lossy().to_string()),
                     enabled: None,
+                    adapter_kind: None,
+                    host: None,
                 },
                 &settings,
                 &root.join("settings.json"),
@@ -1432,6 +1871,92 @@ mod tests {
     }
 
     #[test]
+    fn batch_cleanup_reuses_one_snapshot_and_continues_after_one_failure() {
+        let runtime_executor = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime_executor.block_on(async {
+            const SESSION_COUNT: usize = 300;
+            let root = std::env::temp_dir()
+                .join(format!("codex-monitor-cleanup-batch-{}", Uuid::new_v4()));
+            let codex_home = root.join("codex-home");
+            let archived = codex_home.join("archived_sessions");
+            fs::create_dir_all(&archived).unwrap();
+            let archived_at = super::current_time_ms() - 31 * 24 * 60 * 60 * 1000;
+            let mut index = String::new();
+            for item in 0..SESSION_COUNT {
+                let thread_id = format!("thread-{item:03}");
+                fs::write(
+                    archived.join(format!("rollout-{thread_id}.jsonl")),
+                    format!(
+                        "{{\"type\":\"session_meta\",\"payload\":{{\"id\":\"{thread_id}\"}}}}\n"
+                    ),
+                )
+                .unwrap();
+                index.push_str(&format!(
+                    "{{\"id\":\"{thread_id}\",\"archived_at\":{archived_at}}}\n"
+                ));
+            }
+            fs::write(codex_home.join("session_index.jsonl"), index).unwrap();
+
+            let blocked_thread = "thread-150";
+            let blocked_attachment = session_attachment_dir(&codex_home, blocked_thread).unwrap();
+            fs::create_dir_all(blocked_attachment.parent().unwrap()).unwrap();
+            fs::write(&blocked_attachment, b"not-a-directory").unwrap();
+
+            let settings = Mutex::new(AppSettings::default());
+            update_session_source_core(
+                SessionSourceUpdateRequest {
+                    action: "add".to_string(),
+                    source_id: None,
+                    name: Some("Batch".to_string()),
+                    path: Some(codex_home.to_string_lossy().to_string()),
+                    enabled: None,
+                    adapter_kind: None,
+                    host: None,
+                },
+                &settings,
+                &root.join("settings.json"),
+            )
+            .await
+            .unwrap();
+            let runtime = SessionManagerRuntime::with_storage_dir(&root);
+
+            let response = cleanup_managed_sessions_now_core(
+                ManagedSessionCleanupRequest {
+                    retention_days: 30,
+                    protected_thread_ids: vec![],
+                },
+                &settings,
+                &runtime,
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(response.success_count, SESSION_COUNT - 1);
+            assert_eq!(response.failure_count, 1);
+            assert!(archived
+                .join(format!("rollout-{blocked_thread}.jsonl"))
+                .exists());
+            assert_eq!(
+                fs::read_to_string(root.join("session-deletion-audit.jsonl"))
+                    .unwrap()
+                    .lines()
+                    .count(),
+                SESSION_COUNT
+            );
+            let ledger = read_archive_ledger(&root.join("session-archive-ledger.json")).unwrap();
+            assert_eq!(ledger.entries.len(), 1);
+            assert!(ledger.entries.contains_key(&format!(
+                "{}:{blocked_thread}",
+                response.results[150].source_id
+            )));
+            let _ = fs::remove_dir_all(root);
+        });
+    }
+
+    #[test]
     fn scheduled_cleanup_uses_automatic_audit_reason() {
         let runtime_executor = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -1462,6 +1987,8 @@ mod tests {
                     name: Some("Fixture".to_string()),
                     path: Some(codex_home.to_string_lossy().to_string()),
                     enabled: None,
+                    adapter_kind: None,
+                    host: None,
                 },
                 &settings,
                 &root.join("settings.json"),
@@ -1566,6 +2093,8 @@ mod tests {
                     name: Some("Fixture".to_string()),
                     path: Some(codex_home.to_string_lossy().to_string()),
                     enabled: None,
+                    adapter_kind: None,
+                    host: None,
                 },
                 &settings,
                 &root.join("settings.json"),
@@ -1641,6 +2170,8 @@ mod tests {
                     name: Some("Fixture".to_string()),
                     path: Some(codex_home.to_string_lossy().to_string()),
                     enabled: None,
+                    adapter_kind: None,
+                    host: None,
                 },
                 &settings,
                 &root.join("settings.json"),
@@ -1737,6 +2268,8 @@ mod tests {
                     name: Some("Fixture".to_string()),
                     path: Some(root.join("codex-home").to_string_lossy().to_string()),
                     enabled: None,
+                    adapter_kind: None,
+                    host: None,
                 },
                 &settings,
                 &settings_path,
@@ -1887,7 +2420,15 @@ mod tests {
             let settings = Mutex::new(AppSettings::default());
             let runtime = SessionManagerRuntime::default();
             let sources = update_session_source_core(
-                SessionSourceUpdateRequest { action: "add".to_string(), source_id: None, name: Some("Resume".to_string()), path: Some(root.join("codex-home").to_string_lossy().to_string()), enabled: None },
+                SessionSourceUpdateRequest {
+                    action: "add".to_string(),
+                    source_id: None,
+                    name: Some("Resume".to_string()),
+                    path: Some(root.join("codex-home").to_string_lossy().to_string()),
+                    enabled: None,
+                    adapter_kind: None,
+                    host: None,
+                },
                 &settings,
                 &settings_path,
             ).await.unwrap();
@@ -1936,6 +2477,8 @@ mod tests {
                         name: Some(name.to_string()),
                         path: Some(codex_home.to_string_lossy().to_string()),
                         enabled: None,
+                        adapter_kind: None,
+                        host: None,
                     },
                     &settings,
                     &settings_path,
@@ -2055,6 +2598,8 @@ mod tests {
                     name: Some("Legacy".to_string()),
                     path: Some(root.join("codex-home").to_string_lossy().to_string()),
                     enabled: None,
+                    adapter_kind: None,
+                    host: None,
                 },
                 &settings,
                 &settings_path,

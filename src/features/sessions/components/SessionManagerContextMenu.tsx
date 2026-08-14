@@ -3,13 +3,15 @@ import Copy from "lucide-react/dist/esm/icons/copy";
 import GitBranch from "lucide-react/dist/esm/icons/git-branch";
 import Play from "lucide-react/dist/esm/icons/play";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2";
-import type { ManagedSession } from "@/types";
+import type { ManagedSession, SessionSource } from "@/types";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useI18n } from "@/features/i18n/I18nProvider";
 import { PopoverMenuItem, PopoverSurface } from "@/features/design-system/components/popover/PopoverPrimitives";
+import { allSessionSourcesSupport, sessionSourceSupports } from "../utils/sessionSourceCapabilities";
 
 type Props = {
   sessions: ManagedSession[];
+  sources: SessionSource[];
   x: number;
   y: number;
   boundary: ContextMenuBoundary;
@@ -45,7 +47,7 @@ function resolveMenuPosition(
   };
 }
 
-export function SessionManagerContextMenu({ sessions, x, y, boundary, busy, onClose, onResume, onDerive, onArchive, onPermanentDelete }: Props) {
+export function SessionManagerContextMenu({ sessions, sources, x, y, boundary, busy, onClose, onResume, onDerive, onArchive, onPermanentDelete }: Props) {
   const { t } = useI18n();
   const ref = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ x, y });
@@ -54,7 +56,13 @@ export function SessionManagerContextMenu({ sessions, x, y, boundary, busy, onCl
     Math.max(0, boundary.right - boundary.left - MENU_MARGIN * 2),
   );
   const target = sessions[0];
+  const sourceById = new Map(sources.map((source) => [source.id, source]));
+  const canResume = sessions.length === 1 && sessionSourceSupports(sourceById.get(target?.sourceId), "resumeInApp");
+  const canDerive = allSessionSourcesSupport(sessions, sourceById, "derive");
   const active = sessions.filter((session) => !session.isArchived);
+  const canArchive = active.length > 0 && allSessionSourcesSupport(active, sourceById, "archive");
+  const canDelete = active.length === 0 && allSessionSourcesSupport(sessions, sourceById, "delete");
+  const unavailableTitle = t("sessionManager.actionUnavailable");
   useEffect(() => {
     ref.current?.querySelector<HTMLButtonElement>("button")?.focus();
     const close = (event: PointerEvent) => {
@@ -106,20 +114,20 @@ export function SessionManagerContextMenu({ sessions, x, y, boundary, busy, onCl
     >
       {sessions.length === 1 && (
         <>
-          <PopoverMenuItem role="menuitem" disabled={busy} icon={<Play size={14} />} onClick={() => run(() => onResume(target))}>
+          <PopoverMenuItem role="menuitem" disabled={busy || !canResume} title={!canResume ? unavailableTitle : undefined} icon={<Play size={14} />} onClick={() => run(() => onResume(target))}>
             {t("sessionManager.continueSession")}
           </PopoverMenuItem>
         </>
       )}
-      <PopoverMenuItem role="menuitem" disabled={busy} icon={<GitBranch size={14} />} onClick={() => run(() => onDerive(sessions))}>
+      <PopoverMenuItem role="menuitem" disabled={busy || !canDerive} title={!canDerive ? unavailableTitle : undefined} icon={<GitBranch size={14} />} onClick={() => run(() => onDerive(sessions))}>
         {sessions.length === 1 ? t("sessionManager.deriveToCurrentProject") : t("sessionManager.deriveSelectedToCurrentProject")}
       </PopoverMenuItem>
       {active.length > 0 && (
-        <PopoverMenuItem role="menuitem" disabled={busy} icon={<Archive size={14} />} onClick={() => run(() => onArchive(active))}>
+        <PopoverMenuItem role="menuitem" disabled={busy || !canArchive} title={!canArchive ? unavailableTitle : undefined} icon={<Archive size={14} />} onClick={() => run(() => onArchive(active))}>
           {sessions.length === 1 ? t("sessionManager.archive") : t("sessionManager.archiveSelected")}
         </PopoverMenuItem>
       )}
-      {active.length === 0 && <PopoverMenuItem role="menuitem" disabled={busy} className="is-danger" icon={<Trash2 size={14} />} onClick={() => run(() => onPermanentDelete(sessions))}>
+      {active.length === 0 && <PopoverMenuItem role="menuitem" disabled={busy || !canDelete} title={!canDelete ? unavailableTitle : undefined} className="is-danger" icon={<Trash2 size={14} />} onClick={() => run(() => onPermanentDelete(sessions))}>
           {sessions.length === 1 ? t("sessionManager.permanentDelete") : t("sessionManager.permanentDeleteSelected")}
       </PopoverMenuItem>}
       <PopoverMenuItem role="menuitem" icon={<Copy size={14} />} onClick={() => run(() => { void navigator.clipboard?.writeText(sessions.map((session) => session.threadId).join("\n")).catch(() => undefined); })}>

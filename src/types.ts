@@ -325,12 +325,44 @@ export type SessionSourceStatus =
   | "missing"
   | "denied"
   | "invalid"
+  | "unsupported"
   | "scanning";
+
+export type SessionAdapterKind =
+  | "codex"
+  | "claudeCode"
+  | "geminiCli"
+  | "openCode"
+  | "unsupported";
+
+export type SessionHostKind = "local" | "wsl" | "remote";
+export type SessionPlatform = "windows" | "macos" | "linux" | "unknown";
+
+export type SessionHost = {
+  kind: SessionHostKind;
+  id: string | null;
+  platform?: SessionPlatform;
+};
+
+export type SessionSourceCapabilities = {
+  browse: boolean;
+  preview: boolean;
+  search: boolean;
+  derive: boolean;
+  archive: boolean;
+  delete: boolean;
+  openExternal: boolean;
+  resumeInApp: boolean;
+};
 
 export type SessionSource = {
   id: string;
   name: string;
   codexHomePath: string;
+  nativeRoot?: string;
+  adapterKind?: SessionAdapterKind;
+  host?: SessionHost;
+  capabilities?: SessionSourceCapabilities;
   enabled: boolean;
   isCurrent: boolean;
   isDefault: boolean;
@@ -418,6 +450,8 @@ export type SessionSourceUpdateRequest = {
   name?: string | null;
   path?: string | null;
   enabled?: boolean | null;
+  adapterKind?: SessionAdapterKind | null;
+  host?: SessionHost | null;
 };
 
 export type SessionScanRequest = {
@@ -656,6 +690,21 @@ export type ComposerSubmission = {
   id: string;
   source: ComposerSubmissionSource;
   draftGeneration: number;
+};
+
+export type ManagedSessionCleanupTaskRequest = ManagedSessionCleanupRequest & {
+  requestId: string;
+};
+
+export type ManagedSessionCleanupProgress = {
+  requestId: string;
+  processedCount: number;
+  totalCount: number | null;
+  successCount: number;
+  failureCount: number;
+  completed: boolean;
+  cancelled: boolean;
+  error: string | null;
 };
 export type SendMessageResult = {
   status: "sent" | "blocked" | "steer_failed";

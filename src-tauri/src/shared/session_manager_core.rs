@@ -1,5 +1,7 @@
+pub(crate) mod adapters;
 pub(crate) mod audit;
 pub(crate) mod cleanup;
+pub(crate) mod compatibility;
 pub(crate) mod delete;
 pub(crate) mod derivation;
 pub(crate) mod file_map;

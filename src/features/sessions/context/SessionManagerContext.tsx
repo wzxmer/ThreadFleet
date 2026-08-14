@@ -1,7 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ManagedSession, ManagedSessionPreviewItem, ManagedSessionPreviewResponse } from "@/types";
 import { fetchManagedSessionPreview } from "@services/tauri";
+import { useI18n } from "@/features/i18n/I18nProvider";
 import { useSessionManager } from "../hooks/useSessionManager";
+import { sessionSourceSupports } from "../utils/sessionSourceCapabilities";
 
 type SessionManagerState = ReturnType<typeof useSessionManager>;
 
@@ -70,6 +72,7 @@ function prependPreviewItems(
 }
 
 export function SessionManagerProvider({ active, onActiveChange, onResumeSession, onDeriveSession, onDeriveSessions, currentWorkspace = null, children }: Props) {
+  const { t } = useI18n();
   const manager = useSessionManager(active, currentWorkspace?.path ?? null);
   const [focusedSessionKey, setFocusedSessionKey] = useState<string | null>(null);
   const [sessionPreview, setSessionPreview] = useState<ManagedSessionPreviewResponse | null>(null);
@@ -87,6 +90,8 @@ export function SessionManagerProvider({ active, onActiveChange, onResumeSession
   );
   const focusedSourceId = focusedSession?.sourceId ?? null;
   const focusedThreadId = focusedSession?.threadId ?? null;
+  const focusedSource = manager.sources.find((source) => source.id === focusedSourceId);
+  const focusedPreviewSupported = sessionSourceSupports(focusedSource, "preview");
   const focusSession = useCallback((session: ManagedSession) => {
     if (session.key === focusedSessionKey) return;
     previewRequestRef.current += 1;
@@ -107,6 +112,11 @@ export function SessionManagerProvider({ active, onActiveChange, onResumeSession
     setSessionPreviewLoadingMore(false);
     if (!active || !focusedSourceId || !focusedThreadId) {
       setSessionPreviewLoading(false);
+      return;
+    }
+    if (!focusedPreviewSupported) {
+      setSessionPreviewLoading(false);
+      setSessionPreviewError(t("sessionManager.actionUnavailable"));
       return;
     }
     setSessionPreviewLoading(true);
@@ -131,13 +141,14 @@ export function SessionManagerProvider({ active, onActiveChange, onResumeSession
         });
     }, SESSION_CONTENT_LOAD_DELAY_MS);
     return () => window.clearTimeout(timer);
-  }, [active, focusedSourceId, focusedThreadId]);
+  }, [active, focusedPreviewSupported, focusedSourceId, focusedThreadId, t]);
   const loadEarlierSessionPreview = useCallback(async () => {
     const cursor = sessionPreview?.nextCursor ?? null;
     if (
       !active ||
       !focusedSourceId ||
       !focusedThreadId ||
+      !focusedPreviewSupported ||
       cursor === null ||
       sessionPreviewLoadingMore
     ) {
@@ -166,7 +177,7 @@ export function SessionManagerProvider({ active, onActiveChange, onResumeSession
     } finally {
       if (previewRequestRef.current === requestId) setSessionPreviewLoadingMore(false);
     }
-  }, [active, focusedSourceId, focusedThreadId, sessionPreview?.nextCursor, sessionPreviewLoadingMore]);
+  }, [active, focusedPreviewSupported, focusedSourceId, focusedThreadId, sessionPreview?.nextCursor, sessionPreviewLoadingMore]);
   const resumeDirectly = useCallback(async (session: ManagedSession) => {
     setResumingKey(session.key);
     try {

@@ -1,9 +1,13 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use crate::types::{SessionSource, SessionSourceStatus};
+use crate::types::{
+    current_session_platform, SessionAdapterKind, SessionHost, SessionHostKind, SessionPlatform,
+    SessionSource, SessionSourceCapabilities, SessionSourceStatus,
+};
 use sha2::{Digest, Sha256};
 
+use super::compatibility::{effective_source_capabilities, reconcile_source_compatibility};
 use super::types::{normalize_source_path, source_identity_key};
 
 const CURRENT_SOURCE_NAME: &str = "Current CODEX_HOME";
@@ -16,6 +20,13 @@ pub(crate) fn session_source_for_codex_home(path: &Path) -> Result<SessionSource
         id: source_id_for_path(&normalized_path),
         name: CURRENT_SOURCE_NAME.to_string(),
         codex_home_path: normalized_path.clone(),
+        native_root: normalized_path.clone(),
+        adapter_kind: SessionAdapterKind::Codex,
+        host: SessionHost::default(),
+        capabilities: effective_source_capabilities(
+            SessionAdapterKind::Codex,
+            &SessionHost::default(),
+        ),
         enabled: true,
         is_current: true,
         is_default: false,
@@ -34,15 +45,17 @@ pub(crate) fn reconcile_session_sources(
 ) -> Vec<SessionSource> {
     let mut normalized_sources: Vec<SessionSource> = Vec::new();
     let mut source_index_by_identity: HashMap<String, usize> = HashMap::new();
+    let mut used_source_ids = HashSet::new();
     let current = current_path.and_then(normalized_path_string);
     let default = default_path.and_then(normalized_path_string);
 
     for mut source in sources {
+        reconcile_source_compatibility(&mut source);
         let migrated_path =
             migrated_legacy_system_source_path(&source, current.as_deref(), default.as_deref());
         let path = migrated_path
             .clone()
-            .unwrap_or_else(|| normalize_source_path(&source.codex_home_path));
+            .unwrap_or_else(|| normalized_source_root(&source));
         if path.is_empty() {
             continue;
         }
@@ -51,7 +64,7 @@ pub(crate) fn reconcile_session_sources(
             source.status = status_for_path(Path::new(&path));
             source.error = None;
         }
-        let identity = source_identity_key(&path);
+        let identity = source_storage_identity(source.adapter_kind, &source.host, &path);
         if let Some(index) = source_index_by_identity.get(&identity).copied() {
             merge_duplicate_source(&mut normalized_sources[index], source);
             if migrated_path.is_some() {
@@ -64,15 +77,26 @@ pub(crate) fn reconcile_session_sources(
         }
 
         let mut normalized = source;
-        normalized.codex_home_path = path;
-        normalized.id = source_id_for_path(&normalized.codex_home_path);
-        normalized.name = normalized_source_name(&normalized.name, &normalized.codex_home_path);
-        normalized.is_current = false;
-        normalized.is_default = false;
+        normalized.codex_home_path = path.clone();
+        normalized.native_root = path;
+        if normalized.id.trim().is_empty() || used_source_ids.contains(&normalized.id) {
+            normalized.id = source_id_for_source(&normalized);
+        }
+        normalized.name = normalized_source_name(&normalized.name, &normalized.native_root);
+        if normalized.adapter_kind != SessionAdapterKind::Codex
+            || normalized.host.kind != SessionHostKind::Local
+            || normalized.host.platform != current_session_platform()
+        {
+            normalized.is_current = false;
+            normalized.is_default = false;
+        }
+        normalized.capabilities =
+            effective_source_capabilities(normalized.adapter_kind, &normalized.host);
         if normalized.error.is_none() {
-            normalized.status = status_for_path(Path::new(&normalized.codex_home_path));
+            normalized.status = status_for_source(&normalized);
         }
         source_index_by_identity.insert(identity, normalized_sources.len());
+        used_source_ids.insert(normalized.id.clone());
         normalized_sources.push(normalized);
     }
 
@@ -139,34 +163,75 @@ pub(crate) fn add_session_source(
     path: &Path,
     now_ms: i64,
 ) -> Result<Vec<SessionSource>, String> {
-    let normalized_path = normalized_path_string(path)
-        .ok_or_else(|| "Session source path cannot be empty".to_string())?;
-    let identity = source_identity_key(&normalized_path);
-    let mut sources = sources;
-    if let Some(source) = sources
-        .iter_mut()
-        .find(|source| source_identity_key(&source.codex_home_path) == identity)
-    {
-        source.name = normalized_source_name(name, &normalized_path);
-        source.enabled = true;
-        source.codex_home_path = normalized_path;
-        source.status = status_for_path(Path::new(&source.codex_home_path));
-        source.error = None;
-        return Ok(sources);
-    }
+    add_compatible_session_source(
+        sources,
+        name,
+        &path.to_string_lossy(),
+        SessionAdapterKind::Codex,
+        SessionHost::default(),
+        now_ms,
+    )
+}
 
-    sources.push(SessionSource {
-        id: source_id_for_path(&normalized_path),
-        name: normalized_source_name(name, &normalized_path),
-        codex_home_path: normalized_path.clone(),
+pub(crate) fn add_compatible_session_source(
+    sources: Vec<SessionSource>,
+    name: &str,
+    native_root: &str,
+    adapter_kind: SessionAdapterKind,
+    host: SessionHost,
+    now_ms: i64,
+) -> Result<Vec<SessionSource>, String> {
+    validate_host(&host)?;
+    let mut template = SessionSource {
+        id: String::new(),
+        name: name.to_string(),
+        codex_home_path: native_root.to_string(),
+        native_root: native_root.to_string(),
+        adapter_kind,
+        host,
+        capabilities: SessionSourceCapabilities::default(),
         enabled: true,
         is_current: false,
         is_default: false,
         discovered_at: now_ms,
         last_scan_at: None,
-        status: status_for_path(Path::new(&normalized_path)),
+        status: SessionSourceStatus::Invalid,
         error: None,
-    });
+    };
+    reconcile_source_compatibility(&mut template);
+    let normalized_path = normalized_source_root(&template);
+    if normalized_path.is_empty() {
+        return Err("Session source path cannot be empty".to_string());
+    }
+    template.codex_home_path = normalized_path.clone();
+    template.native_root = normalized_path.clone();
+    template.name = normalized_source_name(name, &normalized_path);
+    template.status = status_for_source(&template);
+    let identity = source_storage_identity(template.adapter_kind, &template.host, &normalized_path);
+    let mut sources = sources;
+    for source in &mut sources {
+        reconcile_source_compatibility(source);
+        let normalized = normalized_source_root(source);
+        source.codex_home_path = normalized.clone();
+        source.native_root = normalized;
+    }
+    if let Some(source) = sources.iter_mut().find(|source| {
+        source_storage_identity(source.adapter_kind, &source.host, &source.native_root) == identity
+    }) {
+        source.name = normalized_source_name(name, &normalized_path);
+        source.enabled = true;
+        source.codex_home_path = normalized_path.clone();
+        source.native_root = normalized_path;
+        source.adapter_kind = template.adapter_kind;
+        source.host = template.host;
+        source.capabilities = template.capabilities;
+        source.status = status_for_source(source);
+        source.error = None;
+        return Ok(sources);
+    }
+
+    template.id = source_id_for_source(&template);
+    sources.push(template);
     Ok(sources)
 }
 
@@ -225,7 +290,7 @@ pub(crate) fn mark_session_source_scan_finished(
     source.status = error
         .as_ref()
         .map(|_| SessionSourceStatus::Invalid)
-        .unwrap_or_else(|| status_for_path(Path::new(&source.codex_home_path)));
+        .unwrap_or_else(|| status_for_source(source));
     source.error = error;
     Ok(())
 }
@@ -242,13 +307,14 @@ fn upsert_system_source(
     let Some(path) = path else {
         return;
     };
-    let identity = source_identity_key(path);
+    let identity =
+        source_storage_identity(SessionAdapterKind::Codex, &SessionHost::default(), path);
     if let Some(index) = source_index_by_identity.get(&identity).copied() {
         let source = &mut sources[index];
         source.is_current |= is_current;
         source.is_default |= is_default;
         if source.error.is_none() {
-            source.status = status_for_path(Path::new(&source.codex_home_path));
+            source.status = status_for_source(source);
         }
         return;
     }
@@ -258,6 +324,13 @@ fn upsert_system_source(
         id: source_id_for_path(path),
         name: default_name.to_string(),
         codex_home_path: path.to_string(),
+        native_root: path.to_string(),
+        adapter_kind: SessionAdapterKind::Codex,
+        host: SessionHost::default(),
+        capabilities: effective_source_capabilities(
+            SessionAdapterKind::Codex,
+            &SessionHost::default(),
+        ),
         enabled: true,
         is_current,
         is_default,
@@ -281,6 +354,20 @@ fn normalized_path_string(path: &Path) -> Option<String> {
     (!normalized.is_empty()).then_some(normalized)
 }
 
+fn normalized_source_root(source: &SessionSource) -> String {
+    let root = if source.native_root.trim().is_empty() {
+        &source.codex_home_path
+    } else {
+        &source.native_root
+    };
+    match (source.host.kind, source.host.platform) {
+        (SessionHostKind::Local, platform) if platform == current_session_platform() => {
+            normalize_source_path(root)
+        }
+        _ => root.trim().to_string(),
+    }
+}
+
 fn normalized_source_name(name: &str, normalized_path: &str) -> String {
     let trimmed = name.trim();
     if !trimmed.is_empty() {
@@ -297,6 +384,48 @@ fn normalized_source_name(name: &str, normalized_path: &str) -> String {
 fn source_id_for_path(path: &str) -> String {
     let digest = Sha256::digest(source_identity_key(path).as_bytes());
     format!("source-{}", hex_prefix(&digest, 16))
+}
+
+fn source_id_for_source(source: &SessionSource) -> String {
+    let identity = source_storage_identity(source.adapter_kind, &source.host, &source.native_root);
+    let digest = Sha256::digest(identity.as_bytes());
+    format!("source-{}", hex_prefix(&digest, 16))
+}
+
+fn source_storage_identity(
+    adapter_kind: SessionAdapterKind,
+    host: &SessionHost,
+    native_root: &str,
+) -> String {
+    if adapter_kind == SessionAdapterKind::Codex
+        && host.kind == SessionHostKind::Local
+        && host.platform == current_session_platform()
+    {
+        return source_identity_key(native_root);
+    }
+    let adapter = match adapter_kind {
+        SessionAdapterKind::Codex => "codex",
+        SessionAdapterKind::ClaudeCode => "claude-code",
+        SessionAdapterKind::GeminiCli => "gemini-cli",
+        SessionAdapterKind::OpenCode => "opencode",
+        SessionAdapterKind::Unsupported => "unsupported",
+    };
+    let host_kind = match host.kind {
+        SessionHostKind::Local => "local",
+        SessionHostKind::Wsl => "wsl",
+        SessionHostKind::Remote => "remote",
+    };
+    let platform = match host.platform {
+        SessionPlatform::Windows => "windows",
+        SessionPlatform::Macos => "macos",
+        SessionPlatform::Linux => "linux",
+        SessionPlatform::Unknown => "unknown",
+    };
+    format!(
+        "{adapter}|{host_kind}|{platform}|{}|{}",
+        host.id.as_deref().unwrap_or_default(),
+        native_root.trim()
+    )
 }
 
 fn hex_prefix(bytes: &[u8], byte_count: usize) -> String {
@@ -319,6 +448,26 @@ fn status_for_path(path: &Path) -> SessionSourceStatus {
     }
 }
 
+fn status_for_source(source: &SessionSource) -> SessionSourceStatus {
+    if !source.capabilities.browse {
+        SessionSourceStatus::Unsupported
+    } else {
+        status_for_path(Path::new(&source.native_root))
+    }
+}
+
+fn validate_host(host: &SessionHost) -> Result<(), String> {
+    if host.kind != SessionHostKind::Local
+        && host
+            .id
+            .as_deref()
+            .is_none_or(|value| value.trim().is_empty())
+    {
+        return Err("Non-local session sources require a host id".to_string());
+    }
+    Ok(())
+}
+
 fn find_source_mut<'a>(
     sources: &'a mut [SessionSource],
     source_id: &str,
@@ -334,16 +483,24 @@ mod tests {
     use std::path::Path;
 
     use super::{
-        add_session_source, reconcile_session_sources, remove_session_source,
-        rename_session_source, session_source_for_codex_home, set_session_source_enabled,
+        add_compatible_session_source, add_session_source, reconcile_session_sources,
+        remove_session_source, rename_session_source, session_source_for_codex_home,
+        set_session_source_enabled,
     };
-    use crate::types::{SessionSource, SessionSourceStatus};
+    use crate::types::{
+        SessionAdapterKind, SessionHost, SessionHostKind, SessionPlatform, SessionSource,
+        SessionSourceStatus,
+    };
 
     fn source(path: &str, name: &str, discovered_at: i64) -> SessionSource {
         SessionSource {
             id: "legacy-id".to_string(),
             name: name.to_string(),
             codex_home_path: path.to_string(),
+            native_root: path.to_string(),
+            adapter_kind: Default::default(),
+            host: Default::default(),
+            capabilities: Default::default(),
             enabled: true,
             is_current: false,
             is_default: false,
@@ -484,8 +641,58 @@ mod tests {
         let second = reconcile_session_sources(first.clone(), None, None, 30);
 
         assert_eq!(first[0].id, second[0].id);
+        assert_eq!(second[0].id, "legacy-id");
         assert_eq!(second[0].error.as_deref(), Some("parse failed"));
         assert!(matches!(second[0].status, SessionSourceStatus::Invalid));
+    }
+
+    #[test]
+    fn compatible_sources_keep_host_and_adapter_in_their_identity() {
+        let local =
+            add_session_source(Vec::new(), "Local", Path::new("/home/test/.codex"), 10).unwrap();
+        let sources = add_compatible_session_source(
+            local,
+            "WSL",
+            "/home/test/.codex",
+            SessionAdapterKind::Codex,
+            SessionHost {
+                kind: SessionHostKind::Wsl,
+                id: Some("Ubuntu".to_string()),
+                platform: SessionPlatform::Linux,
+            },
+            20,
+        )
+        .unwrap();
+
+        assert_eq!(sources.len(), 2);
+        assert_ne!(sources[0].id, sources[1].id);
+        assert_eq!(sources[1].native_root, "/home/test/.codex");
+        assert!(matches!(
+            sources[1].status,
+            SessionSourceStatus::Unsupported
+        ));
+        assert!(!sources[1].capabilities.browse);
+    }
+
+    #[test]
+    fn macos_third_party_roots_remain_in_their_native_namespace() {
+        let sources = add_compatible_session_source(
+            Vec::new(),
+            "Claude on Mac",
+            "/Users/test/.claude",
+            SessionAdapterKind::ClaudeCode,
+            SessionHost {
+                kind: SessionHostKind::Local,
+                id: None,
+                platform: SessionPlatform::Macos,
+            },
+            100,
+        )
+        .unwrap();
+
+        assert_eq!(sources[0].native_root, "/Users/test/.claude");
+        assert_eq!(sources[0].host.platform, SessionPlatform::Macos);
+        assert_eq!(sources[0].status, SessionSourceStatus::Unsupported);
     }
 
     #[cfg(windows)]

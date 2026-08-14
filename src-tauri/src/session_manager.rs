@@ -18,10 +18,10 @@ use crate::shared::settings_core;
 use crate::state::AppState;
 use crate::types::{
     ArchiveManagedSessionsRequest, ArchiveManagedSessionsResponse, ManagedSessionCleanupPreview,
-    ManagedSessionCleanupRequest, ManagedSessionCleanupResponse,
+    ManagedSessionCleanupProgress, ManagedSessionCleanupRequest, ManagedSessionCleanupResponse,
     ManagedSessionCleanupSchedulerRequest, ManagedSessionCleanupSchedulerResponse,
-    ManagedSessionDerivationPreview, ManagedSessionPage, ManagedSessionPageRequest,
-    ManagedSessionPreviewRequest, ManagedSessionPreviewResponse,
+    ManagedSessionCleanupTaskRequest, ManagedSessionDerivationPreview, ManagedSessionPage,
+    ManagedSessionPageRequest, ManagedSessionPreviewRequest, ManagedSessionPreviewResponse,
     PermanentlyDeleteManagedSessionRequest, PermanentlyDeleteManagedSessionResponse,
     PrepareManagedSessionDerivationRequest, ResumeManagedSessionRequest,
     ResumeManagedSessionResponse, SessionScanRequest, SessionScanSummary, SessionSearchProgress,
@@ -504,6 +504,54 @@ pub(crate) async fn cleanup_managed_sessions_now(
         &state.session_manager,
     )
     .await
+}
+
+#[tauri::command]
+pub(crate) async fn start_managed_session_cleanup(
+    request: ManagedSessionCleanupTaskRequest,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<ManagedSessionCleanupProgress, String> {
+    if remote_backend::is_remote_mode(&state).await {
+        return remote_typed_if_enabled(
+            &state,
+            &app,
+            "start_managed_session_cleanup",
+            json!({ "request": request }),
+        )
+        .await?
+        .ok_or_else(|| "Remote session cleanup task returned no response".to_string());
+    }
+    settings_core::get_app_settings_core(&state.app_settings, &state.settings_path).await;
+    let settings = state.app_settings.lock().await.clone();
+    crate::shared::session_manager_core::service::start_managed_session_cleanup_core(
+        request,
+        settings,
+        state.session_manager.clone(),
+    )
+    .await
+}
+
+#[tauri::command]
+pub(crate) async fn fetch_managed_session_cleanup_progress(
+    request_id: String,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<ManagedSessionCleanupProgress, String> {
+    if let Some(value) = remote_typed_if_enabled(
+        &state,
+        &app,
+        "fetch_managed_session_cleanup_progress",
+        json!({ "requestId": request_id }),
+    )
+    .await?
+    {
+        return Ok(value);
+    }
+    crate::shared::session_manager_core::service::fetch_managed_session_cleanup_progress_core(
+        request_id,
+        &state.session_manager,
+    )
 }
 
 #[tauri::command]

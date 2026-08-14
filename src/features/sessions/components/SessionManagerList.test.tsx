@@ -117,6 +117,34 @@ describe("SessionManagerList", () => {
     expect(onResume).toHaveBeenCalledTimes(2);
   });
 
+  it("disables unsupported source actions in rows and context menus", () => {
+    const unsupportedSource: SessionSource = {
+      ...source,
+      status: "unsupported",
+      capabilities: {
+        browse: false,
+        preview: false,
+        search: false,
+        derive: false,
+        archive: false,
+        delete: false,
+        openExternal: false,
+        resumeInApp: false,
+      },
+    };
+    const active = { ...managedSession, isArchived: false, archivedAt: null };
+    render(<SessionManagerList sessions={[active]} sources={[unsupportedSource]} selected={new Set()} resumingKey={null} archivingKeys={new Set()} loading={false} loadingMore={false} error={null} hasMore={false} onToggleSelected={vi.fn()} onResume={vi.fn()} onArchive={vi.fn()} onDerive={vi.fn()} onLoadMore={vi.fn()} />);
+
+    expect((screen.getByRole("button", { name: "继续" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "归档" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "引用" }) as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.contextMenu(screen.getByText(active.title));
+    expect((screen.getByRole("menuitem", { name: "继续会话" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("menuitem", { name: "派生到当前项目" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("menuitem", { name: "归档" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("archives an active row but disables archived rows", () => {
     const onArchive = vi.fn();
     const active = { ...managedSession, isArchived: false, archivedAt: null };

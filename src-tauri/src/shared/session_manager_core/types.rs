@@ -117,12 +117,12 @@ mod tests {
     #[test]
     fn normalizes_windows_source_paths_and_identity() {
         assert_eq!(
-            normalize_source_path(r"  \\?\c:\Users\Lenovo\.codex\sessions\..  "),
-            r"C:\Users\Lenovo\.codex"
+            normalize_source_path(r"  \\?\c:\Users\Test\.codex\sessions\..  "),
+            r"C:\Users\Test\.codex"
         );
         assert_eq!(
-            source_identity_key(r"C:\Users\Lenovo\.CODEX\"),
-            source_identity_key(r"c:/users/lenovo/.codex")
+            source_identity_key(r"C:\Users\Test\.CODEX\"),
+            source_identity_key(r"c:/users/test/.codex")
         );
         assert_eq!(
             normalize_source_path(r"\\Server\Share\Codex\.\sessions\.."),
@@ -164,7 +164,15 @@ mod tests {
         let source = SessionSource {
             id: "source-a".to_string(),
             name: "Default".to_string(),
-            codex_home_path: r"C:\Users\Lenovo\.codex".to_string(),
+            codex_home_path: r"C:\Users\Test\.codex".to_string(),
+            native_root: r"C:\Users\Test\.codex".to_string(),
+            adapter_kind: Default::default(),
+            host: Default::default(),
+            capabilities:
+                crate::shared::session_manager_core::compatibility::effective_source_capabilities(
+                    Default::default(),
+                    &Default::default(),
+                ),
             enabled: true,
             is_current: true,
             is_default: true,
@@ -225,7 +233,24 @@ mod tests {
             json!({
                 "id": "source-a",
                 "name": "Default",
-                "codexHomePath": r"C:\Users\Lenovo\.codex",
+                "codexHomePath": r"C:\Users\Test\.codex",
+                "nativeRoot": r"C:\Users\Test\.codex",
+                "adapterKind": "codex",
+                "host": {
+                    "kind": "local",
+                    "id": null,
+                    "platform": crate::types::current_session_platform()
+                },
+                "capabilities": {
+                    "browse": true,
+                    "preview": true,
+                    "search": true,
+                    "derive": true,
+                    "archive": true,
+                    "delete": true,
+                    "openExternal": false,
+                    "resumeInApp": true
+                },
                 "enabled": true,
                 "isCurrent": true,
                 "isDefault": true,

@@ -209,6 +209,34 @@ describe("useSessionManager", () => {
     expect(cancelSessionTask.mock.calls.some(([requestId]) => String(requestId).startsWith("session-search-"))).toBe(true);
   });
 
+  it("keeps unsupported sources on metadata-only search", async () => {
+    const unsupportedSource: SessionSource = {
+      ...source,
+      status: "unsupported",
+      capabilities: {
+        browse: false,
+        preview: false,
+        search: false,
+        derive: false,
+        archive: false,
+        delete: false,
+        openExternal: false,
+        resumeInApp: false,
+      },
+    };
+    listSessionSources.mockResolvedValue([unsupportedSource]);
+    scanManagedSessions.mockResolvedValue({ requestId: "scan", totalSessions: 1, diagnosticCount: 1, cancelled: false });
+    fetchManagedSessionsPage.mockResolvedValue({ requestId: "scan", items: [session({})], diagnostics: [], total: 1, nextOffset: null });
+
+    const { result } = renderHook(() => useSessionManager(true));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    act(() => result.current.setQuery("Alpha"));
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(searchManagedSessions).not.toHaveBeenCalled();
+    expect(result.current.sessions.map((item) => item.title)).toEqual(["Alpha"]);
+  });
+
   it("refreshes successful archives and keeps failed items selected", async () => {
     const second = session({ key: "source-a:thread-b", threadId: "thread-b", title: "Beta" });
     listSessionSources.mockResolvedValue([source]);

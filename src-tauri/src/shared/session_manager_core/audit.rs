@@ -35,6 +35,16 @@ pub(crate) struct DeletionAuditEntry {
 }
 
 pub(crate) fn append_deletion_audit(path: &Path, entry: &DeletionAuditEntry) -> Result<(), String> {
+    append_deletion_audits(path, std::slice::from_ref(entry))
+}
+
+pub(crate) fn append_deletion_audits(
+    path: &Path,
+    entries: &[DeletionAuditEntry],
+) -> Result<(), String> {
+    if entries.is_empty() {
+        return Ok(());
+    }
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
@@ -43,8 +53,10 @@ pub(crate) fn append_deletion_audit(path: &Path, entry: &DeletionAuditEntry) -> 
         .append(true)
         .open(path)
         .map_err(|error| error.to_string())?;
-    let line = serde_json::to_string(entry).map_err(|error| error.to_string())?;
-    writeln!(file, "{line}").map_err(|error| error.to_string())?;
+    for entry in entries {
+        let line = serde_json::to_string(entry).map_err(|error| error.to_string())?;
+        writeln!(file, "{line}").map_err(|error| error.to_string())?;
+    }
     file.sync_data().map_err(|error| error.to_string())
 }
 
@@ -65,8 +77,8 @@ mod tests {
     use uuid::Uuid;
 
     use super::{
-        append_deletion_audit, normalized_source_path_id, DeletionAuditEntry, DeletionReason,
-        DeletionResult,
+        append_deletion_audit, append_deletion_audits, normalized_source_path_id,
+        DeletionAuditEntry, DeletionReason, DeletionResult,
     };
 
     #[test]
@@ -94,6 +106,31 @@ mod tests {
         assert!(!content.contains("Users"));
         assert!(!content.contains("message"));
         assert!(!content.contains("reasoning"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn appends_multiple_entries_in_one_batch() {
+        let root = std::env::temp_dir().join(format!("delete-audit-batch-{}", Uuid::new_v4()));
+        let path = root.join("audit.jsonl");
+        let entry = |thread_id: &str| DeletionAuditEntry {
+            source_id: "source-a".to_string(),
+            source_path_id: normalized_source_path_id(r"C:\Users\Test\.codex"),
+            thread_id: thread_id.to_string(),
+            archived_at: 1,
+            deleted_at: 2,
+            reason: DeletionReason::Automatic,
+            result: DeletionResult::Success,
+            error_summary: None,
+            cascade_requested: false,
+        };
+
+        append_deletion_audits(&path, &[entry("thread-a"), entry("thread-b")]).unwrap();
+
+        let lines = fs::read_to_string(&path).unwrap();
+        assert_eq!(lines.lines().count(), 2);
+        assert!(lines.contains("thread-a"));
+        assert!(lines.contains("thread-b"));
         let _ = fs::remove_dir_all(root);
     }
 }

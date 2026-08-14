@@ -27,6 +27,8 @@ import type {
   ManagedSessionCleanupPreview,
   ManagedSessionCleanupRequest,
   ManagedSessionCleanupResponse,
+  ManagedSessionCleanupProgress,
+  ManagedSessionCleanupTaskRequest,
   ManagedSessionCleanupSchedulerRequest,
   ManagedSessionCleanupSchedulerResponse,
   ManagedSessionDerivationPreview,
@@ -1939,6 +1941,20 @@ export async function prepareManagedSessionDerivation(
 
 export async function readThread(workspaceId: string, threadId: string) {
   return invoke<any>("read_thread", { workspaceId, threadId });
+}
+
+export async function startManagedSessionCleanup(
+  request: ManagedSessionCleanupTaskRequest,
+): Promise<ManagedSessionCleanupProgress> {
+  return invoke<ManagedSessionCleanupProgress>("start_managed_session_cleanup", { request });
+}
+
+export async function fetchManagedSessionCleanupProgress(
+  requestId: string,
+): Promise<ManagedSessionCleanupProgress> {
+  return invoke<ManagedSessionCleanupProgress>("fetch_managed_session_cleanup_progress", {
+    requestId,
+  });
 }
 
 export async function readThreadPage(

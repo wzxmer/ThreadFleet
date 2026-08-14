@@ -1203,6 +1203,30 @@ impl DaemonState {
         .await
     }
 
+    async fn start_managed_session_cleanup(
+        &self,
+        request: types::ManagedSessionCleanupTaskRequest,
+    ) -> Result<types::ManagedSessionCleanupProgress, String> {
+        settings_core::get_app_settings_core(&self.app_settings, &self.settings_path).await;
+        let settings = self.app_settings.lock().await.clone();
+        shared::session_manager_core::service::start_managed_session_cleanup_core(
+            request,
+            settings,
+            self.session_manager.clone(),
+        )
+        .await
+    }
+
+    async fn fetch_managed_session_cleanup_progress(
+        &self,
+        request_id: String,
+    ) -> Result<types::ManagedSessionCleanupProgress, String> {
+        shared::session_manager_core::service::fetch_managed_session_cleanup_progress_core(
+            request_id,
+            &self.session_manager,
+        )
+    }
+
     async fn run_managed_session_cleanup_scheduler(
         &self,
         request: types::ManagedSessionCleanupSchedulerRequest,

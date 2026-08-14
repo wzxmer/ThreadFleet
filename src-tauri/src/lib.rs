@@ -227,6 +227,8 @@ pub fn run() {
             session_manager::permanently_delete_managed_session,
             session_manager::preview_managed_session_cleanup,
             session_manager::cleanup_managed_sessions_now,
+            session_manager::start_managed_session_cleanup,
+            session_manager::fetch_managed_session_cleanup_progress,
             session_manager::run_managed_session_cleanup_scheduler,
             session_manager::prepare_managed_session_derivation,
             settings::get_codex_config_path,

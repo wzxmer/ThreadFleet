@@ -2,6 +2,7 @@ import type { ManagedSession, SessionSource } from "@/types";
 import { formatLocalDateTime, formatRelativeTimeShort } from "@/utils/time";
 import { useI18n } from "@/features/i18n/I18nProvider";
 import type { CSSProperties } from "react";
+import { sessionSourceSupports } from "../utils/sessionSourceCapabilities";
 
 type Props = {
   session: ManagedSession;
@@ -31,6 +32,11 @@ export function SessionManagerRow({ session, source, depth = 0, selected, resumi
   const relativeTime = session.updatedAt
     ? formatRelativeTimeShort(session.updatedAt)
     : null;
+  const canResume = sessionSourceSupports(source, "resumeInApp");
+  const canArchive = sessionSourceSupports(source, "archive");
+  const canDerive = sessionSourceSupports(source, "derive");
+  const canDelete = sessionSourceSupports(source, "delete");
+  const unavailableTitle = t("sessionManager.actionUnavailable");
   const selectRow = () => {
     onSelectSingle?.();
     onFocus?.();
@@ -44,7 +50,7 @@ export function SessionManagerRow({ session, source, depth = 0, selected, resumi
       <button type="button" className="session-manager-row-select" data-button-elevation="none" onClick={onToggleSelected} aria-label={`${t("sessionManager.select")} ${session.title}`}>
         <input type="checkbox" checked={selected} readOnly tabIndex={-1} />
       </button>
-      <button type="button" className="session-manager-row-content" data-button-elevation="none" onClick={selectRow} onDoubleClick={!resuming && onFocus ? onResume : undefined} aria-busy={resuming} aria-pressed={selected}>
+      <button type="button" className="session-manager-row-content" data-button-elevation="none" onClick={selectRow} onDoubleClick={!resuming && canResume && onFocus ? onResume : undefined} aria-busy={resuming} aria-pressed={selected}>
         <span className="session-manager-row-title" title={session.title}>{session.title}</span>
         <span className="session-manager-row-path" title={session.cwd ?? undefined}>{session.cwd ?? t("sessionManager.unknownProject")}</span>
         {!compact && session.preview && <span className="session-manager-row-preview">{session.preview}</span>}
@@ -58,16 +64,16 @@ export function SessionManagerRow({ session, source, depth = 0, selected, resumi
         {absoluteTime ?? "—"}
       </span>
       {!compact && <span className="session-manager-row-actions">
-        <button type="button" className="session-manager-row-resume" data-button-elevation="none" onClick={onResume} disabled={resuming || archiving}>
+        <button type="button" className="session-manager-row-resume" data-button-elevation="none" onClick={onResume} disabled={!canResume || resuming || archiving} title={!canResume ? unavailableTitle : undefined}>
           {resuming ? t("sessionManager.resuming") : t("sessionManager.resume")}
         </button>
-        <button type="button" className="session-manager-row-archive" data-button-elevation="none" onClick={onArchive} disabled={archiving || session.isArchived}>
+        <button type="button" className="session-manager-row-archive" data-button-elevation="none" onClick={onArchive} disabled={!canArchive || archiving || session.isArchived} title={!canArchive ? unavailableTitle : undefined}>
           {archiving ? t("sessionManager.archiving") : t("sessionManager.archive")}
         </button>
-        <button type="button" className="session-manager-row-derive" data-button-elevation="none" onClick={onDerive} disabled={archiving || resuming}>
+        <button type="button" className="session-manager-row-derive" data-button-elevation="none" onClick={onDerive} disabled={!canDerive || archiving || resuming} title={!canDerive ? unavailableTitle : undefined}>
           {t("sessionManager.derive")}
         </button>
-        {session.isArchived && <button type="button" className="session-manager-row-delete" data-button-elevation="none" onClick={onPermanentDelete} disabled={deleting || archiving || resuming}>{deleting ? t("sessionManager.deleting") : t("sessionManager.permanentDelete")}</button>}
+        {session.isArchived && <button type="button" className="session-manager-row-delete" data-button-elevation="none" onClick={onPermanentDelete} disabled={!canDelete || deleting || archiving || resuming} title={!canDelete ? unavailableTitle : undefined}>{deleting ? t("sessionManager.deleting") : t("sessionManager.permanentDelete")}</button>}
       </span>}
     </div>
   );

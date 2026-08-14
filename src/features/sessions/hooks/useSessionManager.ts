@@ -14,6 +14,7 @@ import {
   type SessionManagerStorageFilter,
   type SessionManagerTypeFilter,
 } from "../utils/sessionManagerFilters";
+import { sessionSourceSupports } from "../utils/sessionSourceCapabilities";
 
 const PAGE_LIMIT = 100;
 const CONTENT_SEARCH_DELAY_MS = 250;
@@ -126,16 +127,23 @@ export function useSessionManager(enabled: boolean, currentProjectPath: string |
     setSearchResults(null);
     setSearchProgress(null);
     if (!enabled || loading || normalizedQuery.length < 2 || sessions.length === 0) return;
+    const searchableSourceIds = sources
+      .filter((source) => (
+        (sourceFilter === "all" || source.id === sourceFilter)
+        && sessionSourceSupports(source, "search")
+      ))
+      .map((source) => source.id);
+    if (searchableSourceIds.length === 0) return;
 
     const requestId = `session-search-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     searchRequestIdRef.current = requestId;
     const timer = window.setTimeout(async () => {
-      setSearchProgress({ requestId, scannedSources: 0, totalSources: sourceFilter === "all" ? sources.length : 1, scannedFiles: 0, totalFiles: null, completed: false, cancelled: false, incomplete: false });
+      setSearchProgress({ requestId, scannedSources: 0, totalSources: searchableSourceIds.length, scannedFiles: 0, totalFiles: null, completed: false, cancelled: false, incomplete: false });
       try {
         const progress = await searchManagedSessions({
           requestId,
           query: normalizedQuery,
-          sourceIds: sourceFilter === "all" ? [] : [sourceFilter],
+          sourceIds: searchableSourceIds,
           includeArchived: storageFilter !== "local",
           includeSubagents: sessionTypeFilter !== "main",
         });

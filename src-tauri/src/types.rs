@@ -1,11 +1,109 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum SessionAdapterKind {
+    #[default]
+    Codex,
+    ClaudeCode,
+    GeminiCli,
+    OpenCode,
+    #[serde(other)]
+    Unsupported,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum SessionHostKind {
+    #[default]
+    Local,
+    Wsl,
+    Remote,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum SessionPlatform {
+    Windows,
+    Macos,
+    Linux,
+    #[default]
+    Unknown,
+}
+
+pub(crate) const fn current_session_platform() -> SessionPlatform {
+    #[cfg(target_os = "windows")]
+    {
+        return SessionPlatform::Windows;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        return SessionPlatform::Macos;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        return SessionPlatform::Linux;
+    }
+    #[allow(unreachable_code)]
+    SessionPlatform::Unknown
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SessionHost {
+    #[serde(default)]
+    pub(crate) kind: SessionHostKind,
+    #[serde(default)]
+    pub(crate) id: Option<String>,
+    #[serde(default)]
+    pub(crate) platform: SessionPlatform,
+}
+
+impl Default for SessionHost {
+    fn default() -> Self {
+        Self {
+            kind: SessionHostKind::Local,
+            id: None,
+            platform: current_session_platform(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SessionSourceCapabilities {
+    #[serde(default)]
+    pub(crate) browse: bool,
+    #[serde(default)]
+    pub(crate) preview: bool,
+    #[serde(default)]
+    pub(crate) search: bool,
+    #[serde(default)]
+    pub(crate) derive: bool,
+    #[serde(default)]
+    pub(crate) archive: bool,
+    #[serde(default)]
+    pub(crate) delete: bool,
+    #[serde(default)]
+    pub(crate) open_external: bool,
+    #[serde(default)]
+    pub(crate) resume_in_app: bool,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SessionSource {
     pub(crate) id: String,
     pub(crate) name: String,
     pub(crate) codex_home_path: String,
+    #[serde(default)]
+    pub(crate) native_root: String,
+    #[serde(default)]
+    pub(crate) adapter_kind: SessionAdapterKind,
+    #[serde(default)]
+    pub(crate) host: SessionHost,
+    #[serde(default)]
+    pub(crate) capabilities: SessionSourceCapabilities,
     pub(crate) enabled: bool,
     pub(crate) is_current: bool,
     pub(crate) is_default: bool,
@@ -21,6 +119,7 @@ pub(crate) enum SessionSourceStatus {
     Missing,
     Denied,
     Invalid,
+    Unsupported,
     Scanning,
 }
 
@@ -154,6 +253,10 @@ pub(crate) struct SessionSourceUpdateRequest {
     pub(crate) path: Option<String>,
     #[serde(default)]
     pub(crate) enabled: Option<bool>,
+    #[serde(default)]
+    pub(crate) adapter_kind: Option<SessionAdapterKind>,
+    #[serde(default)]
+    pub(crate) host: Option<SessionHost>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
@@ -600,6 +703,28 @@ pub(crate) struct LocalUsageModel {
     pub(crate) model: String,
     pub(crate) tokens: i64,
     pub(crate) share_percent: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ManagedSessionCleanupTaskRequest {
+    pub(crate) request_id: String,
+    pub(crate) retention_days: u32,
+    #[serde(default)]
+    pub(crate) protected_thread_ids: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ManagedSessionCleanupProgress {
+    pub(crate) request_id: String,
+    pub(crate) processed_count: usize,
+    pub(crate) total_count: Option<usize>,
+    pub(crate) success_count: usize,
+    pub(crate) failure_count: usize,
+    pub(crate) completed: bool,
+    pub(crate) cancelled: bool,
+    pub(crate) error: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

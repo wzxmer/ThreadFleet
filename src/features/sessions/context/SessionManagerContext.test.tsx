@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ManagedSession } from "@/types";
 
 const { managerMock, fetchPreviewMock } = vi.hoisted(() => ({
-  managerMock: { indexedSessions: [] as ManagedSession[], sessions: [] as ManagedSession[] },
+  managerMock: { indexedSessions: [] as ManagedSession[], sessions: [] as ManagedSession[], sources: [] as import("@/types").SessionSource[] },
   fetchPreviewMock: vi.fn(),
 }));
 
@@ -26,6 +26,7 @@ afterEach(() => {
 beforeEach(() => {
   managerMock.indexedSessions = [];
   managerMock.sessions = [];
+  managerMock.sources = [];
   fetchPreviewMock.mockReset();
 });
 
@@ -99,6 +100,43 @@ describe("SessionManagerProvider", () => {
       threadId: "thread",
       limit: 40,
     });
+  });
+
+  it("does not request content when the source lacks preview capability", async () => {
+    vi.useFakeTimers();
+    managerMock.indexedSessions = [session];
+    managerMock.sessions = [session];
+    managerMock.sources = [{
+      id: "source",
+      name: "WSL",
+      codexHomePath: "/home/test/.codex",
+      nativeRoot: "/home/test/.codex",
+      adapterKind: "codex",
+      host: { kind: "wsl", id: "Ubuntu", platform: "linux" },
+      capabilities: {
+        browse: false,
+        preview: false,
+        search: false,
+        derive: false,
+        archive: false,
+        delete: false,
+        openExternal: false,
+        resumeInApp: false,
+      },
+      enabled: true,
+      isCurrent: false,
+      isDefault: false,
+      discoveredAt: 1,
+      lastScanAt: null,
+      status: "unsupported",
+      error: null,
+    }];
+
+    render(<SessionManagerProvider active onActiveChange={vi.fn()} onResumeSession={vi.fn()} onDeriveSession={vi.fn()}><PreviewProbe /></SessionManagerProvider>);
+    fireEvent.click(screen.getByRole("button", { name: "focus B session" }));
+    await act(async () => vi.advanceTimersByTime(100));
+
+    expect(fetchPreviewMock).not.toHaveBeenCalled();
   });
 
   it("ignores latest-page responses from a previously focused session", async () => {
