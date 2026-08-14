@@ -416,7 +416,7 @@ export function ComposerMetaBar({
           className="composer-select-wrap composer-select-wrap--model"
           style={getControlWidthStyle(
             getSelectedLabel(modelOptions, selectedModelId ?? ""),
-            78,
+            80,
             122,
             260,
           )}

@@ -133,7 +133,7 @@ describe("ComposerMetaBar", () => {
     const wrapper = view.container.querySelector<HTMLElement>(
       ".composer-select-wrap--model",
     );
-    expect(wrapper?.style.getPropertyValue("--composer-control-width")).toBe("159px");
+    expect(wrapper?.style.getPropertyValue("--composer-control-width")).toBe("161px");
   });
 
   it("combines input shortcut and trigger mode in one menu", () => {

@@ -34,6 +34,15 @@ describe("composer select interaction styles", () => {
     );
   });
 
+  it("reserves visual space between the model core and trigger label", () => {
+    const modelLabelRule = composerCss.match(
+      /\.composer-select-wrap--model \.composer-select-trigger-label\s*\{([\s\S]*?)\n\}/,
+    );
+
+    expect(modelLabelRule).not.toBeNull();
+    expect(modelLabelRule?.[1]).toContain("padding-inline-start: 2px;");
+  });
+
   it("allows light conversation presets to override only the input surface", () => {
     expect(composerCss).toContain(
       "background: var(--composer-input-background, var(--cm-surface-panel-elevated));",

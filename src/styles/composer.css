@@ -1706,6 +1706,10 @@
   min-width: 0;
 }
 
+.composer-select-wrap--model .composer-select-trigger-label {
+  padding-inline-start: 2px;
+}
+
 .composer-model-refresh {
   display: inline-flex;
   align-items: center;
