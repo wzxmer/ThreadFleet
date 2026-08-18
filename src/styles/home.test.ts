@@ -76,4 +76,16 @@ describe("home layout styles", () => {
       /\.home-actions \.home-button\.primary\s*\{[^}]*background:\s*#[0-9a-fA-F]{3,8}/s,
     );
   });
+
+  it("uses theme-owned colors for Codex download progress", () => {
+    const progressFillRule = homeCss.match(
+      /\.codex-install-progress-track span\s*\{([\s\S]*?)\n\}/,
+    );
+
+    expect(progressFillRule).not.toBeNull();
+    expect(progressFillRule?.[1]).toContain(
+      "background: color-mix(in srgb, var(--border-accent) 72%, var(--text-accent));",
+    );
+    expect(progressFillRule?.[1]).not.toContain("var(--accent-color)");
+  });
 });

@@ -1159,7 +1159,7 @@
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: var(--accent-color);
+  background: color-mix(in srgb, var(--border-accent) 72%, var(--text-accent));
   transition: width 160ms ease;
 }
 
