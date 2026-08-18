@@ -121,7 +121,7 @@ describe("ThreadList", () => {
     expect(screen.getByRole("button", { name: "更多..." })).toBeTruthy();
   });
 
-  it("counts pinned roots toward each visible batch", () => {
+  it("keeps pinned roots outside collapsed batches", () => {
     const pinnedRows = Array.from({ length: 2 }, (_, index) => ({
       thread: {
         id: `pinned-${index}`,
@@ -148,11 +148,11 @@ describe("ThreadList", () => {
     );
 
     expect(container.querySelectorAll(".thread-row")).toHaveLength(
-      COLLAPSED_THREAD_ROOT_LIMIT,
+      pinnedRows.length + COLLAPSED_THREAD_ROOT_LIMIT,
     );
     fireEvent.click(screen.getByRole("button", { name: "更多..." }));
     expect(container.querySelectorAll(".thread-row")).toHaveLength(
-      COLLAPSED_THREAD_ROOT_LIMIT * 2,
+      pinnedRows.length + COLLAPSED_THREAD_ROOT_LIMIT * 2,
     );
   });
 

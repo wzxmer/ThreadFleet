@@ -1239,6 +1239,47 @@ describe("Sidebar", () => {
     window.localStorage.removeItem("codexmonitor.pinnedWorkspaceFolders");
   });
 
+  it("keeps pinned threads visible when their workspace is collapsed", () => {
+    const collapsedWorkspace = {
+      id: "ws-1",
+      name: "Alpha Project",
+      path: "/tmp/alpha",
+      connected: true,
+      settings: { sidebarCollapsed: true },
+    };
+    const { container } = render(
+      <Sidebar
+        {...baseProps}
+        workspaces={[collapsedWorkspace]}
+        groupedWorkspaces={[
+          {
+            id: null,
+            name: "Workspaces",
+            workspaces: [collapsedWorkspace],
+          },
+        ]}
+        threadsByWorkspace={{
+          "ws-1": [
+            {
+              id: "thread-pinned",
+              name: "Pinned through collapse",
+              updatedAt: 100,
+            },
+          ],
+        }}
+        pinnedThreadsVersion={1}
+        isThreadPinned={vi.fn(() => true)}
+        getPinTimestamp={vi.fn(() => 1)}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "显示 Agents" })).toBeTruthy();
+    const pinnedRow = screen.getByText("Pinned through collapse").closest(".thread-row");
+    expect(pinnedRow).toBeTruthy();
+    expect(pinnedRow?.closest(".pinned-section")).toBeTruthy();
+    expect(container.querySelector(".workspace-card-content .thread-row")).toBeNull();
+  });
+
   it("refreshes all workspace threads from the header button", () => {
     const onRefreshAllThreads = vi.fn();
     render(

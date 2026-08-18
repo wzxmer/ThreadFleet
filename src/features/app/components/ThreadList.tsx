@@ -104,25 +104,19 @@ export function ThreadList({
       ),
     [pinnedRows, pinnedSubagentCollapse, workspaceId],
   );
+  const pinnedRootCount = countRootRows(pinnedRows);
+  const totalUnpinnedRoots = Math.max(0, totalThreadRoots - pinnedRootCount);
   const unpinnedVisibility = useMemo(
     () =>
       buildThreadRowVisibility(
         splitRowsByRoot(unpinnedRows)
-          .slice(
-            0,
-            Math.max(
-              0,
-              (isExpanded ? totalThreadRoots : visibleRootLimit) -
-                countRootRows(pinnedRows),
-            ),
-          )
+          .slice(0, isExpanded ? totalUnpinnedRoots : visibleRootLimit)
           .flatMap((group) => group.rows),
         (row) => unpinnedSubagentCollapse.isCollapsed(workspaceId, row.thread.id),
       ),
     [
       isExpanded,
-      pinnedRows,
-      totalThreadRoots,
+      totalUnpinnedRoots,
       unpinnedRows,
       unpinnedSubagentCollapse,
       visibleRootLimit,
@@ -130,23 +124,22 @@ export function ThreadList({
     ],
   );
 
-  const pinnedRootCount = countRootRows(pinnedRows);
-  const visibleRootCount = pinnedRootCount + countRootRows(unpinnedVisibility.visibleRows);
-  const hasMoreRoots = totalThreadRoots > visibleRootCount;
+  const visibleUnpinnedRootCount = countRootRows(unpinnedVisibility.visibleRows);
+  const hasMoreRoots = totalUnpinnedRoots > visibleUnpinnedRootCount;
   const canCollapse =
     !isExpanded && visibleRootLimit > COLLAPSED_THREAD_ROOT_LIMIT && !hasMoreRoots;
 
   const handleShowMore = () => {
     setVisibleRootLimit((currentLimit) => {
-      const effectiveLimit = Math.max(currentLimit, visibleRootCount);
+      const effectiveLimit = Math.max(currentLimit, visibleUnpinnedRootCount);
       const nextLimit = effectiveLimit + COLLAPSED_THREAD_ROOT_LIMIT;
-      return Math.min(totalThreadRoots, nextLimit);
+      return Math.min(totalUnpinnedRoots, nextLimit);
     });
   };
 
   const handleLoadOlder = () => {
     setVisibleRootLimit((currentLimit) =>
-      Math.max(currentLimit, totalThreadRoots) + COLLAPSED_THREAD_ROOT_LIMIT,
+      Math.max(currentLimit, totalUnpinnedRoots) + COLLAPSED_THREAD_ROOT_LIMIT,
     );
     onLoadOlderThreads(workspaceId);
   };

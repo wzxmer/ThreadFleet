@@ -1887,6 +1887,20 @@ describe("useThreads UX integration", () => {
       "ws-1",
       "thread-pinned",
     );
+
+    rerender({ autoArchiveThreadsEnabled: false });
+    act(() => {
+      result.current.unpinThread("ws-1", "thread-pinned");
+    });
+    vi.mocked(archiveThread).mockClear();
+    rerender({ autoArchiveThreadsEnabled: true });
+
+    await waitFor(() => {
+      expect(vi.mocked(archiveThread)).toHaveBeenCalledWith(
+        "ws-1",
+        "thread-pinned",
+      );
+    });
   });
 
   it("bounds hydrated history after scrollback settings are available", async () => {

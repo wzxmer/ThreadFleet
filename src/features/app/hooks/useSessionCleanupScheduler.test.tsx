@@ -54,6 +54,40 @@ describe("useSessionCleanupScheduler", () => {
     );
   });
 
+  it("stops protecting an unpinned thread on the next scheduler refresh", async () => {
+    window.localStorage.setItem(
+      "codexmonitor.pinnedThreads",
+      JSON.stringify({ "workspace-a:pinned": 1 }),
+    );
+    const { rerender } = renderHook(
+      ({ pinnedThreadsVersion }) =>
+        useSessionCleanupScheduler({
+          settingsLoading: false,
+          startupReady: true,
+          enabled: true,
+          activeThreadId: null,
+          threadStatusById: {},
+          pinnedThreadsVersion,
+        }),
+      { initialProps: { pinnedThreadsVersion: 0 } },
+    );
+
+    await waitFor(() =>
+      expect(runManagedSessionCleanupScheduler).toHaveBeenLastCalledWith({
+        protectedThreadIds: ["pinned"],
+      }),
+    );
+
+    window.localStorage.removeItem("codexmonitor.pinnedThreads");
+    rerender({ pinnedThreadsVersion: 1 });
+
+    await waitFor(() =>
+      expect(runManagedSessionCleanupScheduler).toHaveBeenLastCalledWith({
+        protectedThreadIds: [],
+      }),
+    );
+  });
+
   it("waits until workspace and thread restoration completes", () => {
     renderHook(() =>
       useSessionCleanupScheduler({
