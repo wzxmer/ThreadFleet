@@ -61,6 +61,9 @@ export function useComposerInputLayout({
     textarea.style.setProperty("--composer-textarea-max-height", `${maxTextareaHeight}px`);
     textarea.style.minHeight = `${minTextareaHeight}px`;
     textarea.style.maxHeight = `${maxTextareaHeight}px`;
+    if (manualHeight === null) {
+      textarea.style.height = "auto";
+    }
     const nextHeight =
       manualHeight === null
         ? Math.min(
@@ -68,9 +71,6 @@ export function useComposerInputLayout({
             maxTextareaHeight,
           )
         : Math.min(Math.max(manualHeight, minTextareaHeight), maxTextareaHeight);
-    if (manualHeight === null) {
-      textarea.style.height = "auto";
-    }
     textarea.style.height = `${nextHeight}px`;
     const nextScrollable =
       manualHeight === null
