@@ -331,6 +331,7 @@ describe("Messages", () => {
   });
 
   it("shows turn activity and code changes on the final assistant message", () => {
+    const createdAt = new Date("2026-08-20T10:00:00").getTime();
     const summary: TurnExecutionSummary = {
       schemaVersion: 1,
       executionId: "exec-claude",
@@ -342,7 +343,7 @@ describe("Messages", () => {
       status: "completed",
       startedAtMs: 1,
       endedAtMs: 2,
-      workingDurationMs: 1,
+      workingDurationMs: 65_000,
       addedLines: 8,
       deletedLines: 3,
       diffRevision: 1,
@@ -359,6 +360,7 @@ describe("Messages", () => {
             role: "assistant",
             phase: "commentary",
             text: "Checking files.",
+            createdAt,
             turnId: "turn-claude",
           },
           {
@@ -382,6 +384,7 @@ describe("Messages", () => {
             role: "assistant",
             phase: "final_answer",
             text: "Done",
+            createdAt: createdAt + 65_000,
             turnId: "turn-claude",
           },
         ]}
@@ -419,6 +422,214 @@ describe("Messages", () => {
     expect(
       finalMessage?.querySelector(".message-agent-stat-delete")?.textContent,
     ).toBe("-3");
+    expect(
+      finalMessage?.querySelector(".message-agent-duration")?.textContent,
+    ).toContain("用时 1:05");
+    expect(
+      container.querySelectorAll(".message-agent-duration"),
+    ).toHaveLength(1);
+  });
+
+  it("shows one frozen duration for each completed execution", () => {
+    const createdAt = new Date("2026-08-20T10:00:00").getTime();
+    const summaries: TurnExecutionSummary[] = [
+      {
+        schemaVersion: 1,
+        executionId: "exec-1",
+        workspaceId: "ws-1",
+        threadId: "thread-1",
+        turnId: "turn-1",
+        turnChain: ["turn-1"],
+        status: "completed",
+        startedAtMs: createdAt,
+        endedAtMs: createdAt + 7_000,
+        workingDurationMs: 7_000,
+        addedLines: null,
+        deletedLines: null,
+        diffRevision: 0,
+        recordRevision: 1,
+        updatedAtMs: createdAt + 7_000,
+      },
+      {
+        schemaVersion: 1,
+        executionId: "exec-2",
+        workspaceId: "ws-1",
+        threadId: "thread-1",
+        turnId: "turn-2",
+        turnChain: ["turn-2-retry", "turn-2"],
+        status: "completed",
+        startedAtMs: createdAt + 10_000,
+        endedAtMs: createdAt + 75_000,
+        workingDurationMs: 65_000,
+        addedLines: null,
+        deletedLines: null,
+        diffRevision: 0,
+        recordRevision: 1,
+        updatedAtMs: createdAt + 75_000,
+      },
+    ];
+
+    const { container } = render(
+      <Messages
+        items={[
+          {
+            id: "assistant-turn-1",
+            kind: "message",
+            role: "assistant",
+            phase: "final_answer",
+            text: "First done",
+            createdAt: createdAt + 7_000,
+            turnId: "turn-1",
+          },
+          {
+            id: "assistant-turn-2-retry",
+            kind: "message",
+            role: "assistant",
+            phase: "final_answer",
+            text: "Retrying",
+            createdAt: createdAt + 20_000,
+            turnId: "turn-2-retry",
+          },
+          {
+            id: "assistant-turn-2",
+            kind: "message",
+            role: "assistant",
+            phase: "final_answer",
+            text: "Second done",
+            createdAt: createdAt + 75_000,
+            turnId: "turn-2",
+          },
+        ]}
+        threadId="thread-1"
+        workspaceId="ws-1"
+        isThinking={false}
+        turnExecutionSummaries={summaries}
+        openTargets={[]}
+        selectedOpenAppId=""
+      />,
+    );
+
+    expect(
+      Array.from(container.querySelectorAll(".message-agent-duration")).map(
+        (node) => node.textContent?.trim(),
+      ),
+    ).toEqual(["· 用时 0:07", "· 用时 1:05"]);
+    expect(screen.getByText("总计用时 1:12")).toBeTruthy();
+  });
+
+  it("totals failed and interrupted executions once using the latest revision", () => {
+    const baseSummary: TurnExecutionSummary = {
+      schemaVersion: 1,
+      executionId: "exec-interrupted",
+      workspaceId: "ws-1",
+      threadId: "thread-1",
+      turnId: "turn-interrupted",
+      turnChain: ["turn-interrupted"],
+      status: "interrupted",
+      startedAtMs: 1,
+      endedAtMs: 2,
+      workingDurationMs: 1_000,
+      addedLines: null,
+      deletedLines: null,
+      diffRevision: 0,
+      recordRevision: 1,
+      updatedAtMs: 2,
+    };
+    const summaries: TurnExecutionSummary[] = [
+      baseSummary,
+      {
+        ...baseSummary,
+        workingDurationMs: 3_600_000,
+        recordRevision: 2,
+        updatedAtMs: 3,
+      },
+      {
+        ...baseSummary,
+        executionId: "exec-failed",
+        turnId: "turn-failed",
+        turnChain: ["turn-failed-retry", "turn-failed"],
+        status: "failed",
+        workingDurationMs: 61_000,
+      },
+    ];
+
+    render(
+      <Messages
+        items={[
+          {
+            id: "assistant-interrupted",
+            kind: "message",
+            role: "assistant",
+            text: "Interrupted",
+            turnId: "turn-interrupted",
+          },
+          {
+            id: "assistant-failed",
+            kind: "message",
+            role: "assistant",
+            text: "Failed",
+            turnId: "turn-failed",
+          },
+        ]}
+        threadId="thread-1"
+        workspaceId="ws-1"
+        isThinking={false}
+        turnExecutionSummaries={summaries}
+        openTargets={[]}
+        selectedOpenAppId=""
+      />,
+    );
+
+    expect(screen.getByText("总计用时 1:01:01")).toBeTruthy();
+  });
+
+  it("labels a partial session total as recorded time", () => {
+    const summary: TurnExecutionSummary = {
+      schemaVersion: 1,
+      executionId: "exec-recorded",
+      workspaceId: "ws-1",
+      threadId: "thread-1",
+      turnId: "turn-recorded",
+      turnChain: ["turn-recorded"],
+      status: "completed",
+      startedAtMs: 1,
+      endedAtMs: 2,
+      workingDurationMs: 10_000,
+      addedLines: null,
+      deletedLines: null,
+      diffRevision: 0,
+      recordRevision: 1,
+      updatedAtMs: 2,
+    };
+
+    render(
+      <Messages
+        items={[
+          {
+            id: "assistant-recorded",
+            kind: "message",
+            role: "assistant",
+            text: "Recorded",
+            turnId: "turn-recorded",
+          },
+          {
+            id: "assistant-legacy",
+            kind: "message",
+            role: "assistant",
+            text: "Legacy",
+            turnId: "turn-without-summary",
+          },
+        ]}
+        threadId="thread-1"
+        workspaceId="ws-1"
+        isThinking={false}
+        turnExecutionSummaries={[summary]}
+        openTargets={[]}
+        selectedOpenAppId=""
+      />,
+    );
+
+    expect(screen.getByText("已记录用时 0:10")).toBeTruthy();
   });
 
   it("requests an older backend history page after the local window is exhausted", async () => {
@@ -2783,7 +2994,7 @@ describe("Messages", () => {
     }
   });
 
-  it("keeps done duration text when polling fetch countdown is not requested", () => {
+  it("shows recorded duration when only the latest fallback is available", () => {
     const items: ConversationItem[] = [
       {
         id: "assistant-msg-done-default",
@@ -2805,7 +3016,7 @@ describe("Messages", () => {
       />,
     );
 
-    const duration = screen.getByText("Done in 0:04");
+    const duration = screen.getByText("已记录用时 0:04");
     const finalMessage = screen.getByText("Completed response").closest(".message");
 
     const completion = container.querySelector(".turn-complete");

@@ -194,6 +194,9 @@ describe("message tool group interaction styles", () => {
     expect(messagesCss).toMatch(
       /\.message-agent-process-toggle\s*\{[^}]*display:\s*inline-flex;[^}]*border:\s*0;[^}]*background:\s*transparent;/s,
     );
+    expect(messagesCss).toMatch(
+      /@media \(max-width:\s*720px\)\s*\{[\s\S]*?\.message-agent-stats\s*\{[^}]*flex-basis:\s*100%;/s,
+    );
     expect(messagesCss).toContain(".message-agent-process-content");
     expect(messagesCss).toMatch(
       /\.process-group-nested-collapsible\s*\{[^}]*border:\s*1px solid[^}]*border-radius:\s*8px;/s,

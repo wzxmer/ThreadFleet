@@ -2764,6 +2764,10 @@
     max-width: 100%;
   }
 
+  .message-agent-stats {
+    flex-basis: 100%;
+  }
+
   .bubble,
   .message.assistant .bubble,
   .item-card,

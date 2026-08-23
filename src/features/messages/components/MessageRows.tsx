@@ -74,15 +74,12 @@ type WorkingIndicatorProps = {
   isThinking: boolean;
   activityState?: ModelActivityState;
   processingStartedAt?: number | null;
-  lastDurationMs?: number | null;
+  summaryDurationMs?: number | null;
   hasItems: boolean;
   reasoningLabel?: string | null;
   showPollingFetchStatus?: boolean;
   pollingIntervalMs?: number;
-  completionStatus?: "completed" | "interrupted" | "failed" | null;
-  completedLabel?: string;
-  interruptedLabel?: string;
-  failedLabel?: string;
+  summaryDurationLabel?: string;
   pollingFetchLabel?: string;
   assistantMeta?: AssistantMessageMeta | null;
   assistantProcessDisclosure?: AssistantProcessDisclosure;
@@ -125,6 +122,7 @@ export type AssistantMessageMeta = {
   processMessageCount: number;
   additions: number | null;
   deletions: number | null;
+  durationMs: number | null;
 };
 
 export type AssistantProcessDisclosure = {
@@ -565,15 +563,12 @@ export const WorkingIndicator = memo(function WorkingIndicator({
   isThinking,
   activityState = "thinking",
   processingStartedAt = null,
-  lastDurationMs = null,
+  summaryDurationMs = null,
   hasItems,
   reasoningLabel = null,
   showPollingFetchStatus = false,
   pollingIntervalMs = 12000,
-  completionStatus = null,
-  completedLabel = "Done in",
-  interruptedLabel = "Interrupted in",
-  failedLabel = "Failed in",
+  summaryDurationLabel = "Total time",
   pollingFetchLabel = "New message will be fetched in {seconds} seconds",
   assistantMeta = null,
   assistantProcessDisclosure,
@@ -703,19 +698,13 @@ export const WorkingIndicator = memo(function WorkingIndicator({
           ) : null}
         </div>
       )}
-      {!isThinking && lastDurationMs !== null && hasItems && (
+      {!isThinking && summaryDurationMs !== null && hasItems && (
         <div className="turn-complete" aria-live="polite">
           <span className="turn-complete-line" aria-hidden />
           <span className="turn-complete-label">
             {showPollingFetchStatus
               ? pollingFetchLabel.replace("{seconds}", String(pollCountdownSeconds))
-              : `${
-                  completionStatus === "interrupted"
-                    ? interruptedLabel
-                    : completionStatus === "failed"
-                      ? failedLabel
-                      : completedLabel
-                } ${formatDurationMs(lastDurationMs)}`}
+              : `${summaryDurationLabel} ${formatDurationMs(summaryDurationMs)}`}
           </span>
           <span className="turn-complete-line" aria-hidden />
         </div>
@@ -948,12 +937,30 @@ export const MessageRow = memo(function MessageRow({
               {assistantMeta?.name ?? "Assistant"}
             </span>
             {messageTimestamp?.dateTime ? (
-              <time
-                className="message-agent-time"
-                dateTime={messageTimestamp.iso}
-              >
-                {messageTimestamp.dateTime}
-              </time>
+              <>
+                <time
+                  className="message-agent-time"
+                  dateTime={messageTimestamp.iso}
+                >
+                  {messageTimestamp.dateTime}
+                </time>
+                {assistantMeta?.durationMs !== null &&
+                assistantMeta?.durationMs !== undefined ? (
+                  <span className="message-agent-time message-agent-duration">
+                    <span
+                      className="message-agent-duration-separator"
+                      aria-hidden
+                    >
+                      ·
+                    </span>
+                    {" "}
+                    {t("messages.turnDuration").replace(
+                      "{duration}",
+                      formatDurationMs(assistantMeta.durationMs),
+                    )}
+                  </span>
+                ) : null}
+              </>
             ) : null}
             {repeatedErrorDisclosure ? (
               <button

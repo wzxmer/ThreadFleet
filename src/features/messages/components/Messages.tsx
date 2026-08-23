@@ -77,6 +77,72 @@ type RepeatedErrorRun = {
 
 const EMPTY_REPEATED_ERROR_GROUPS = new Set<string>();
 
+type SessionWorkingDuration = {
+  durationMs: number;
+  isComplete: boolean;
+};
+
+function resolveSessionWorkingDuration(
+  items: ConversationItem[],
+  summaries: TurnExecutionSummary[],
+  fallbackDurationMs: number | null,
+  activeTurnId: string | null,
+): SessionWorkingDuration | null {
+  const summaryByExecutionId = new Map<string, TurnExecutionSummary>();
+  summaries.forEach((summary) => {
+    const previous = summaryByExecutionId.get(summary.executionId);
+    if (
+      !previous ||
+      summary.recordRevision > previous.recordRevision ||
+      (summary.recordRevision === previous.recordRevision &&
+        summary.updatedAtMs > previous.updatedAtMs)
+    ) {
+      summaryByExecutionId.set(summary.executionId, summary);
+    }
+  });
+
+  const uniqueSummaries = Array.from(summaryByExecutionId.values());
+  const terminalSummaries = uniqueSummaries.filter(
+    (summary) => summary.status !== "active",
+  );
+  const recordedSummaries = terminalSummaries.filter(
+    (summary) =>
+      typeof summary.workingDurationMs === "number" &&
+      Number.isFinite(summary.workingDurationMs) &&
+      summary.workingDurationMs >= 0,
+  );
+  if (recordedSummaries.length === 0) {
+    return typeof fallbackDurationMs === "number" &&
+      Number.isFinite(fallbackDurationMs) &&
+      fallbackDurationMs >= 0
+      ? { durationMs: fallbackDurationMs, isComplete: false }
+      : null;
+  }
+
+  const coveredTurnIds = new Set<string>();
+  uniqueSummaries.forEach((summary) => {
+    coveredTurnIds.add(summary.turnId);
+    summary.turnChain.forEach((turnId) => coveredTurnIds.add(turnId));
+  });
+  const visibleTurnsCovered = items.every(
+    (item) =>
+      !item.turnId ||
+      item.turnId === activeTurnId ||
+      coveredTurnIds.has(item.turnId),
+  );
+
+  return {
+    durationMs: recordedSummaries.reduce(
+      (total, summary) => total + (summary.workingDurationMs ?? 0),
+      0,
+    ),
+    isComplete:
+      terminalSummaries.length === recordedSummaries.length &&
+      uniqueSummaries.every((summary) => summary.status !== "active") &&
+      visibleTurnsCovered,
+  };
+}
+
 function getRepeatableErrorText(entry: MessageListEntry) {
   if (
     entry.kind !== "item" ||
@@ -576,6 +642,25 @@ export const Messages = memo(function Messages({
   );
   const hasVisibleUserInputRequest =
     hasActiveUserInputRequest && Boolean(onUserInputSubmit);
+  const sessionWorkingDuration = useMemo(
+    () =>
+      resolveSessionWorkingDuration(
+        items,
+        [
+          ...turnExecutionSummaries,
+          ...(turnExecutionSummary ? [turnExecutionSummary] : []),
+        ],
+        lastDurationMs,
+        activeTurnId,
+      ),
+    [
+      activeTurnId,
+      items,
+      lastDurationMs,
+      turnExecutionSummaries,
+      turnExecutionSummary,
+    ],
+  );
   const userInputNode =
     hasActiveUserInputRequest && onUserInputSubmit ? (
       <RequestUserInputMessage
@@ -1096,6 +1181,10 @@ export const Messages = memo(function Messages({
       const isFinalAssistantMessage =
         Boolean(item.turnId) &&
         finalAssistantIdByTurnId.get(item.turnId!) === item.id;
+      const isExecutionFinalAssistantMessage =
+        isFinalAssistantMessage &&
+        summary?.status !== "active" &&
+        summary?.turnId === item.turnId;
       result.set(item.id, {
         name: resolveAssistantName(
           identity,
@@ -1111,6 +1200,9 @@ export const Messages = memo(function Messages({
           : null,
         deletions: isFinalAssistantMessage
           ? (activeLineChanges?.deletions ?? summary?.deletedLines ?? null)
+          : null,
+        durationMs: isExecutionFinalAssistantMessage
+          ? (summary?.workingDurationMs ?? null)
           : null,
       });
     });
@@ -1277,6 +1369,7 @@ export const Messages = memo(function Messages({
         activeSummary?.modelId ?? assistantFallbackModelId,
         assistantModelOptions,
       ),
+      durationMs: null,
       ...activeToolGroupStats,
     };
   }, [
@@ -1949,24 +2042,15 @@ export const Messages = memo(function Messages({
             isThinking={isThinking}
             activityState={activityState}
             processingStartedAt={processingStartedAt}
-            lastDurationMs={lastDurationMs}
+            summaryDurationMs={sessionWorkingDuration?.durationMs ?? null}
             hasItems={items.length > 0}
             reasoningLabel={latestReasoningLabel}
             showPollingFetchStatus={showPollingFetchStatus}
             pollingIntervalMs={pollingIntervalMs}
-            completionStatus={
-              turnExecutionSummary?.status === "active"
-                ? null
-                : (turnExecutionSummary?.status ?? null)
-            }
-            completedLabel={
-              turnExecutionSummary ? t("messages.completedIn") : undefined
-            }
-            interruptedLabel={
-              turnExecutionSummary ? t("messages.interruptedIn") : undefined
-            }
-            failedLabel={
-              turnExecutionSummary ? t("messages.failedIn") : undefined
+            summaryDurationLabel={
+              sessionWorkingDuration?.isComplete
+                ? t("messages.sessionTotalDuration")
+                : t("messages.sessionRecordedDuration")
             }
             pollingFetchLabel={t("messages.pollingFetchCountdown")}
             assistantMeta={activeAssistantMeta}

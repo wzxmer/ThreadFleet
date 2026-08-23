@@ -450,9 +450,13 @@ export function buildToolSummary(
 
 export function formatDurationMs(durationMs: number) {
   const durationSeconds = Math.max(0, Math.floor(durationMs / 1000));
-  const durationMinutes = Math.floor(durationSeconds / 60);
+  const durationHours = Math.floor(durationSeconds / 3600);
+  const durationMinutes = Math.floor((durationSeconds % 3600) / 60);
   const durationRemainder = durationSeconds % 60;
-  return `${durationMinutes}:${String(durationRemainder).padStart(2, "0")}`;
+  const minuteAndSecond = `${durationMinutes}:${String(durationRemainder).padStart(2, "0")}`;
+  return durationHours > 0
+    ? `${durationHours}:${String(durationMinutes).padStart(2, "0")}:${String(durationRemainder).padStart(2, "0")}`
+    : minuteAndSecond;
 }
 
 export function statusToneFromText(status?: string): StatusTone {
