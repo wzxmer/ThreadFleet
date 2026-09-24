@@ -38,6 +38,28 @@ function prepareLiveThreadItems(
   return prepareThreadItems(items, { maxItemsPerThread });
 }
 
+// Streaming deltas update one already-prepared item. Re-running the full
+// history normalization/summarization pipeline for every token makes render
+// work grow with conversation length and can starve pointer input.
+function updateStreamingItem(
+  items: ConversationItem[],
+  index: number,
+  item: ConversationItem,
+  maxItemsPerThread: number | null,
+) {
+  const next = [...items];
+  const normalized = normalizeItem(item);
+  if (index >= 0) {
+    next[index] = normalized;
+  } else {
+    next.push(normalized);
+  }
+  if (maxItemsPerThread === null || next.length <= maxItemsPerThread) {
+    return next;
+  }
+  return next.slice(-maxItemsPerThread);
+}
+
 function mergeCompletedContextCompactionIds(
   current: Record<string, true> | undefined,
   items: ConversationItem[],
@@ -83,9 +105,11 @@ export function reduceThreadItems(state: ThreadState, action: ThreadAction): Thr
     case "appendAgentDelta": {
       const list = [...(state.itemsByThread[action.threadId] ?? [])];
       const index = list.findIndex((msg) => msg.id === action.itemId);
+      let targetIndex = index;
+      let updatedItem: ConversationItem;
       if (index >= 0 && list[index].kind === "message") {
         const existing = list[index];
-        list[index] = {
+        updatedItem = {
           ...existing,
           text: mergeStreamingText(existing.text, action.delta),
           ...(action.turnId && !existing.turnId
@@ -93,17 +117,24 @@ export function reduceThreadItems(state: ThreadState, action: ThreadAction): Thr
             : {}),
           createdAt: existing.createdAt ?? Date.now(),
         };
+        list[index] = updatedItem;
       } else {
-        list.push({
+        updatedItem = {
           id: action.itemId,
           kind: "message",
           role: "assistant",
           text: action.delta,
           ...(action.turnId ? { turnId: action.turnId } : {}),
           createdAt: Date.now(),
-        });
+        };
+        targetIndex = -1;
       }
-      const updatedItems = prepareLiveThreadItems(list, state.maxItemsPerThread);
+      const updatedItems = updateStreamingItem(
+        list,
+        targetIndex,
+        updatedItem,
+        state.maxItemsPerThread,
+      );
       const nextThreadsByWorkspace = maybeRenameThreadFromAgent({
         workspaceId: action.workspaceId,
         threadId: action.threadId,
@@ -436,15 +467,16 @@ export function reduceThreadItems(state: ThreadState, action: ThreadAction): Thr
           action.delta,
         ),
       } as ConversationItem;
-      const next = index >= 0 ? [...list] : [...list, updated];
-      if (index >= 0) {
-        next[index] = updated;
-      }
       return {
         ...state,
         itemsByThread: {
           ...state.itemsByThread,
-          [action.threadId]: prepareLiveThreadItems(next, state.maxItemsPerThread),
+          [action.threadId]: updateStreamingItem(
+            list,
+            index,
+            updated,
+            state.maxItemsPerThread,
+          ),
         },
       };
     }
@@ -464,15 +496,16 @@ export function reduceThreadItems(state: ThreadState, action: ThreadAction): Thr
         ...base,
         summary: addSummaryBoundary("summary" in base ? base.summary : ""),
       } as ConversationItem;
-      const next = index >= 0 ? [...list] : [...list, updated];
-      if (index >= 0) {
-        next[index] = updated;
-      }
       return {
         ...state,
         itemsByThread: {
           ...state.itemsByThread,
-          [action.threadId]: prepareLiveThreadItems(next, state.maxItemsPerThread),
+          [action.threadId]: updateStreamingItem(
+            list,
+            index,
+            updated,
+            state.maxItemsPerThread,
+          ),
         },
       };
     }
@@ -495,15 +528,16 @@ export function reduceThreadItems(state: ThreadState, action: ThreadAction): Thr
           action.delta,
         ),
       } as ConversationItem;
-      const next = index >= 0 ? [...list] : [...list, updated];
-      if (index >= 0) {
-        next[index] = updated;
-      }
       return {
         ...state,
         itemsByThread: {
           ...state.itemsByThread,
-          [action.threadId]: prepareLiveThreadItems(next, state.maxItemsPerThread),
+          [action.threadId]: updateStreamingItem(
+            list,
+            index,
+            updated,
+            state.maxItemsPerThread,
+          ),
         },
       };
     }
@@ -532,15 +566,16 @@ export function reduceThreadItems(state: ThreadState, action: ThreadAction): Thr
         status: "in_progress",
         output: mergeStreamingText(existingOutput, action.delta),
       } as ConversationItem;
-      const next = index >= 0 ? [...list] : [...list, updated];
-      if (index >= 0) {
-        next[index] = updated;
-      }
       return {
         ...state,
         itemsByThread: {
           ...state.itemsByThread,
-          [action.threadId]: prepareLiveThreadItems(next, state.maxItemsPerThread),
+          [action.threadId]: updateStreamingItem(
+            list,
+            index,
+            updated,
+            state.maxItemsPerThread,
+          ),
         },
       };
     }

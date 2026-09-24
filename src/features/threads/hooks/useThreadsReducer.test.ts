@@ -222,6 +222,40 @@ describe("threadReducer", () => {
     });
   });
 
+  it("appends an agent message when the item id belongs to a non-message item", () => {
+    const tool: ConversationItem = {
+      id: "shared-id",
+      kind: "tool",
+      toolType: "commandExecution",
+      title: "Command",
+      detail: "",
+      status: "in_progress",
+      output: "existing output",
+    };
+    const next = threadReducer(
+      {
+        ...initialState,
+        itemsByThread: { "thread-1": [tool] },
+      },
+      {
+        type: "appendAgentDelta",
+        workspaceId: "ws-1",
+        threadId: "thread-1",
+        itemId: "shared-id",
+        delta: "Assistant output",
+        hasCustomName: false,
+      },
+    );
+
+    expect(next.itemsByThread["thread-1"]).toHaveLength(2);
+    expect(next.itemsByThread["thread-1"]?.[0]).toBe(tool);
+    expect(next.itemsByThread["thread-1"]?.[1]).toMatchObject({
+      id: "shared-id",
+      kind: "message",
+      text: "Assistant output",
+    });
+  });
+
   it("updates thread timestamp when newer activity arrives", () => {
     const threads: ThreadSummary[] = [
       { id: "thread-1", name: "Agent 1", updatedAt: 1000 },
