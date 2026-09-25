@@ -99,7 +99,6 @@ export function useWindowDrag(targetId: string) {
       if (!isInsideAnyDragZone(event.clientX, event.clientY, dragZoneSelectors)) {
         return;
       }
-      event.preventDefault();
       startDraggingSafe();
     };
 

@@ -64,6 +64,29 @@ describe("useWindowDrag", () => {
     expect(startDragging).toHaveBeenCalledTimes(1);
   });
 
+  it("does not cancel the native mousedown event in a drag zone", () => {
+    const titlebar = document.createElement("div");
+    titlebar.id = "titlebar";
+    document.body.appendChild(titlebar);
+    setRect(titlebar, { left: 0, top: 0, right: 300, bottom: 44 });
+
+    renderHook(() => useWindowDrag("titlebar"));
+
+    const target = document.createElement("div");
+    titlebar.appendChild(target);
+    const event = new MouseEvent("mousedown", {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+      clientX: 12,
+      clientY: 12,
+    });
+    target.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(startDragging).toHaveBeenCalledTimes(1);
+  });
+
   it("starts dragging on Windows when click is inside the main topbar", () => {
     const topbar = document.createElement("div");
     topbar.className = "main-topbar";
