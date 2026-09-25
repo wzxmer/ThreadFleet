@@ -42,6 +42,7 @@ AGENTS.md
 RTK.md
 .claude/
 .cursor/
+.tmp-webview-debug/
 public/assets/material-icons/
 
 # Local-only product planning and agent knowledge
