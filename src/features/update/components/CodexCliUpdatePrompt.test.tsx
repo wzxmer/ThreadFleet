@@ -24,7 +24,7 @@ const check = {
 describe("CodexCliUpdatePrompt", () => {
   afterEach(cleanup);
 
-  it("requires explicit confirmation for a local managed update", () => {
+  it("requires explicit confirmation for a local in-place update", () => {
     const onConfirm = vi.fn();
     render(
       <I18nProvider preference="zh">
@@ -33,14 +33,13 @@ describe("CodexCliUpdatePrompt", () => {
           check={check}
           installEnabled
           busy={false}
-          progress={null}
           onCancel={vi.fn()}
           onConfirm={onConfirm}
         />
       </I18nProvider>,
     );
-    expect(screen.getByText("腾讯 COS")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "确认安装" }));
+    expect(screen.getByText("通过当前 Codex CLI 的 npm 或 Homebrew 安装来源原地更新，不创建应用副本。")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "确认更新" }));
     expect(onConfirm).toHaveBeenCalledTimes(1);
   });
 
@@ -52,39 +51,31 @@ describe("CodexCliUpdatePrompt", () => {
           check={check}
           installEnabled={false}
           busy={false}
-          progress={null}
           onCancel={vi.fn()}
           onConfirm={vi.fn()}
         />
       </I18nProvider>,
     );
-    expect(screen.queryByRole("button", { name: "确认安装" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "确认更新" })).toBeNull();
     expect(screen.getByText(/远程执行主机/)).toBeTruthy();
   });
 
-  it("shows determinate download progress while installation is busy", () => {
-    const { container } = render(
+  it("disables confirmation while the in-place update is busy", () => {
+    render(
       <I18nProvider preference="zh">
         <CodexCliUpdatePrompt
           open
           check={check}
           installEnabled
           busy
-          progress={50}
           onCancel={vi.fn()}
           onConfirm={vi.fn()}
         />
       </I18nProvider>,
     );
 
-    const progress = screen.getByLabelText("Codex CLI 下载进度");
-    expect(progress.textContent).toContain("50%");
     expect(
-      (container.querySelector(".codex-install-progress-track > span") as HTMLElement)
-        .style.width,
-    ).toBe("50%");
-    expect(
-      (screen.getByRole("button", { name: "正在安装…" }) as HTMLButtonElement)
+      (screen.getByRole("button", { name: "正在更新…" }) as HTMLButtonElement)
         .disabled,
     ).toBe(true);
   });

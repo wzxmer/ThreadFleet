@@ -2,13 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { isTauri } from "@tauri-apps/api/core";
 import type {
   CodexCliUpdateCheckResult,
+  CodexUpdateResult,
   DebugEntry,
 } from "@/types";
-import {
-  checkCodexCliUpdate,
-  installManagedCodex,
-} from "@services/tauri";
-import { subscribeReleaseAssetDownloadProgress } from "@services/events";
+import { checkCodexCliUpdate, runCodexUpdate } from "@services/tauri";
 
 export type CodexCliUpdaterStage =
   | "idle"
@@ -17,19 +14,15 @@ export type CodexCliUpdaterStage =
   | "unsupported"
   | "upToDate"
   | "available"
-  | "downloading"
   | "installing"
-  | "restartRequired"
+  | "updated"
   | "error";
 
 export type CodexCliUpdaterState = {
   stage: CodexCliUpdaterStage;
   check?: CodexCliUpdateCheckResult;
-  progress?: {
-    downloadedBytes: number;
-    totalBytes?: number;
-  };
   installedVersion?: string;
+  update?: CodexUpdateResult;
   error?: string;
 };
 
@@ -38,7 +31,7 @@ type UseCodexCliUpdaterOptions = {
   installEnabled?: boolean;
   autoCheckOnMount?: boolean;
   codexBin: string | null;
-  onInstalled: (path: string, version: string) => Promise<void> | void;
+  onUpdated?: (version: string) => Promise<void> | void;
   onDebug?: (entry: DebugEntry) => void;
 };
 
@@ -62,7 +55,7 @@ export function useCodexCliUpdater({
   installEnabled = true,
   autoCheckOnMount = true,
   codexBin,
-  onInstalled,
+  onUpdated,
   onDebug,
 }: UseCodexCliUpdaterOptions) {
   const [state, setState] = useState<CodexCliUpdaterState>({ stage: "idle" });
@@ -111,32 +104,28 @@ export function useCodexCliUpdater({
     if (!packageInfo) {
       return undefined;
     }
-    const requestId = `codex-cli-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    activeDownloadIdRef.current = requestId;
+    activeDownloadIdRef.current = `codex-cli-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     setPromptOpen(true);
     setState({
-      stage: "downloading",
+      stage: "installing",
       check: check ?? undefined,
-      progress: { downloadedBytes: 0, totalBytes: packageInfo.size },
     });
     try {
-      const installed = await installManagedCodex(
-        packageInfo.urls,
-        packageInfo.fileName,
-        requestId,
-        packageInfo.version,
-        packageInfo.size,
-        packageInfo.sha256,
-      );
-      await onInstalled(installed.path, installed.version);
+      const update = await runCodexUpdate(codexBin, null);
+      if (!update.ok) {
+        throw new Error(update.details || "Codex CLI update failed.");
+      }
+      const updatedVersion = update.afterVersion ?? packageInfo.version;
+      await onUpdated?.(updatedVersion);
       activeDownloadIdRef.current = null;
       setPromptOpen(false);
       setState({
-        stage: "restartRequired",
+        stage: update.upgraded ? "updated" : "upToDate",
         check: check ?? undefined,
-        installedVersion: installed.version,
+        installedVersion: updatedVersion,
+        update,
       });
-      return installed;
+      return update;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       activeDownloadIdRef.current = null;
@@ -150,7 +139,7 @@ export function useCodexCliUpdater({
       setState({ stage: "error", check: check ?? undefined, error: message });
       return undefined;
     }
-  }, [enabled, installEnabled, onDebug, onInstalled]);
+  }, [codexBin, enabled, installEnabled, onDebug, onUpdated]);
 
   const dismissPrompt = useCallback(() => {
     if (!activeDownloadIdRef.current) {
@@ -166,45 +155,6 @@ export function useCodexCliUpdater({
     setPromptOpen(false);
     setState({ stage: "idle" });
   }, []);
-
-  useEffect(() => {
-    if (!enabled || !isTauri()) {
-      return;
-    }
-    return subscribeReleaseAssetDownloadProgress((progress) => {
-      if (progress.id !== activeDownloadIdRef.current) {
-        return;
-      }
-      setState((current) => {
-        if (current.stage !== "downloading" && current.stage !== "installing") {
-          return current;
-        }
-        const totalBytes = progress.totalBytes ?? current.progress?.totalBytes;
-        const complete =
-          typeof totalBytes === "number" &&
-          totalBytes > 0 &&
-          progress.downloadedBytes >= totalBytes;
-        return {
-          ...current,
-          stage: complete ? "installing" : "downloading",
-          progress: {
-            downloadedBytes: progress.downloadedBytes,
-            totalBytes: totalBytes ?? undefined,
-          },
-        };
-      });
-    }, {
-      onError: (error) => {
-        onDebug?.({
-          id: `${Date.now()}-client-codex-cli-update-progress-error`,
-          timestamp: Date.now(),
-          source: "error",
-          label: "codex-cli-updater/progress-error",
-          payload: error instanceof Error ? error.message : String(error),
-        });
-      },
-    });
-  }, [enabled, onDebug]);
 
   useEffect(() => {
     if (!enabled || !autoCheckOnMount || import.meta.env.DEV || !isTauri()) {

@@ -146,6 +146,10 @@ const SettingsView = lazy(() =>
   })),
 );
 
+function isManagedCodexPath(path: string | null | undefined) {
+  return Boolean(path?.replace(/\\/g, "/").toLowerCase().includes("/managed-codex/"));
+}
+
 function resolveWorkspaceIdForLocalCodexPath(
   path: string,
   workspaces: WorkspaceInfo[],
@@ -1154,11 +1158,15 @@ export default function MainApp() {
       appSettings.automaticWindowsUiUpdateChecksEnabled,
     onDebug: addDebugEntry,
   });
-  const handleCodexCliUpdaterInstalled = useCallback(
-    async (path: string) => {
-      const nextSettings = { ...appSettingsRef.current, codexBin: path };
+  const handleCodexCliUpdaterUpdated = useCallback(
+    async () => {
+      const currentPath = appSettingsRef.current.codexBin;
+      if (!isManagedCodexPath(currentPath)) {
+        return;
+      }
+      const nextSettings = { ...appSettingsRef.current, codexBin: null };
       await queueSaveSettings(nextSettings);
-      setAppSettings((current) => ({ ...current, codexBin: path }));
+      setAppSettings((current) => ({ ...current, codexBin: null }));
     },
     [queueSaveSettings, setAppSettings],
   );
@@ -1169,7 +1177,7 @@ export default function MainApp() {
     autoCheckOnMount:
       !appSettingsLoading && appSettings.automaticCodexCliUpdateChecksEnabled,
     codexBin: appSettings.codexBin,
-    onInstalled: handleCodexCliUpdaterInstalled,
+    onUpdated: handleCodexCliUpdaterUpdated,
     onDebug: addDebugEntry,
   });
   const gitState = useMainAppGitState({
@@ -2953,15 +2961,7 @@ export default function MainApp() {
           check={codexCliUpdater.state.check ?? null}
           installEnabled={appSettings.backendMode === "local"}
           busy={
-            codexCliUpdater.state.stage === "downloading" ||
             codexCliUpdater.state.stage === "installing"
-          }
-          progress={
-            codexCliUpdater.state.progress?.totalBytes
-              ? (codexCliUpdater.state.progress.downloadedBytes /
-                  codexCliUpdater.state.progress.totalBytes) *
-                100
-              : null
           }
           error={codexCliUpdater.state.error}
           onCancel={codexCliUpdater.dismissPrompt}

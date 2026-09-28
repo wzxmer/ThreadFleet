@@ -6,9 +6,11 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::time::timeout;
 
-use crate::backend::app_server::check_codex_installation;
+use crate::backend::app_server::{check_codex_installation, resolve_codex_command_path};
 use crate::shared::process_core::tokio_command;
 use crate::types::AppSettings;
+
+static CODEX_UPDATE_LOCK: Mutex<()> = Mutex::const_new(());
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -143,11 +145,39 @@ async fn run_npm_install_latest(package: &str) -> Result<(bool, String), String>
     Ok((output.status.success(), combined.trim().to_string()))
 }
 
+fn normalized_path(value: &str) -> String {
+    value.replace('\\', "/").to_ascii_lowercase()
+}
+
+fn path_is_npm_codex(path: &str) -> bool {
+    let normalized = normalized_path(path);
+    normalized.contains("/node_modules/@openai/codex/")
+        || normalized.ends_with("/npm/codex")
+        || normalized.ends_with("/npm/codex.cmd")
+        || normalized.ends_with("/npm/codex.ps1")
+        || normalized.ends_with("/npm/codex.bat")
+}
+
+fn path_is_brew_codex(path: &str) -> bool {
+    let normalized = normalized_path(path);
+    normalized.contains("/cellar/codex/")
+        || normalized.contains("/homebrew/opt/codex/")
+        || normalized.contains("/homebrew/bin/codex")
+}
+
+fn path_is_managed_codex(path: &str) -> bool {
+    let normalized = normalized_path(path);
+    normalized.contains("/managed-codex/")
+        || normalized.ends_with("/managed-codex/codex")
+        || normalized.ends_with("/managed-codex/codex.exe")
+}
+
 pub(crate) async fn codex_update_core(
     app_settings: &Mutex<AppSettings>,
     codex_bin: Option<String>,
     codex_args: Option<String>,
 ) -> Result<Value, String> {
+    let _update_guard = CODEX_UPDATE_LOCK.lock().await;
     let (default_bin, default_args) = {
         let settings = app_settings.lock().await;
         (settings.codex_bin.clone(), settings.codex_args.clone())
@@ -162,48 +192,59 @@ pub(crate) async fn codex_update_core(
         .or(default_args);
     let _ = resolved_args;
 
+    let resolved_path = resolve_codex_command_path(resolved.as_deref());
+    let path_is_npm = path_is_npm_codex(&resolved_path);
+    let path_is_brew = path_is_brew_codex(&resolved_path);
+    let path_is_managed = path_is_managed_codex(&resolved_path);
+
     let before_version = check_codex_installation(resolved.clone())
         .await
         .ok()
         .flatten();
 
-    let (method, package, upgrade_ok, output, upgraded) = if detect_brew_cask("codex").await? {
-        let (ok, output) = run_brew_upgrade(&["--cask", "codex"]).await?;
-        let upgraded = brew_output_indicates_upgrade(&output);
-        (
-            "brew_cask".to_string(),
-            Some("codex".to_string()),
-            ok,
-            output,
-            upgraded,
-        )
-    } else if detect_brew_formula("codex").await? {
-        let (ok, output) = run_brew_upgrade(&["codex"]).await?;
-        let upgraded = brew_output_indicates_upgrade(&output);
-        (
-            "brew_formula".to_string(),
-            Some("codex".to_string()),
-            ok,
-            output,
-            upgraded,
-        )
-    } else if npm_has_package("@openai/codex").await? {
-        let (ok, output) = run_npm_install_latest("@openai/codex").await?;
-        (
-            "npm".to_string(),
-            Some("@openai/codex".to_string()),
-            ok,
-            output,
-            ok,
-        )
-    } else {
-        ("unknown".to_string(), None, false, String::new(), false)
-    };
+    let (method, package, upgrade_ok, output, upgraded) =
+        if path_is_brew && detect_brew_cask("codex").await? {
+            let (ok, output) = run_brew_upgrade(&["--cask", "codex"]).await?;
+            let upgraded = brew_output_indicates_upgrade(&output);
+            (
+                "brew_cask".to_string(),
+                Some("codex".to_string()),
+                ok,
+                output,
+                upgraded,
+            )
+        } else if path_is_brew && detect_brew_formula("codex").await? {
+            let (ok, output) = run_brew_upgrade(&["codex"]).await?;
+            let upgraded = brew_output_indicates_upgrade(&output);
+            (
+                "brew_formula".to_string(),
+                Some("codex".to_string()),
+                ok,
+                output,
+                upgraded,
+            )
+        } else if (path_is_npm || path_is_managed) && npm_has_package("@openai/codex").await? {
+            let (ok, output) = run_npm_install_latest("@openai/codex").await?;
+            (
+                "npm".to_string(),
+                Some("@openai/codex".to_string()),
+                ok,
+                output,
+                ok,
+            )
+        } else {
+            ("unknown".to_string(), None, false, String::new(), false)
+        };
 
+    let verification_bin = if method == "npm" && path_is_managed {
+        Some(resolve_codex_command_path(None))
+    } else {
+        resolved.clone()
+    };
     let after_version = if method == "unknown" {
         None
     } else {
-        match check_codex_installation(resolved.clone()).await {
+        match check_codex_installation(verification_bin).await {
             Ok(version) => version,
             Err(err) => {
                 let result = CodexUpdateResult {
@@ -222,7 +263,9 @@ pub(crate) async fn codex_update_core(
     };
 
     let details = if method == "unknown" {
-        Some("Unable to detect Codex installation method (brew/npm).".to_string())
+        Some(format!(
+            "Unable to update the selected Codex CLI in place (resolved path: {resolved_path}). Select the package-manager installation or update this custom CLI manually."
+        ))
     } else if upgrade_ok {
         None
     } else {
@@ -241,4 +284,32 @@ pub(crate) async fn codex_update_core(
     };
 
     serde_json::to_value(result).map_err(|err| err.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{path_is_brew_codex, path_is_managed_codex, path_is_npm_codex};
+
+    #[test]
+    fn recognizes_npm_and_managed_codex_paths() {
+        assert!(path_is_npm_codex(
+            r"C:\Users\user\AppData\Roaming\npm\codex.ps1"
+        ));
+        assert!(path_is_npm_codex(
+            r"C:\Users\user\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js"
+        ));
+        assert!(path_is_managed_codex(
+            r"C:\Users\user\AppData\Roaming\com.dimillian.codexmonitor\managed-codex\0.156.1\bin\codex.exe"
+        ));
+        assert!(!path_is_npm_codex(r"C:\Tools\codex.exe"));
+    }
+
+    #[test]
+    fn recognizes_homebrew_codex_paths() {
+        assert!(path_is_brew_codex(
+            "/opt/homebrew/Cellar/codex/0.157.0/bin/codex"
+        ));
+        assert!(path_is_brew_codex("/opt/homebrew/bin/codex"));
+        assert!(!path_is_brew_codex("/usr/local/bin/custom-codex"));
+    }
 }

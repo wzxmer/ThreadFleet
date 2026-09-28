@@ -1,12 +1,7 @@
 // @vitest-environment jsdom
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ReleaseAssetDownloadProgress } from "@/types";
-import {
-  checkCodexCliUpdate,
-  installManagedCodex,
-} from "@services/tauri";
-import { subscribeReleaseAssetDownloadProgress } from "@services/events";
+import { checkCodexCliUpdate, runCodexUpdate } from "@services/tauri";
 import { useCodexCliUpdater } from "./useCodexCliUpdater";
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -15,17 +10,11 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 vi.mock("@services/tauri", () => ({
   checkCodexCliUpdate: vi.fn(),
-  installManagedCodex: vi.fn(),
-}));
-
-vi.mock("@services/events", () => ({
-  subscribeReleaseAssetDownloadProgress: vi.fn(() => vi.fn()),
+  runCodexUpdate: vi.fn(),
 }));
 
 const checkMock = vi.mocked(checkCodexCliUpdate);
-const installMock = vi.mocked(installManagedCodex);
-const subscribeProgressMock = vi.mocked(subscribeReleaseAssetDownloadProgress);
-let progressListener: ((event: ReleaseAssetDownloadProgress) => void) | null = null;
+const updateMock = vi.mocked(runCodexUpdate);
 
 const availableCheck = {
   status: "available" as const,
@@ -47,15 +36,16 @@ const availableCheck = {
 describe("useCodexCliUpdater", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    progressListener = null;
     checkMock.mockResolvedValue(availableCheck);
-    installMock.mockResolvedValue({
-      path: "C:\\ThreadFleet\\managed-codex\\0.147.0\\codex.exe",
-      version: "0.147.0",
-    });
-    subscribeProgressMock.mockImplementation((listener) => {
-      progressListener = listener;
-      return vi.fn();
+    updateMock.mockResolvedValue({
+      ok: true,
+      method: "npm",
+      package: "@openai/codex",
+      beforeVersion: "0.144.0",
+      afterVersion: "0.147.0",
+      upgraded: true,
+      output: "updated",
+      details: null,
     });
   });
 
@@ -64,7 +54,7 @@ describe("useCodexCliUpdater", () => {
       useCodexCliUpdater({
         autoCheckOnMount: false,
         codexBin: null,
-        onInstalled: vi.fn(),
+        onUpdated: vi.fn(),
       }),
     );
 
@@ -74,16 +64,16 @@ describe("useCodexCliUpdater", () => {
 
     expect(result.current.state.stage).toBe("available");
     expect(result.current.promptOpen).toBe(true);
-    expect(installMock).not.toHaveBeenCalled();
+    expect(updateMock).not.toHaveBeenCalled();
   });
 
-  it("installs only after confirmation and reports progress", async () => {
-    const onInstalled = vi.fn();
+  it("updates the existing installation only after confirmation", async () => {
+    const onUpdated = vi.fn();
     const { result } = renderHook(() =>
       useCodexCliUpdater({
         autoCheckOnMount: false,
         codexBin: "codex",
-        onInstalled,
+        onUpdated,
       }),
     );
     await act(async () => {
@@ -94,31 +84,25 @@ describe("useCodexCliUpdater", () => {
       await result.current.startInstall();
     });
 
-    expect(installMock).toHaveBeenCalledWith(
-      availableCheck.package.urls,
-      availableCheck.package.fileName,
-      expect.stringMatching(/^codex-cli-/),
-      "0.147.0",
-      100,
-      "a".repeat(64),
-    );
-    expect(onInstalled).toHaveBeenCalledWith(
-      "C:\\ThreadFleet\\managed-codex\\0.147.0\\codex.exe",
-      "0.147.0",
-    );
-    expect(result.current.state.stage).toBe("restartRequired");
-
-    act(() => {
-      progressListener?.({ id: "other", downloadedBytes: 100, totalBytes: 100 });
-    });
-    await waitFor(() => expect(result.current.state.stage).toBe("restartRequired"));
+    expect(updateMock).toHaveBeenCalledWith("codex", null);
+    expect(onUpdated).toHaveBeenCalledWith("0.147.0");
+    expect(result.current.state.stage).toBe("updated");
   });
 
-  it("reopens the prompt and renders progress when installation starts from settings", async () => {
+  it("reopens the prompt while the in-place update is running", async () => {
     let resolveInstall:
-      | ((value: { path: string; version: string }) => void)
+      | ((value: {
+          ok: boolean;
+          method: "npm";
+          package: string;
+          beforeVersion: string;
+          afterVersion: string;
+          upgraded: boolean;
+          output: string;
+          details: null;
+        }) => void)
       | null = null;
-    installMock.mockImplementation(
+    updateMock.mockImplementation(
       () =>
         new Promise((resolve) => {
           resolveInstall = resolve;
@@ -128,7 +112,7 @@ describe("useCodexCliUpdater", () => {
       useCodexCliUpdater({
         autoCheckOnMount: false,
         codexBin: "codex",
-        onInstalled: vi.fn(),
+        onUpdated: vi.fn(),
       }),
     );
     await act(async () => {
@@ -140,29 +124,24 @@ describe("useCodexCliUpdater", () => {
     act(() => {
       void result.current.startInstall();
     });
-    await waitFor(() => expect(result.current.state.stage).toBe("downloading"));
+    await waitFor(() => expect(result.current.state.stage).toBe("installing"));
     expect(result.current.promptOpen).toBe(true);
 
-    const requestId = installMock.mock.calls[0]?.[2];
-    act(() => {
-      progressListener?.({
-        id: requestId,
-        downloadedBytes: 50,
-        totalBytes: 100,
-      });
-    });
-    expect(result.current.state.progress).toEqual({
-      downloadedBytes: 50,
-      totalBytes: 100,
-    });
+    expect(result.current.state.stage).toBe("installing");
 
     act(() => {
       resolveInstall?.({
-        path: "C:\\ThreadFleet\\managed-codex\\0.147.0\\codex.exe",
-        version: "0.147.0",
+        ok: true,
+        method: "npm",
+        package: "@openai/codex",
+        beforeVersion: "0.144.0",
+        afterVersion: "0.147.0",
+        upgraded: true,
+        output: "updated",
+        details: null,
       });
     });
-    await waitFor(() => expect(result.current.state.stage).toBe("restartRequired"));
+    await waitFor(() => expect(result.current.state.stage).toBe("updated"));
   });
 
   it("refuses control-side installation for a remote host", async () => {
@@ -171,7 +150,7 @@ describe("useCodexCliUpdater", () => {
         autoCheckOnMount: false,
         installEnabled: false,
         codexBin: null,
-        onInstalled: vi.fn(),
+        onUpdated: vi.fn(),
       }),
     );
     await act(async () => {
@@ -179,6 +158,6 @@ describe("useCodexCliUpdater", () => {
       await result.current.startInstall();
     });
     expect(result.current.state.stage).toBe("available");
-    expect(installMock).not.toHaveBeenCalled();
+    expect(updateMock).not.toHaveBeenCalled();
   });
 });

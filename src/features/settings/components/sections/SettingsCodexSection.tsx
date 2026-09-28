@@ -1953,23 +1953,13 @@ export function SettingsCodexSection({
                             ? t("settings.codex.codexCliUpdateUnsupported")
                             : codexCliUpdater.state.stage === "notInstalled"
                               ? t("settings.codex.missing")
-                              : codexCliUpdater.state.stage === "downloading"
-                                ? `${t("codexUpdate.downloading")} ${
-                                    codexCliUpdater.state.progress?.totalBytes
-                                      ? `${Math.round(
-                                          (codexCliUpdater.state.progress.downloadedBytes /
-                                            codexCliUpdater.state.progress.totalBytes) *
-                                            100,
-                                        )}%`
-                                      : ""
-                                  }`
-                                : codexCliUpdater.state.stage === "installing"
-                                  ? t("codexUpdate.installing")
-                                  : codexCliUpdater.state.stage === "restartRequired"
-                                    ? `${t("settings.codex.updated")} ${codexCliUpdater.state.installedVersion ?? ""}`
-                                    : codexCliUpdater.state.stage === "error"
-                                      ? `${t("settings.codex.codexCliUpdateFailed")}: ${codexCliUpdater.state.error ?? unknownLabel}`
-                                      : t("settings.codex.codexCliUpdateIdle")}
+                               : codexCliUpdater.state.stage === "installing"
+                                 ? t("codexUpdate.installing")
+                                 : codexCliUpdater.state.stage === "updated"
+                                   ? `${t("settings.codex.updated")} ${codexCliUpdater.state.installedVersion ?? ""}`
+                                   : codexCliUpdater.state.stage === "error"
+                                     ? `${t("settings.codex.codexCliUpdateFailed")}: ${codexCliUpdater.state.error ?? unknownLabel}`
+                                     : t("settings.codex.codexCliUpdateIdle")}
                 </div>
               </div>
               <div className="settings-windows-ui-update-actions">
@@ -1989,7 +1979,6 @@ export function SettingsCodexSection({
                       !codexCliUpdater.enabled ||
                       codexCliUpdater.state.stage === "checking" ||
                       codexCliUpdater.state.stage === "available" ||
-                      codexCliUpdater.state.stage === "downloading" ||
                       codexCliUpdater.state.stage === "installing"
                     }
                     onClick={() => void codexCliUpdater.checkForUpdates()}

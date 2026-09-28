@@ -7,32 +7,16 @@ type CodexCliUpdatePromptProps = {
   check: CodexCliUpdateCheckResult | null;
   installEnabled: boolean;
   busy: boolean;
-  progress: number | null;
   error?: string;
   onCancel: () => void;
   onConfirm: () => void;
 };
-
-function formatBytes(value: number | null | undefined) {
-  if (!value || !Number.isFinite(value) || value <= 0) {
-    return "-";
-  }
-  const units = ["B", "KB", "MB", "GB"];
-  let size = value;
-  let unitIndex = 0;
-  while (size >= 1024 && unitIndex < units.length - 1) {
-    size /= 1024;
-    unitIndex += 1;
-  }
-  return `${size.toFixed(size >= 10 ? 0 : 1)} ${units[unitIndex]}`;
-}
 
 export function CodexCliUpdatePrompt({
   open,
   check,
   installEnabled,
   busy,
-  progress,
   error,
   onCancel,
   onConfirm,
@@ -41,13 +25,6 @@ export function CodexCliUpdatePrompt({
   if (!open || check?.status !== "available" || !check.package) {
     return null;
   }
-  const sourceKey =
-    check.source === "tencent"
-      ? "codexUpdate.sourceTencent"
-      : check.source === "aliyun"
-        ? "codexUpdate.sourceAliyun"
-        : "codexUpdate.sourceGithub";
-
   return (
     <ModalShell
       ariaLabelledBy="codex-cli-update-title"
@@ -72,23 +49,7 @@ export function CodexCliUpdatePrompt({
           <dt>{t("codexUpdate.targetVersion")}</dt>
           <dd><code>{check.latestVersion ?? check.package.version}</code></dd>
         </div>
-        <div>
-          <dt>{t("codexUpdate.route")}</dt>
-          <dd>{t(sourceKey)}</dd>
-        </div>
-        <div>
-          <dt>{t("codexUpdate.size")}</dt>
-          <dd>{formatBytes(check.package.size)}</dd>
-        </div>
       </dl>
-      {progress !== null && (
-        <div className="codex-install-progress" aria-label={t("codexUpdate.downloading")}>
-          <div className="codex-install-progress-track">
-            <span style={{ width: `${Math.max(2, Math.min(progress, 100))}%` }} />
-          </div>
-          <span>{Math.round(progress)}%</span>
-        </div>
-      )}
       {error && <div className="ds-modal-error">{error}</div>}
       <div className="ds-modal-actions">
         <button type="button" className="ghost ds-modal-button" onClick={onCancel} disabled={busy}>
