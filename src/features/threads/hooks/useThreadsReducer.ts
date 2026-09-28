@@ -117,7 +117,7 @@ export type ThreadAction =
       workspaceId: string;
       threadId: string;
       itemId: string;
-      delta: string;
+      delta: string | string[];
       turnId?: string;
       hasCustomName: boolean;
     }
@@ -157,16 +157,16 @@ export type ThreadAction =
       type: "appendReasoningSummary";
       threadId: string;
       itemId: string;
-      delta: string;
+      delta: string | string[];
     }
   | {
       type: "appendReasoningSummaryBoundary";
       threadId: string;
       itemId: string;
     }
-  | { type: "appendReasoningContent"; threadId: string; itemId: string; delta: string }
-  | { type: "appendPlanDelta"; threadId: string; itemId: string; delta: string }
-  | { type: "appendToolOutput"; threadId: string; itemId: string; delta: string }
+  | { type: "appendReasoningContent"; threadId: string; itemId: string; delta: string | string[] }
+  | { type: "appendPlanDelta"; threadId: string; itemId: string; delta: string | string[] }
+  | { type: "appendToolOutput"; threadId: string; itemId: string; delta: string | string[] }
   | {
       type: "setThreads";
       workspaceId: string;

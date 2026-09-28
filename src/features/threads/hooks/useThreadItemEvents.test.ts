@@ -315,6 +315,7 @@ describe("useThreadItemEvents", () => {
         itemId: "assistant-1",
         delta: "Hello",
       });
+      result.current.flushStreamingDeltas();
     });
 
     expect(dispatch).toHaveBeenCalledWith({
@@ -328,9 +329,44 @@ describe("useThreadItemEvents", () => {
       workspaceId: "ws-1",
       threadId: "thread-1",
       itemId: "assistant-1",
-      delta: "Hello",
+      delta: ["Hello"],
       hasCustomName: false,
     });
+  });
+
+  it("restarts streaming lifecycle after a completed item", () => {
+    const { result, dispatch, markProcessing } = makeOptions();
+
+    act(() => {
+      result.current.onAgentMessageDelta({
+        workspaceId: "ws-1",
+        threadId: "thread-1",
+        itemId: "assistant-1",
+        delta: "first",
+      });
+      result.current.onAgentMessageCompleted({
+        workspaceId: "ws-1",
+        threadId: "thread-1",
+        itemId: "assistant-1",
+        turnId: "turn-1",
+        text: "first",
+      });
+      result.current.onAgentMessageDelta({
+        workspaceId: "ws-1",
+        threadId: "thread-1",
+        itemId: "assistant-2",
+        delta: "second",
+      });
+    });
+
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "ensureThread",
+      workspaceId: "ws-1",
+      threadId: "thread-1",
+    });
+    expect(markProcessing).toHaveBeenCalledTimes(2);
+    expect(markProcessing).toHaveBeenNthCalledWith(1, "thread-1", true);
+    expect(markProcessing).toHaveBeenNthCalledWith(2, "thread-1", true);
   });
 
   it("assigns an agent delta to the active turn before completion arrives", () => {
@@ -344,6 +380,7 @@ describe("useThreadItemEvents", () => {
         itemId: "assistant-2",
         delta: "Streaming next result",
       });
+      result.current.flushStreamingDeltas();
     });
 
     expect(getActiveTurnId).toHaveBeenCalledWith("thread-1");
@@ -352,7 +389,7 @@ describe("useThreadItemEvents", () => {
       workspaceId: "ws-1",
       threadId: "thread-1",
       itemId: "assistant-2",
-      delta: "Streaming next result",
+      delta: ["Streaming next result"],
       turnId: "turn-1",
       hasCustomName: false,
     });
@@ -370,6 +407,7 @@ describe("useThreadItemEvents", () => {
         turnId: "event-turn",
         delta: "Streaming result",
       });
+      result.current.flushStreamingDeltas();
     });
 
     expect(getActiveTurnId).not.toHaveBeenCalled();
@@ -378,7 +416,7 @@ describe("useThreadItemEvents", () => {
       workspaceId: "ws-1",
       threadId: "thread-1",
       itemId: "assistant-3",
-      delta: "Streaming result",
+      delta: ["Streaming result"],
       turnId: "event-turn",
       hasCustomName: false,
     });
@@ -393,6 +431,42 @@ describe("useThreadItemEvents", () => {
     });
 
     expect(onThreadActivity).toHaveBeenCalledWith("ws-1", "thread-1", "active");
+  });
+
+  it("coalesces same-item deltas and preserves their order until a flush boundary", () => {
+    const { result, dispatch } = makeOptions();
+
+    act(() => {
+      result.current.onAgentMessageDelta({
+        workspaceId: "ws-1",
+        threadId: "thread-1",
+        itemId: "assistant-1",
+        delta: "A",
+      });
+      result.current.onAgentMessageDelta({
+        workspaceId: "ws-1",
+        threadId: "thread-1",
+        itemId: "assistant-1",
+        delta: "B",
+      });
+    });
+
+    expect(dispatch).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "appendAgentDelta" }),
+    );
+
+    act(() => {
+      result.current.flushStreamingDeltas();
+    });
+
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "appendAgentDelta",
+      workspaceId: "ws-1",
+      threadId: "thread-1",
+      itemId: "assistant-1",
+      delta: ["A", "B"],
+      hasCustomName: false,
+    });
   });
 
   it("completes agent messages and updates thread activity", () => {
@@ -469,13 +543,14 @@ describe("useThreadItemEvents", () => {
 
     act(() => {
       result.current.onPlanDelta("ws-1", "thread-1", "plan-1", "- Step 1");
+      result.current.flushStreamingDeltas();
     });
 
     expect(dispatch).toHaveBeenCalledWith({
       type: "appendPlanDelta",
       threadId: "thread-1",
       itemId: "plan-1",
-      delta: "- Step 1",
+      delta: ["- Step 1"],
     });
   });
 });

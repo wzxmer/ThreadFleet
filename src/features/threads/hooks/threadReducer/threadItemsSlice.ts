@@ -38,6 +38,12 @@ function prepareLiveThreadItems(
   return prepareThreadItems(items, { maxItemsPerThread });
 }
 
+function mergeStreamingDeltas(existing: string, delta: string | string[]) {
+  return Array.isArray(delta)
+    ? delta.reduce(mergeStreamingText, existing)
+    : mergeStreamingText(existing, delta);
+}
+
 // Streaming deltas update one already-prepared item. Re-running the full
 // history normalization/summarization pipeline for every token makes render
 // work grow with conversation length and can starve pointer input.
@@ -111,7 +117,7 @@ export function reduceThreadItems(state: ThreadState, action: ThreadAction): Thr
         const existing = list[index];
         updatedItem = {
           ...existing,
-          text: mergeStreamingText(existing.text, action.delta),
+          text: mergeStreamingDeltas(existing.text, action.delta),
           ...(action.turnId && !existing.turnId
             ? { turnId: action.turnId }
             : {}),
@@ -123,7 +129,7 @@ export function reduceThreadItems(state: ThreadState, action: ThreadAction): Thr
           id: action.itemId,
           kind: "message",
           role: "assistant",
-          text: action.delta,
+          text: mergeStreamingDeltas("", action.delta),
           ...(action.turnId ? { turnId: action.turnId } : {}),
           createdAt: Date.now(),
         };
@@ -462,7 +468,7 @@ export function reduceThreadItems(state: ThreadState, action: ThreadAction): Thr
             };
       const updated: ConversationItem = {
         ...base,
-        summary: mergeStreamingText(
+        summary: mergeStreamingDeltas(
           "summary" in base ? base.summary : "",
           action.delta,
         ),
@@ -523,7 +529,7 @@ export function reduceThreadItems(state: ThreadState, action: ThreadAction): Thr
             };
       const updated: ConversationItem = {
         ...base,
-        content: mergeStreamingText(
+        content: mergeStreamingDeltas(
           "content" in base ? base.content : "",
           action.delta,
         ),
@@ -564,7 +570,7 @@ export function reduceThreadItems(state: ThreadState, action: ThreadAction): Thr
         title: "Plan",
         detail: "Generating plan...",
         status: "in_progress",
-        output: mergeStreamingText(existingOutput, action.delta),
+        output: mergeStreamingDeltas(existingOutput, action.delta),
       } as ConversationItem;
       return {
         ...state,
@@ -588,7 +594,7 @@ export function reduceThreadItems(state: ThreadState, action: ThreadAction): Thr
       const existing = list[index];
       const updated: ConversationItem = {
         ...existing,
-        output: mergeStreamingText(existing.output ?? "", action.delta),
+        output: mergeStreamingDeltas(existing.output ?? "", action.delta),
       } as ConversationItem;
       return {
         ...state,

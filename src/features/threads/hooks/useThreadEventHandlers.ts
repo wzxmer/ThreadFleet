@@ -81,6 +81,15 @@ type ThreadActivityHandler = (
   activityType?: ThreadActivityType,
 ) => void;
 
+const STREAMING_DELTA_METHODS = new Set([
+  "item/agentMessage/delta",
+  "item/commandExecution/outputDelta",
+  "item/fileChange/outputDelta",
+  "item/plan/delta",
+  "item/reasoning/summaryTextDelta",
+  "item/reasoning/textDelta",
+]);
+
 export function useThreadEventHandlers({
   activeThreadId,
   dispatch,
@@ -181,6 +190,8 @@ export function useThreadEventHandlers({
     onCommandOutputDelta,
     onTerminalInteraction,
     onFileChangeOutputDelta,
+    flushStreamingDeltas,
+    resetStreamingThreadState,
   } = useThreadItemEvents({
     activeThreadId,
     dispatch,
@@ -203,16 +214,16 @@ export function useThreadEventHandlers({
     onThreadNameUpdated,
     onThreadArchived,
     onThreadUnarchived,
-    onTurnStarted,
-    onTurnCompleted,
-    onThreadStatusChanged,
-    onThreadClosed,
+    onTurnStarted: handleTurnStarted,
+    onTurnCompleted: handleTurnCompleted,
+    onThreadStatusChanged: handleThreadStatusChanged,
+    onThreadClosed: handleThreadClosed,
     onThreadActivity,
     onTurnPlanUpdated,
     onTurnDiffUpdated,
     onThreadTokenUsageUpdated,
     onAccountRateLimitsUpdated,
-    onTurnError,
+    onTurnError: handleTurnError,
     getLatestKnownActiveTurnId,
   } = useThreadTurnEvents({
     dispatch,
@@ -235,6 +246,73 @@ export function useThreadEventHandlers({
   });
   onThreadActivityRef.current = onThreadActivity;
 
+  const onTurnStarted = useCallback(
+    (workspaceId: string, threadId: string, turnId: string) => {
+      resetStreamingThreadState(workspaceId, threadId);
+      handleTurnStarted(workspaceId, threadId, turnId);
+    },
+    [handleTurnStarted, resetStreamingThreadState],
+  );
+
+  const onTurnCompleted = useCallback(
+    (
+      workspaceId: string,
+      threadId: string,
+      turnId: string,
+      status?: "completed" | "interrupted" | "failed",
+    ) => {
+      const activeTurnId = getLatestKnownActiveTurnId(threadId);
+      if (!turnId || !activeTurnId || turnId === activeTurnId) {
+        resetStreamingThreadState(workspaceId, threadId);
+      }
+      handleTurnCompleted(workspaceId, threadId, turnId, status);
+    },
+    [
+      getLatestKnownActiveTurnId,
+      handleTurnCompleted,
+      resetStreamingThreadState,
+    ],
+  );
+
+  const onThreadStatusChanged = useCallback(
+    (workspaceId: string, threadId: string, status: Record<string, unknown>) => {
+      const statusType = String(
+        status.type ?? status.statusType ?? status.status_type ?? "",
+      )
+        .trim()
+        .toLowerCase();
+      if (statusType !== "active") {
+        resetStreamingThreadState(workspaceId, threadId);
+      }
+      handleThreadStatusChanged(workspaceId, threadId, status);
+    },
+    [handleThreadStatusChanged, resetStreamingThreadState],
+  );
+
+  const onThreadClosed = useCallback(
+    (workspaceId: string, threadId: string) => {
+      resetStreamingThreadState(workspaceId, threadId);
+      handleThreadClosed(workspaceId, threadId);
+    },
+    [handleThreadClosed, resetStreamingThreadState],
+  );
+
+  const onTurnError = useCallback(
+    (
+      workspaceId: string,
+      threadId: string,
+      turnId: string,
+      payload: { message: string; willRetry: boolean },
+    ) => {
+      const activeTurnId = getLatestKnownActiveTurnId(threadId);
+      if (!turnId || !activeTurnId || turnId === activeTurnId) {
+        resetStreamingThreadState(workspaceId, threadId);
+      }
+      handleTurnError(workspaceId, threadId, turnId, payload);
+    },
+    [getLatestKnownActiveTurnId, handleTurnError, resetStreamingThreadState],
+  );
+
   const onBackgroundThreadAction = useCallback(
     (workspaceId: string, threadId: string, action: string) => {
       if (action !== "hide") {
@@ -248,6 +326,9 @@ export function useThreadEventHandlers({
   const onAppServerEvent = useCallback(
     (event: AppServerEvent) => {
       const method = getAppServerRawMethod(event) ?? "";
+      if (!STREAMING_DELTA_METHODS.has(method)) {
+        flushStreamingDeltas();
+      }
       const isTurnActivity =
         method.startsWith("item/") ||
         method.startsWith("turn/") ||
@@ -270,7 +351,7 @@ export function useThreadEventHandlers({
         payload: event,
       });
     },
-    [onDebug, recordTurnActivity],
+    [flushStreamingDeltas, onDebug, recordTurnActivity],
   );
 
   const handlers = useMemo(

@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type { Dispatch } from "react";
 import {
   buildCollabExecutionBindingObservation,
@@ -47,6 +47,40 @@ type UseThreadItemEventsOptions = {
   ) => void;
 };
 
+type StreamingDeltaKind =
+  | "agent"
+  | "reasoningSummary"
+  | "reasoningContent"
+  | "plan"
+  | "toolOutput";
+
+type PendingStreamingDelta = {
+  kind: StreamingDeltaKind;
+  workspaceId: string;
+  threadId: string;
+  itemId: string;
+  deltas: string[];
+  turnId?: string;
+  hasCustomName?: boolean;
+};
+
+type StreamingDeltaInput = Omit<PendingStreamingDelta, "deltas"> & {
+  delta: string;
+};
+
+const STREAMING_FLUSH_INTERVAL_MS = 50;
+
+function isSameStreamingDelta(
+  left: PendingStreamingDelta,
+  right: StreamingDeltaInput,
+) {
+  return (
+    left.kind === right.kind &&
+    left.threadId === right.threadId &&
+    left.itemId === right.itemId
+  );
+}
+
 export function useThreadItemEvents({
   activeThreadId,
   dispatch,
@@ -63,6 +97,115 @@ export function useThreadItemEvents({
   onExecutionBindingObserved,
   onThreadActivity,
 }: UseThreadItemEventsOptions) {
+  const pendingStreamingDeltasRef = useRef<PendingStreamingDelta[]>([]);
+  const ensuredStreamingThreadsRef = useRef<Set<string>>(new Set());
+  const processingStreamingThreadsRef = useRef<Set<string>>(new Set());
+  const streamingFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const flushStreamingDeltas = useCallback(() => {
+    if (streamingFlushTimerRef.current !== null) {
+      clearTimeout(streamingFlushTimerRef.current);
+      streamingFlushTimerRef.current = null;
+    }
+    const pending = pendingStreamingDeltasRef.current;
+    if (pending.length === 0) {
+      return;
+    }
+    pendingStreamingDeltasRef.current = [];
+    pending.forEach((entry) => {
+      if (entry.kind === "agent") {
+        dispatch({
+          type: "appendAgentDelta",
+          workspaceId: entry.workspaceId,
+          threadId: entry.threadId,
+          itemId: entry.itemId,
+          delta: entry.deltas,
+          ...(entry.turnId ? { turnId: entry.turnId } : {}),
+          hasCustomName: Boolean(entry.hasCustomName),
+        });
+        return;
+      }
+      const actionType =
+        entry.kind === "reasoningSummary"
+          ? "appendReasoningSummary"
+          : entry.kind === "reasoningContent"
+            ? "appendReasoningContent"
+            : entry.kind === "plan"
+              ? "appendPlanDelta"
+              : "appendToolOutput";
+      dispatch({
+        type: actionType,
+        threadId: entry.threadId,
+        itemId: entry.itemId,
+        delta: entry.deltas,
+      });
+    });
+  }, [dispatch]);
+
+  const resetStreamingThreadState = useCallback(
+    (workspaceId: string, threadId: string) => {
+      flushStreamingDeltas();
+      const threadKey = `${workspaceId}:${threadId}`;
+      ensuredStreamingThreadsRef.current.delete(threadKey);
+      processingStreamingThreadsRef.current.delete(threadKey);
+    },
+    [flushStreamingDeltas],
+  );
+
+  const scheduleStreamingFlush = useCallback(() => {
+    if (streamingFlushTimerRef.current !== null) {
+      return;
+    }
+    streamingFlushTimerRef.current = setTimeout(() => {
+      streamingFlushTimerRef.current = null;
+      flushStreamingDeltas();
+    }, STREAMING_FLUSH_INTERVAL_MS);
+  }, [flushStreamingDeltas]);
+
+  const queueStreamingDelta = useCallback(
+    ({
+      kind,
+      workspaceId,
+      threadId,
+      itemId,
+      delta,
+      turnId,
+      hasCustomName,
+    }: StreamingDeltaInput) => {
+      const pending = pendingStreamingDeltasRef.current;
+      const incoming: StreamingDeltaInput = {
+        kind,
+        workspaceId,
+        threadId,
+        itemId,
+        delta,
+        turnId,
+        hasCustomName,
+      };
+      const existing = pending[pending.length - 1];
+      if (existing && isSameStreamingDelta(existing, incoming)) {
+        existing.deltas.push(delta);
+        if (turnId) {
+          existing.turnId = turnId;
+        }
+        if (hasCustomName !== undefined) {
+          existing.hasCustomName = hasCustomName;
+        }
+      } else {
+        pending.push({ ...incoming, deltas: [delta] });
+      }
+      scheduleStreamingFlush();
+    },
+    [scheduleStreamingFlush],
+  );
+
+  useEffect(
+    () => () => {
+      flushStreamingDeltas();
+    },
+    [flushStreamingDeltas],
+  );
+
   const handleItemUpdate = useCallback(
     (
       workspaceId: string,
@@ -71,6 +214,10 @@ export function useThreadItemEvents({
       shouldMarkProcessing: boolean,
       eventTurnId?: string,
     ) => {
+      flushStreamingDeltas();
+      if (!shouldMarkProcessing) {
+        resetStreamingThreadState(workspaceId, threadId);
+      }
       dispatch({ type: "ensureThread", workspaceId, threadId });
       onThreadActivity?.(
         workspaceId,
@@ -146,6 +293,8 @@ export function useThreadItemEvents({
       onUserMessageCreated,
       onThreadActivity,
       hydrateSubagentThreads,
+      flushStreamingDeltas,
+      resetStreamingThreadState,
       safeMessageActivity,
     ],
   );
@@ -153,11 +302,21 @@ export function useThreadItemEvents({
   const handleToolOutputDelta = useCallback(
     (workspaceId: string, threadId: string, itemId: string, delta: string) => {
       onThreadActivity?.(workspaceId, threadId, "active");
-      markProcessing(threadId, true);
-      dispatch({ type: "appendToolOutput", threadId, itemId, delta });
+      const threadKey = `${workspaceId}:${threadId}`;
+      if (!processingStreamingThreadsRef.current.has(threadKey)) {
+        processingStreamingThreadsRef.current.add(threadKey);
+        markProcessing(threadId, true);
+      }
+      queueStreamingDelta({
+        kind: "toolOutput",
+        workspaceId,
+        threadId,
+        itemId,
+        delta,
+      });
       safeMessageActivity();
     },
-    [dispatch, markProcessing, onThreadActivity, safeMessageActivity],
+    [markProcessing, onThreadActivity, queueStreamingDelta, safeMessageActivity],
   );
 
   const handleTerminalInteraction = useCallback(
@@ -191,13 +350,20 @@ export function useThreadItemEvents({
       turnId?: string;
       delta: string;
     }) => {
-      dispatch({ type: "ensureThread", workspaceId, threadId });
+      const threadKey = `${workspaceId}:${threadId}`;
+      if (!ensuredStreamingThreadsRef.current.has(threadKey)) {
+        ensuredStreamingThreadsRef.current.add(threadKey);
+        dispatch({ type: "ensureThread", workspaceId, threadId });
+      }
       onThreadActivity?.(workspaceId, threadId, "active");
-      markProcessing(threadId, true);
+      if (!processingStreamingThreadsRef.current.has(threadKey)) {
+        processingStreamingThreadsRef.current.add(threadKey);
+        markProcessing(threadId, true);
+      }
       const hasCustomName = Boolean(getCustomName(workspaceId, threadId));
       const turnId = eventTurnId?.trim() || getActiveTurnId(threadId);
-      dispatch({
-        type: "appendAgentDelta",
+      queueStreamingDelta({
+        kind: "agent",
         workspaceId,
         threadId,
         itemId,
@@ -206,7 +372,7 @@ export function useThreadItemEvents({
         hasCustomName,
       });
     },
-    [dispatch, getActiveTurnId, getCustomName, markProcessing, onThreadActivity],
+    [dispatch, getActiveTurnId, getCustomName, markProcessing, onThreadActivity, queueStreamingDelta],
   );
 
   const onAgentMessageCompleted = useCallback(
@@ -225,6 +391,7 @@ export function useThreadItemEvents({
       phase?: string | null;
       text: string;
     }) => {
+      resetStreamingThreadState(workspaceId, threadId);
       const timestamp = Date.now();
       dispatch({ type: "ensureThread", workspaceId, threadId });
       onThreadActivity?.(workspaceId, threadId, "active");
@@ -263,6 +430,7 @@ export function useThreadItemEvents({
       getCustomName,
       onThreadActivity,
       recordThreadActivity,
+      resetStreamingThreadState,
       safeMessageActivity,
     ],
   );
@@ -294,33 +462,34 @@ export function useThreadItemEvents({
   const onReasoningSummaryDelta = useCallback(
     (workspaceId: string, threadId: string, itemId: string, delta: string) => {
       onThreadActivity?.(workspaceId, threadId, "active");
-      dispatch({ type: "appendReasoningSummary", threadId, itemId, delta });
+      queueStreamingDelta({ kind: "reasoningSummary", workspaceId, threadId, itemId, delta });
     },
-    [dispatch, onThreadActivity],
+    [onThreadActivity, queueStreamingDelta],
   );
 
   const onReasoningSummaryBoundary = useCallback(
     (workspaceId: string, threadId: string, itemId: string) => {
+      flushStreamingDeltas();
       onThreadActivity?.(workspaceId, threadId, "active");
       dispatch({ type: "appendReasoningSummaryBoundary", threadId, itemId });
     },
-    [dispatch, onThreadActivity],
+    [dispatch, flushStreamingDeltas, onThreadActivity],
   );
 
   const onReasoningTextDelta = useCallback(
     (workspaceId: string, threadId: string, itemId: string, delta: string) => {
       onThreadActivity?.(workspaceId, threadId, "active");
-      dispatch({ type: "appendReasoningContent", threadId, itemId, delta });
+      queueStreamingDelta({ kind: "reasoningContent", workspaceId, threadId, itemId, delta });
     },
-    [dispatch, onThreadActivity],
+    [onThreadActivity, queueStreamingDelta],
   );
 
   const onPlanDelta = useCallback(
     (workspaceId: string, threadId: string, itemId: string, delta: string) => {
       onThreadActivity?.(workspaceId, threadId, "active");
-      dispatch({ type: "appendPlanDelta", threadId, itemId, delta });
+      queueStreamingDelta({ kind: "plan", workspaceId, threadId, itemId, delta });
     },
-    [dispatch, onThreadActivity],
+    [onThreadActivity, queueStreamingDelta],
   );
 
   const onCommandOutputDelta = useCallback(
@@ -345,6 +514,8 @@ export function useThreadItemEvents({
   );
 
   return {
+    flushStreamingDeltas,
+    resetStreamingThreadState,
     onAgentMessageDelta,
     onAgentMessageCompleted,
     onItemStarted,
