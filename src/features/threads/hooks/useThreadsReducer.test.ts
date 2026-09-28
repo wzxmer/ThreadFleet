@@ -760,6 +760,92 @@ describe("threadReducer", () => {
     });
   });
 
+  it("keeps output when a tool item arrives after its first output delta", () => {
+    const withPlaceholder = threadReducer(initialState, {
+      type: "appendToolOutput",
+      threadId: "thread-1",
+      itemId: "tool-1",
+      delta: "first chunk",
+      createIfMissing: true,
+    });
+    expect(withPlaceholder.itemsByThread["thread-1"]?.[0]).toMatchObject({
+      id: "tool-1",
+      kind: "tool",
+      output: "first chunk",
+    });
+
+    const completed = threadReducer(withPlaceholder, {
+      type: "upsertItem",
+      workspaceId: "ws-1",
+      threadId: "thread-1",
+      item: {
+        id: "tool-1",
+        kind: "tool",
+        toolType: "commandExecution",
+        title: "Command: npm test",
+        detail: "D:/workspace",
+        status: "completed",
+        output: "",
+      },
+    });
+    expect(completed.itemsByThread["thread-1"]?.[0]).toMatchObject({
+      id: "tool-1",
+      title: "Command: npm test",
+      status: "completed",
+      output: "first chunk",
+    });
+  });
+
+  it("prepares deferred item updates when a batch is flushed", () => {
+    const base: ThreadState = {
+      ...initialState,
+      itemsByThread: {
+        "thread-1": [
+          {
+            id: "user-1",
+            kind: "message",
+            role: "user",
+            text: "Inspect the source",
+          },
+        ],
+      },
+    };
+    const command = (id: string, title: string): ConversationItem => ({
+      id,
+      kind: "tool",
+      toolType: "commandExecution",
+      title,
+      detail: "D:/workspace",
+      status: "completed",
+      output: "output",
+    });
+
+    const deferred = threadReducer(base, {
+      type: "upsertItem",
+      workspaceId: "ws-1",
+      threadId: "thread-1",
+      item: command("command-1", "Command: cat src/a.ts"),
+      deferPreparation: true,
+    });
+    expect(deferred.itemsByThread["thread-1"]?.[1]?.kind).toBe("tool");
+
+    const prepared = threadReducer(deferred, {
+      type: "upsertItems",
+      items: [
+        {
+          workspaceId: "ws-1",
+          threadId: "thread-1",
+          item: command("command-2", "Command: sed -n '1,10p' src/b.ts"),
+        },
+      ],
+    });
+    const explore = prepared.itemsByThread["thread-1"]?.[1];
+    expect(explore?.kind).toBe("explore");
+    if (explore?.kind === "explore") {
+      expect(explore.entries).toHaveLength(2);
+    }
+  });
+
   it("adds and removes user input requests by workspace and id", () => {
     const requestA = {
       workspace_id: "ws-1",

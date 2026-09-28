@@ -138,7 +138,19 @@ export type ThreadAction =
       item: ConversationItem;
       replaceExisting?: boolean;
       hasCustomName?: boolean;
+      deferPreparation?: boolean;
     }
+  | {
+      type: "upsertItems";
+      items: Array<{
+        workspaceId: string;
+        threadId: string;
+        item: ConversationItem;
+        replaceExisting?: boolean;
+        hasCustomName?: boolean;
+      }>;
+    }
+  | { type: "prepareThreadItems"; threadId: string }
   | { type: "setItemTurnId"; threadId: string; itemId: string; turnId: string }
   | { type: "removeItem"; threadId: string; itemId: string }
   | {
@@ -166,7 +178,13 @@ export type ThreadAction =
     }
   | { type: "appendReasoningContent"; threadId: string; itemId: string; delta: string | string[] }
   | { type: "appendPlanDelta"; threadId: string; itemId: string; delta: string | string[] }
-  | { type: "appendToolOutput"; threadId: string; itemId: string; delta: string | string[] }
+  | {
+      type: "appendToolOutput";
+      threadId: string;
+      itemId: string;
+      delta: string | string[];
+      createIfMissing?: boolean;
+    }
   | {
       type: "setThreads";
       workspaceId: string;

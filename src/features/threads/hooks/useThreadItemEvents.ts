@@ -4,7 +4,11 @@ import {
   buildCollabExecutionBindingObservation,
   buildConversationItem,
 } from "@utils/threadItems";
-import type { CollabAgentRef, ExecutionBindingObserveInput } from "@/types";
+import type {
+  CollabAgentRef,
+  ConversationItem,
+  ExecutionBindingObserveInput,
+} from "@/types";
 import {
   buildItemForDisplay,
   handleConvertedItemEffects,
@@ -62,13 +66,38 @@ type PendingStreamingDelta = {
   deltas: string[];
   turnId?: string;
   hasCustomName?: boolean;
+  createIfMissing?: boolean;
 };
 
 type StreamingDeltaInput = Omit<PendingStreamingDelta, "deltas"> & {
   delta: string;
 };
 
+type PendingItemUpsert = {
+  workspaceId: string;
+  threadId: string;
+  item: ConversationItem;
+  replaceExisting?: boolean;
+  hasCustomName?: boolean;
+};
+
 const STREAMING_FLUSH_INTERVAL_MS = 50;
+
+function shouldDeferItemPreparation(item: ConversationItem) {
+  if (
+    item.kind === "tool" &&
+    (item.toolType === "collabToolCall" || item.toolType === "collabAgentToolCall")
+  ) {
+    return false;
+  }
+  return (
+    item.kind === "tool" ||
+    item.kind === "reasoning" ||
+    item.kind === "diff" ||
+    item.kind === "process" ||
+    item.kind === "explore"
+  );
+}
 
 function isSameStreamingDelta(
   left: PendingStreamingDelta,
@@ -98,9 +127,69 @@ export function useThreadItemEvents({
   onThreadActivity,
 }: UseThreadItemEventsOptions) {
   const pendingStreamingDeltasRef = useRef<PendingStreamingDelta[]>([]);
+  const pendingItemUpsertsRef = useRef<PendingItemUpsert[]>([]);
   const ensuredStreamingThreadsRef = useRef<Set<string>>(new Set());
   const processingStreamingThreadsRef = useRef<Set<string>>(new Set());
   const streamingFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const itemUpsertFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const flushItemUpserts = useCallback(() => {
+    if (itemUpsertFlushTimerRef.current !== null) {
+      clearTimeout(itemUpsertFlushTimerRef.current);
+      itemUpsertFlushTimerRef.current = null;
+    }
+    const pending = pendingItemUpsertsRef.current;
+    if (pending.length === 0) {
+      return;
+    }
+    pendingItemUpsertsRef.current = [];
+    const grouped = new Map<string, PendingItemUpsert[]>();
+    pending.forEach((entry) => {
+      const key = `${entry.workspaceId}:${entry.threadId}`;
+      const group = grouped.get(key);
+      if (group) {
+        group.push(entry);
+      } else {
+        grouped.set(key, [entry]);
+      }
+    });
+    grouped.forEach((items) => {
+      dispatch({
+        type: "upsertItems",
+        items,
+      });
+    });
+  }, [dispatch]);
+
+  const scheduleItemUpsertFlush = useCallback(() => {
+    if (itemUpsertFlushTimerRef.current !== null) {
+      return;
+    }
+    itemUpsertFlushTimerRef.current = setTimeout(() => {
+      itemUpsertFlushTimerRef.current = null;
+      flushItemUpserts();
+    }, STREAMING_FLUSH_INTERVAL_MS);
+  }, [flushItemUpserts]);
+
+  const queueItemUpsert = useCallback(
+    ({
+      workspaceId,
+      threadId,
+      item,
+      replaceExisting,
+      hasCustomName,
+    }: PendingItemUpsert) => {
+      pendingItemUpsertsRef.current.push({
+        workspaceId,
+        threadId,
+        item,
+        ...(replaceExisting ? { replaceExisting } : {}),
+        ...(hasCustomName !== undefined ? { hasCustomName } : {}),
+      });
+      scheduleItemUpsertFlush();
+    },
+    [scheduleItemUpsertFlush],
+  );
 
   const flushStreamingDeltas = useCallback(() => {
     if (streamingFlushTimerRef.current !== null) {
@@ -138,6 +227,7 @@ export function useThreadItemEvents({
         threadId: entry.threadId,
         itemId: entry.itemId,
         delta: entry.deltas,
+        ...(entry.createIfMissing ? { createIfMissing: true } : {}),
       });
     });
   }, [dispatch]);
@@ -171,6 +261,7 @@ export function useThreadItemEvents({
       delta,
       turnId,
       hasCustomName,
+      createIfMissing,
     }: StreamingDeltaInput) => {
       const pending = pendingStreamingDeltasRef.current;
       const incoming: StreamingDeltaInput = {
@@ -181,6 +272,7 @@ export function useThreadItemEvents({
         delta,
         turnId,
         hasCustomName,
+        createIfMissing,
       };
       const existing = pending[pending.length - 1];
       if (existing && isSameStreamingDelta(existing, incoming)) {
@@ -201,9 +293,10 @@ export function useThreadItemEvents({
 
   useEffect(
     () => () => {
+      flushItemUpserts();
       flushStreamingDeltas();
     },
-    [flushStreamingDeltas],
+    [flushItemUpserts, flushStreamingDeltas],
   );
 
   const handleItemUpdate = useCallback(
@@ -268,8 +361,7 @@ export function useThreadItemEvents({
           String(item.turnId ?? item.turn_id ?? "").trim() ||
           getActiveTurnId(threadId) ||
           undefined;
-        dispatch({
-          type: "upsertItem",
+        const upsert = {
           workspaceId,
           threadId,
           item: {
@@ -277,7 +369,13 @@ export function useThreadItemEvents({
             ...(turnId ? { turnId } : {}),
           },
           hasCustomName: Boolean(getCustomName(workspaceId, threadId)),
-        });
+        } satisfies PendingItemUpsert;
+        if (shouldDeferItemPreparation(converted)) {
+          queueItemUpsert(upsert);
+        } else {
+          flushItemUpserts();
+          dispatch({ type: "upsertItem", ...upsert });
+        }
       }
       safeMessageActivity();
     },
@@ -286,6 +384,7 @@ export function useThreadItemEvents({
       dispatch,
       getCustomName,
       getActiveTurnId,
+      flushItemUpserts,
       markProcessing,
       markReviewing,
       onReviewExited,
@@ -294,6 +393,7 @@ export function useThreadItemEvents({
       onThreadActivity,
       hydrateSubagentThreads,
       flushStreamingDeltas,
+      queueItemUpsert,
       resetStreamingThreadState,
       safeMessageActivity,
     ],
@@ -313,6 +413,7 @@ export function useThreadItemEvents({
         threadId,
         itemId,
         delta,
+        createIfMissing: true,
       });
       safeMessageActivity();
     },
@@ -391,6 +492,7 @@ export function useThreadItemEvents({
       phase?: string | null;
       text: string;
     }) => {
+      flushItemUpserts();
       resetStreamingThreadState(workspaceId, threadId);
       const timestamp = Date.now();
       dispatch({ type: "ensureThread", workspaceId, threadId });
@@ -428,6 +530,7 @@ export function useThreadItemEvents({
       activeThreadId,
       dispatch,
       getCustomName,
+      flushItemUpserts,
       onThreadActivity,
       recordThreadActivity,
       resetStreamingThreadState,
@@ -514,6 +617,7 @@ export function useThreadItemEvents({
   );
 
   return {
+    flushItemUpserts,
     flushStreamingDeltas,
     resetStreamingThreadState,
     onAgentMessageDelta,

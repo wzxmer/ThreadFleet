@@ -190,6 +190,7 @@ export function useThreadEventHandlers({
     onCommandOutputDelta,
     onTerminalInteraction,
     onFileChangeOutputDelta,
+    flushItemUpserts,
     flushStreamingDeltas,
     resetStreamingThreadState,
   } = useThreadItemEvents({
@@ -248,10 +249,11 @@ export function useThreadEventHandlers({
 
   const onTurnStarted = useCallback(
     (workspaceId: string, threadId: string, turnId: string) => {
+      flushItemUpserts();
       resetStreamingThreadState(workspaceId, threadId);
       handleTurnStarted(workspaceId, threadId, turnId);
     },
-    [handleTurnStarted, resetStreamingThreadState],
+    [flushItemUpserts, handleTurnStarted, resetStreamingThreadState],
   );
 
   const onTurnCompleted = useCallback(
@@ -263,12 +265,14 @@ export function useThreadEventHandlers({
     ) => {
       const activeTurnId = getLatestKnownActiveTurnId(threadId);
       if (!turnId || !activeTurnId || turnId === activeTurnId) {
+        flushItemUpserts();
         resetStreamingThreadState(workspaceId, threadId);
       }
       handleTurnCompleted(workspaceId, threadId, turnId, status);
     },
     [
       getLatestKnownActiveTurnId,
+      flushItemUpserts,
       handleTurnCompleted,
       resetStreamingThreadState,
     ],
@@ -282,19 +286,21 @@ export function useThreadEventHandlers({
         .trim()
         .toLowerCase();
       if (statusType !== "active") {
+        flushItemUpserts();
         resetStreamingThreadState(workspaceId, threadId);
       }
       handleThreadStatusChanged(workspaceId, threadId, status);
     },
-    [handleThreadStatusChanged, resetStreamingThreadState],
+    [flushItemUpserts, handleThreadStatusChanged, resetStreamingThreadState],
   );
 
   const onThreadClosed = useCallback(
     (workspaceId: string, threadId: string) => {
+      flushItemUpserts();
       resetStreamingThreadState(workspaceId, threadId);
       handleThreadClosed(workspaceId, threadId);
     },
-    [handleThreadClosed, resetStreamingThreadState],
+    [flushItemUpserts, handleThreadClosed, resetStreamingThreadState],
   );
 
   const onTurnError = useCallback(
@@ -306,11 +312,17 @@ export function useThreadEventHandlers({
     ) => {
       const activeTurnId = getLatestKnownActiveTurnId(threadId);
       if (!turnId || !activeTurnId || turnId === activeTurnId) {
+        flushItemUpserts();
         resetStreamingThreadState(workspaceId, threadId);
       }
       handleTurnError(workspaceId, threadId, turnId, payload);
     },
-    [getLatestKnownActiveTurnId, handleTurnError, resetStreamingThreadState],
+    [
+      flushItemUpserts,
+      getLatestKnownActiveTurnId,
+      handleTurnError,
+      resetStreamingThreadState,
+    ],
   );
 
   const onBackgroundThreadAction = useCallback(

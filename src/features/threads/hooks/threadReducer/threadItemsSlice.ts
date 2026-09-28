@@ -66,6 +66,16 @@ function updateStreamingItem(
   return next.slice(-maxItemsPerThread);
 }
 
+function limitLiveThreadItems(
+  items: ConversationItem[],
+  maxItemsPerThread: number | null,
+) {
+  if (maxItemsPerThread === null || items.length <= maxItemsPerThread) {
+    return items;
+  }
+  return items.slice(-maxItemsPerThread);
+}
+
 function mergeCompletedContextCompactionIds(
   current: Record<string, true> | undefined,
   items: ConversationItem[],
@@ -258,7 +268,9 @@ export function reduceThreadItems(state: ThreadState, action: ThreadAction): Thr
                 ...list.slice(pendingReplacementIndex + 1),
               ]
           : upsertItem(list, nextItem);
-      const updatedItems = prepareLiveThreadItems(nextList, state.maxItemsPerThread);
+      const updatedItems = action.deferPreparation
+        ? limitLiveThreadItems(nextList, state.maxItemsPerThread)
+        : prepareLiveThreadItems(nextList, state.maxItemsPerThread);
       const completedContextCompactionIds = mergeCompletedContextCompactionIds(
         state.completedContextCompactionIdsByThread[action.threadId],
         [nextItem],
@@ -335,6 +347,42 @@ export function reduceThreadItems(state: ThreadState, action: ThreadAction): Thr
                 ...state.completedContextCompactionIdsByThread,
                 [action.threadId]: completedContextCompactionIds ?? {},
               },
+      };
+    }
+    case "upsertItems": {
+      if (action.items.length === 0) {
+        return state;
+      }
+      let nextState = state;
+      let changed = false;
+      action.items.forEach((item) => {
+        const updatedState = reduceThreadItems(nextState, {
+          type: "upsertItem",
+          ...item,
+          deferPreparation: true,
+        });
+        changed ||= updatedState !== nextState;
+        nextState = updatedState;
+      });
+      if (!changed) {
+        return state;
+      }
+      return reduceThreadItems(nextState, {
+        type: "prepareThreadItems",
+        threadId: action.items[0].threadId,
+      });
+    }
+    case "prepareThreadItems": {
+      const list = state.itemsByThread[action.threadId];
+      if (!list) {
+        return state;
+      }
+      return {
+        ...state,
+        itemsByThread: {
+          ...state.itemsByThread,
+          [action.threadId]: prepareLiveThreadItems(list, state.maxItemsPerThread),
+        },
       };
     }
     case "setItemTurnId": {
@@ -588,10 +636,24 @@ export function reduceThreadItems(state: ThreadState, action: ThreadAction): Thr
     case "appendToolOutput": {
       const list = state.itemsByThread[action.threadId] ?? [];
       const index = list.findIndex((entry) => entry.id === action.itemId);
-      if (index < 0 || list[index].kind !== "tool") {
+      if (index >= 0 && list[index].kind !== "tool") {
         return state;
       }
-      const existing = list[index];
+      if (index < 0 && !action.createIfMissing) {
+        return state;
+      }
+      const existing =
+        index >= 0 && list[index].kind === "tool"
+          ? list[index]
+          : {
+              id: action.itemId,
+              kind: "tool",
+              toolType: "commandExecution",
+              title: "Command",
+              detail: "",
+              status: "in_progress",
+              output: "",
+            };
       const updated: ConversationItem = {
         ...existing,
         output: mergeStreamingDeltas(existing.output ?? "", action.delta),

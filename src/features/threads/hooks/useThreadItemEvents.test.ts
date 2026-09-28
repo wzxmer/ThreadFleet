@@ -5,6 +5,7 @@ import {
   buildCollabExecutionBindingObservation,
   buildConversationItem,
 } from "@utils/threadItems";
+import type { ConversationItem } from "@/types";
 import { useThreadItemEvents } from "./useThreadItemEvents";
 
 vi.mock("@utils/threadItems", () => ({
@@ -228,6 +229,55 @@ describe("useThreadItemEvents", () => {
         status: "completed",
       }),
     );
+  });
+
+  it("batches live tool item updates before reducer preparation", () => {
+    const toolItem: ConversationItem = {
+      id: "command-1",
+      kind: "tool",
+      toolType: "commandExecution",
+      title: "Command: rg source",
+      detail: "D:/workspace",
+      status: "in_progress",
+      output: "",
+    };
+    vi.mocked(buildConversationItem).mockReturnValue(toolItem);
+    const { result, dispatch } = makeOptions();
+
+    act(() => {
+      result.current.onItemStarted("ws-1", "thread-1", {
+        type: "commandExecution",
+        id: "command-1",
+      });
+      result.current.onItemCompleted("ws-1", "thread-1", {
+        type: "commandExecution",
+        id: "command-1",
+      });
+    });
+
+    expect(dispatch).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "upsertItem" }),
+    );
+    act(() => {
+      result.current.flushItemUpserts();
+    });
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "upsertItems",
+      items: [
+        {
+          workspaceId: "ws-1",
+          threadId: "thread-1",
+          item: toolItem,
+          hasCustomName: false,
+        },
+        {
+          workspaceId: "ws-1",
+          threadId: "thread-1",
+          item: toolItem,
+          hasCustomName: false,
+        },
+      ],
+    });
   });
 
   it("observes spawn bindings from raw started and completed items without prompt data", () => {
