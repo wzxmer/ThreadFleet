@@ -37,6 +37,7 @@ import {
 import { useWorkspaceController } from "@app/hooks/useWorkspaceController";
 import { useWorkspaceSelection } from "@/features/workspaces/hooks/useWorkspaceSelection";
 import { normalizeRootPath } from "@/features/threads/utils/threadNormalize";
+import { CHAT_SCROLLBACK_DEFAULT } from "@utils/chatScrollback";
 import { usePlanReadyActions } from "@app/hooks/usePlanReadyActions";
 import { getActivePlanStream } from "@/features/plan/planStream";
 import { useThreadRows } from "@app/hooks/useThreadRows";
@@ -864,13 +865,17 @@ export default function MainApp() {
     ensureWorkspaceRuntimeCodexArgs: ensureWorkspaceRuntimeCodexArgsWithContinuity,
     preserveSessionLibraryOnProviderSwitch:
       appSettings.preserveSessionLibraryOnProviderSwitch,
+    avoidUnboundedReadOnlyFallback: true,
     getThreadListRuntimeContext,
     reviewDeliveryMode: appSettings.reviewDeliveryMode,
     steerEnabled: appSettings.steerEnabled,
     subagentCheckpointSyncMode: appSettings.subagentCheckpointSyncMode,
     threadTitleAutogenerationEnabled: appSettings.threadTitleAutogenerationEnabled,
+    // Keep startup history bounded until persisted settings are available. A
+    // null value means unlimited history, which is unsafe during bootstrap
+    // because the selected thread may still be restored from a large session.
     chatHistoryScrollbackItems: appSettingsLoading
-      ? null
+      ? CHAT_SCROLLBACK_DEFAULT
       : appSettings.chatHistoryScrollbackItems,
     autoArchiveThreadsEnabled: appSettings.autoArchiveThreadsEnabled,
     autoArchiveThreadsDays: appSettings.autoArchiveThreadsDays,

@@ -68,6 +68,7 @@ const THREAD_HISTORY_INITIAL_ITEMS = 50;
 const THREAD_HISTORY_INITIAL_BYTES = 1 * 1024 * 1024;
 const THREAD_HISTORY_OLDER_ITEMS = 50;
 const THREAD_HISTORY_OLDER_BYTES = 1 * 1024 * 1024;
+const THREAD_HISTORY_READ_FALLBACK_ITEMS = THREAD_HISTORY_INITIAL_ITEMS;
 
 export type ThreadHistoryPageState = {
   nextCursor: string | null;
@@ -139,6 +140,7 @@ type UseThreadActionsOptions = {
     threadId: string,
     thread: Record<string, unknown>,
   ) => Promise<TurnExecutionSummary | null>;
+  avoidUnboundedReadOnlyFallback?: boolean;
 };
 
 export function useThreadActions({
@@ -173,6 +175,7 @@ export function useThreadActions({
   onSubagentTitleCandidate,
   onThreadCodexMetadataDetected,
   hydrateTurnExecutionSummary = async () => null,
+  avoidUnboundedReadOnlyFallback = false,
 }: UseThreadActionsOptions) {
   const localArchivedCursorByWorkspaceRef = useRef<Record<string, string | null>>({});
   const localArchivedFirstPageCursorByWorkspaceRef = useRef<
@@ -384,6 +387,9 @@ export function useThreadActions({
               label: "thread/read page fallback",
               payload: pageError instanceof Error ? pageError.message : String(pageError),
             });
+            if (avoidUnboundedReadOnlyFallback) {
+              return null;
+            }
             response = (await readThreadService(
               workspaceId,
               threadId,
@@ -534,6 +540,10 @@ export function useThreadActions({
             localActiveTurnId: activeTurnIdByThreadRef.current[threadId] ?? null,
             getCustomName,
           });
+          const hydratedItems =
+            readOnly && avoidUnboundedReadOnlyFallback
+              ? hydrationPlan.mergedItems.slice(-THREAD_HISTORY_READ_FALLBACK_ITEMS)
+              : hydrationPlan.mergedItems;
           const canTrustHydratedActiveTurn =
             !readOnly || threadReadAuthority === "execution";
           const shouldMarkProcessing =
@@ -604,7 +614,7 @@ export function useThreadActions({
             dispatch({
               type: "setThreadItems",
               threadId,
-              items: hydrationPlan.mergedItems,
+              items: hydratedItems,
             });
           }
           if (hydrationPlan.threadName) {
@@ -655,6 +665,7 @@ export function useThreadActions({
     [
       applyThreadMetadata,
       applyCollabThreadLinksFromThread,
+      avoidUnboundedReadOnlyFallback,
       dispatchPreviewMessage,
       dispatch,
       getCustomName,

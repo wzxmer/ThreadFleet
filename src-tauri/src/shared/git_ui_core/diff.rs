@@ -489,6 +489,9 @@ pub(super) async fn get_git_diffs_inner(
             .include_untracked(true)
             .recurse_untracked_dirs(true)
             .show_untracked_content(true);
+        // Prevent a large untracked or modified text file from being
+        // materialized as an unbounded diff during startup preloading.
+        options.max_size(MAX_TEXT_DIFF_BYTES as i64);
         options.ignore_whitespace_change(ignore_whitespace_changes);
 
         let diff = match head_tree.as_ref() {

@@ -882,6 +882,28 @@ describe("useThreadActions", () => {
     });
   });
 
+  it("does not fall back to a full read for bounded read-only restore", async () => {
+    const { result, dispatch } = renderActions({
+      avoidUnboundedReadOnlyFallback: true,
+    });
+
+    await act(async () => {
+      expect(
+        await result.current.readThreadForWorkspace(
+          "ws-1",
+          "thread-large",
+          true,
+          true,
+        ),
+      ).toBeNull();
+    });
+
+    expect(readThread).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "setThreadItems" }),
+    );
+  });
+
   it("advances an older-page cursor without reporting duplicate items as inserted", async () => {
     const latestItems: ConversationItem[] = [
       { id: "item-1", kind: "message", role: "user", text: "question" },

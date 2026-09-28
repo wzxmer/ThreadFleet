@@ -109,6 +109,7 @@ type UseThreadsOptions = {
   threadSortKey?: ThreadListSortKey;
   preserveSessionLibraryOnProviderSwitch?: boolean;
   getThreadListRuntimeContext?: () => ThreadListRuntimeContext;
+  avoidUnboundedReadOnlyFallback?: boolean;
   onThreadCodexMetadataDetected?: (
     workspaceId: string,
     threadId: string,
@@ -170,6 +171,7 @@ export function useThreads({
     sourceId: null,
     runtimeGeneration: 0,
   }),
+  avoidUnboundedReadOnlyFallback = false,
   onThreadCodexMetadataDetected,
 }: UseThreadsOptions) {
   const maxItemsPerThread =
@@ -1019,6 +1021,7 @@ export function useThreads({
     onSubagentTitleCandidate,
     onThreadCodexMetadataDetected,
     hydrateTurnExecutionSummary,
+    avoidUnboundedReadOnlyFallback,
   });
 
   planReconcileRef.current = async (workspaceId, threadId) => {
