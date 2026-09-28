@@ -138,6 +138,7 @@ import { SessionResumeChoicePrompt } from "@/features/sessions/components/Sessio
 import { applyMessageReference } from "@/features/messages/orchestration/deriveMessageReference";
 import type { MessageReferenceAction } from "@/features/messages/utils/messageReferences";
 import { buildProviderSessionDiagnostics } from "@settings/utils/providerSessionDiagnostics";
+import { SettingsSurfaceFallback } from "@app/components/SettingsSurfaceFallback";
 
 const SettingsView = lazy(() =>
   import("@settings/components/SettingsView").then((module) => ({
@@ -2813,7 +2814,7 @@ export default function MainApp() {
   const mainMessagesNode = showWorkspaceHome ? workspaceHomeNode : messagesNode;
   const SettingsSurfaceComponent = appModalsProps.SettingsViewComponent;
   const settingsNode = appModalsProps.settingsOpen ? (
-    <Suspense fallback={null}>
+    <Suspense fallback={<SettingsSurfaceFallback />}>
       <SettingsSurfaceComponent
         {...appModalsProps.settingsProps}
         onClose={appModalsProps.onCloseSettings}

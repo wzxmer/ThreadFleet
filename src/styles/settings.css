@@ -32,6 +32,42 @@
   box-shadow: none;
 }
 
+.settings-surface-fallback {
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-surface-fallback-content {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--text-subtle);
+  font-size: 12px;
+}
+
+.settings-surface-fallback-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid color-mix(in srgb, var(--text-subtle) 28%, transparent);
+  border-top-color: var(--border-accent);
+  border-radius: 50%;
+  animation: settings-surface-fallback-spin 0.8s linear infinite;
+}
+
+@keyframes settings-surface-fallback-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-surface-fallback-spinner {
+    animation: none;
+  }
+}
+
 .settings-surface .settings-titlebar {
   min-height: var(--main-topbar-height, 64px);
   padding: 0 var(--main-panel-padding, 24px);
