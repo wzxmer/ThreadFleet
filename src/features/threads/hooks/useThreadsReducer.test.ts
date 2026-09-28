@@ -725,6 +725,41 @@ describe("threadReducer", () => {
     expect(next).toBe(base);
   });
 
+  it("merges command output deltas into the existing prepared tool item", () => {
+    const userMessage: ConversationItem = {
+      id: "user-1",
+      kind: "message",
+      role: "user",
+      text: "Run the command",
+    };
+    const command: ConversationItem = {
+      id: "tool-1",
+      kind: "tool",
+      toolType: "commandExecution",
+      title: "Command: node build-script.js",
+      detail: "D:/workspace",
+      status: "in_progress",
+      output: "first chunk",
+    };
+    const base: ThreadState = {
+      ...initialState,
+      itemsByThread: { "thread-1": [userMessage, command] },
+    };
+
+    const next = threadReducer(base, {
+      type: "appendToolOutput",
+      threadId: "thread-1",
+      itemId: "tool-1",
+      delta: "\nsecond chunk",
+    });
+
+    expect(next.itemsByThread["thread-1"]?.[0]).toBe(userMessage);
+    expect(next.itemsByThread["thread-1"]?.[1]).toMatchObject({
+      id: "tool-1",
+      output: "first chunk\nsecond chunk",
+    });
+  });
+
   it("adds and removes user input requests by workspace and id", () => {
     const requestA = {
       workspace_id: "ws-1",

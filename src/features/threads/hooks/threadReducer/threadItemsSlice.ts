@@ -590,13 +590,16 @@ export function reduceThreadItems(state: ThreadState, action: ThreadAction): Thr
         ...existing,
         output: mergeStreamingText(existing.output ?? "", action.delta),
       } as ConversationItem;
-      const next = [...list];
-      next[index] = updated;
       return {
         ...state,
         itemsByThread: {
           ...state.itemsByThread,
-          [action.threadId]: prepareLiveThreadItems(next, state.maxItemsPerThread),
+          [action.threadId]: updateStreamingItem(
+            list,
+            index,
+            updated,
+            state.maxItemsPerThread,
+          ),
         },
       };
     }
