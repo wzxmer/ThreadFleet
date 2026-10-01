@@ -371,6 +371,44 @@ describe("useThreadActions", () => {
     expect(resumeThread).toHaveBeenCalledTimes(2);
   });
 
+  it("ignores a resume response from an older runtime before hydrating history", async () => {
+    let runtimeContext = { sourceId: "source-a", runtimeGeneration: 1 };
+    let resolveResume!: (value: unknown) => void;
+    const pendingResume = new Promise((resolve) => {
+      resolveResume = resolve;
+    });
+    vi.mocked(resumeThread).mockReturnValue(pendingResume);
+    vi.mocked(buildItemsFromThread).mockReturnValue([
+      { id: "stale-item", kind: "message", role: "assistant", text: "stale" },
+    ]);
+
+    const { result, dispatch } = renderActions({
+      getThreadListRuntimeContext: () => runtimeContext,
+    });
+
+    let resumePromise: Promise<string | null>;
+    act(() => {
+      resumePromise = result.current.resumeThreadForWorkspace(
+        "ws-1",
+        "thread-1",
+        true,
+      );
+    });
+    await waitFor(() => {
+      expect(resumeThread).toHaveBeenCalledTimes(1);
+    });
+
+    runtimeContext = { sourceId: "source-a", runtimeGeneration: 2 };
+    resolveResume({ result: { thread: { id: "thread-1", turns: [] } } });
+    await act(async () => {
+      await resumePromise;
+    });
+
+    expect(dispatch).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "setThreadItems", threadId: "thread-1" }),
+    );
+  });
+
   it("resumes an explicit thread id, replaces history, and activates after success", async () => {
     const serverItems = [{ id: "item-1", kind: "message" }] as ConversationItem[];
     vi.mocked(resumeThread).mockResolvedValue({
@@ -422,6 +460,38 @@ describe("useThreadActions", () => {
       type: "setThreadItems",
       threadId: "thread-1",
       items: [],
+    });
+  });
+
+  it("shares overlapping forced refreshes for the same thread and runtime", async () => {
+    let resolveRead!: (value: unknown) => void;
+    const pendingRead = new Promise((resolve) => {
+      resolveRead = resolve;
+    });
+    vi.mocked(readThreadPage).mockReturnValue(pendingRead);
+
+    const { result } = renderActions();
+
+    let firstRefresh!: Promise<string | null>;
+    let secondRefresh!: Promise<string | null>;
+    act(() => {
+      firstRefresh = result.current.refreshThread("ws-1", "thread-1");
+      secondRefresh = result.current.refreshThread("ws-1", "thread-1");
+    });
+
+    expect(readThreadPage).toHaveBeenCalledTimes(1);
+    expect(secondRefresh).toBe(firstRefresh);
+
+    resolveRead({
+      result: { thread: { id: "thread-1", turns: [] } },
+      codexMonitorHistoryPage: {
+        nextCursor: null,
+        hasMore: false,
+        snapshotId: "snapshot-1",
+      },
+    });
+    await act(async () => {
+      await firstRefresh;
     });
   });
 

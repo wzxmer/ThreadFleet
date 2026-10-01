@@ -191,6 +191,7 @@ export function useThreadActions({
   const threadListGenerationRef = useRef<Record<string, number>>({});
   const threadListRequestIdRef = useRef(0);
   const resumeInFlightByThreadRef = useRef<Record<string, number>>({});
+  const refreshThreadInFlightRef = useRef<Record<string, Promise<string | null>>>({});
   const resumeGenerationByThreadRef = useRef<Record<string, number>>({});
   const resumeAppliedGenerationByThreadRef = useRef<Record<string, number>>({});
   const readOnlyLoadedThreadsRef = useRef<Record<string, true>>({});
@@ -422,6 +423,17 @@ export function useThreadActions({
           delete readOnlyLoadedThreadsRef.current[threadId];
         }
         const thread = extractThreadFromResponse(response);
+        if (getCurrentThreadRuntimeKey() !== requestRuntimeKey) {
+          delete readOnlyLoadedThreadsRef.current[threadId];
+          onDebug?.({
+            id: `${Date.now()}-client-thread-resume-stale-runtime`,
+            timestamp: Date.now(),
+            source: "client",
+            label: "thread/resume stale runtime ignored",
+            payload: { workspaceId, threadId, requestRuntimeKey },
+          });
+          return null;
+        }
         if (!thread && requireThreadResponse) {
           return null;
         }
@@ -840,14 +852,38 @@ export function useThreadActions({
   );
 
   const refreshThread = useCallback(
-    async (workspaceId: string, threadId: string) => {
+    (workspaceId: string, threadId: string) => {
       if (!threadId) {
-        return null;
+        return Promise.resolve(null);
+      }
+      const refreshKey = `${workspaceId}:${threadId}:${getCurrentThreadRuntimeKey()}`;
+      const inFlight = refreshThreadInFlightRef.current[refreshKey];
+      if (inFlight) {
+        return inFlight;
       }
       replaceOnResumeRef.current[threadId] = true;
-      return readThreadForWorkspace(workspaceId, threadId, true, true);
+      const refreshPromise = readThreadForWorkspace(
+        workspaceId,
+        threadId,
+        true,
+        true,
+      );
+      refreshThreadInFlightRef.current[refreshKey] = refreshPromise;
+      void refreshPromise.then(
+        () => {
+          if (refreshThreadInFlightRef.current[refreshKey] === refreshPromise) {
+            delete refreshThreadInFlightRef.current[refreshKey];
+          }
+        },
+        () => {
+          if (refreshThreadInFlightRef.current[refreshKey] === refreshPromise) {
+            delete refreshThreadInFlightRef.current[refreshKey];
+          }
+        },
+      );
+      return refreshPromise;
     },
-    [readThreadForWorkspace, replaceOnResumeRef],
+    [getCurrentThreadRuntimeKey, readThreadForWorkspace, replaceOnResumeRef],
   );
 
   const resumeThreadById = useCallback(
