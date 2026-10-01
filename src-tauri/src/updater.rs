@@ -333,6 +333,44 @@ pub async fn download_release_asset(
     .await
 }
 
+fn release_asset_relative_path(url: &str) -> Option<String> {
+    let parsed = reqwest::Url::parse(url).ok()?;
+    if parsed.host_str() != Some(RELEASE_HOST) {
+        return None;
+    }
+    parsed
+        .path()
+        .strip_prefix(RELEASE_PATH_PREFIX)
+        .map(ToOwned::to_owned)
+}
+
+fn append_update_mirror_routes(
+    mut urls: Vec<String>,
+    configured_bases: [Option<&str>; 2],
+) -> Vec<String> {
+    let mut seen = urls.iter().cloned().collect::<HashSet<_>>();
+    let originals = urls.clone();
+    for original in originals {
+        let Some(relative_path) = release_asset_relative_path(&original) else {
+            continue;
+        };
+        for base in configured_bases.into_iter().flatten() {
+            let base = base.trim().trim_end_matches('/');
+            if base.is_empty() {
+                continue;
+            }
+            let candidate = format!("{base}/{relative_path}");
+            if seen.insert(candidate.clone()) {
+                urls.push(candidate);
+            }
+        }
+    }
+    urls
+}
+
+fn append_configured_update_routes(urls: Vec<String>) -> Vec<String> {
+    append_update_mirror_routes(urls, [TENCENT_UPDATE_BASE_URL, ALIYUN_UPDATE_BASE_URL])
+}
 async fn download_release_asset_impl(
     app_handle: tauri::AppHandle,
     urls: Vec<String>,
@@ -341,6 +379,7 @@ async fn download_release_asset_impl(
     expected_size: Option<u64>,
     expected_sha256: Option<String>,
 ) -> Result<DownloadedReleaseAsset, String> {
+    let urls = append_configured_update_routes(urls);
     if urls.is_empty() {
         return Err("No release asset download URL was provided.".to_string());
     }
@@ -417,7 +456,10 @@ pub async fn install_managed_codex(
     expected_size: u64,
     expected_sha256: String,
 ) -> Result<InstalledManagedCodex, String> {
-    if matches!(state.app_settings.lock().await.backend_mode, BackendMode::Remote) {
+    if matches!(
+        state.app_settings.lock().await.backend_mode,
+        BackendMode::Remote
+    ) {
         return Err(
             "Managed Codex installation must run on the remote execution host.".to_string(),
         );
@@ -1164,23 +1206,90 @@ fn checked_downloaded_size(
     Ok(next_size)
 }
 
-async fn download_to_path(
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct UpdateDownloadRoute {
+    name: &'static str,
+    proxy_url: Option<String>,
+    use_environment_proxy: bool,
+}
+
+fn build_update_download_routes(
+    system_proxy: Option<String>,
+    environment_proxy_configured: bool,
+) -> Vec<UpdateDownloadRoute> {
+    let mut routes = Vec::with_capacity(3);
+    if let Some(proxy_url) = system_proxy {
+        routes.push(UpdateDownloadRoute {
+            name: "system-proxy",
+            proxy_url: Some(proxy_url),
+            use_environment_proxy: false,
+        });
+    }
+    if environment_proxy_configured {
+        routes.push(UpdateDownloadRoute {
+            name: "environment-proxy",
+            proxy_url: None,
+            use_environment_proxy: true,
+        });
+    }
+    routes.push(UpdateDownloadRoute {
+        name: "direct",
+        proxy_url: None,
+        use_environment_proxy: false,
+    });
+    routes
+}
+
+fn has_environment_proxy_for_url(url: &str) -> bool {
+    let scheme = reqwest::Url::parse(url)
+        .map(|parsed| parsed.scheme().to_ascii_lowercase())
+        .unwrap_or_else(|_| "https".to_string());
+    [
+        format!("{scheme}_proxy"),
+        format!("{scheme}_PROXY"),
+        "all_proxy".to_string(),
+        "ALL_PROXY".to_string(),
+    ]
+    .iter()
+    .filter_map(std::env::var_os)
+    .any(|value| !value.to_string_lossy().trim().is_empty())
+}
+
+fn build_update_client(
+    proxy_url: Option<&str>,
+    use_environment_proxy: bool,
+) -> Result<reqwest::Client, String> {
+    let mut builder = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(30 * 60))
+        .user_agent("ThreadFleet updater");
+    if let Some(proxy_url) = proxy_url {
+        let proxy = reqwest::Proxy::all(proxy_url)
+            .map_err(|_| "Invalid Windows system proxy configuration.".to_string())?;
+        builder = builder.no_proxy().proxy(proxy);
+    } else if !use_environment_proxy {
+        builder = builder.no_proxy();
+    }
+    builder
+        .build()
+        .map_err(|_| "Failed to create update client.".to_string())
+}
+
+async fn download_to_path_with_client(
     app_handle: &tauri::AppHandle,
     request_id: &str,
+    client: &reqwest::Client,
     url: &str,
     target_path: &Path,
     expected_size: Option<u64>,
     expected_sha256: Option<&str>,
 ) -> Result<(), String> {
-    let response = reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(10))
-        .build()
-        .map_err(|error| format!("Failed to create update client: {error}"))?
+    let response = client
         .get(url)
         .header(reqwest::header::ACCEPT, "application/octet-stream")
         .send()
         .await
-        .map_err(|error| format!("Failed to download installer: {error}"))?;
+        .map_err(|error| format!("request failed: {error}"))?;
     if !response.status().is_success() {
         return Err(format!(
             "Release asset download failed ({}).",
@@ -1233,9 +1342,9 @@ async fn download_to_path(
         }
     }
     if let Some(expected_sha256) = expected_sha256 {
-        let actual_sha256 = format!("{:x}", hasher.finalize());
-        if !actual_sha256.eq_ignore_ascii_case(expected_sha256) {
-            return Err("Installer SHA-256 verification failed.".to_string());
+        let actual = format!("{:x}", hasher.finalize());
+        if !actual.eq_ignore_ascii_case(expected_sha256) {
+            return Err("Installer SHA-256 checksum mismatch.".to_string());
         }
     }
     emit_download_progress(
@@ -1247,6 +1356,56 @@ async fn download_to_path(
     Ok(())
 }
 
+async fn download_to_path(
+    app_handle: &tauri::AppHandle,
+    request_id: &str,
+    url: &str,
+    target_path: &Path,
+    expected_size: Option<u64>,
+    expected_sha256: Option<&str>,
+) -> Result<(), String> {
+    let mut errors = Vec::new();
+    #[cfg(target_os = "windows")]
+    let system_proxy = match crate::windows_proxy::resolve_proxy_for_url(url.to_string()).await {
+        Ok(proxy) => proxy,
+        Err(error) => {
+            errors.push(format!("system-proxy resolution: {error}"));
+            None
+        }
+    };
+    #[cfg(not(target_os = "windows"))]
+    let system_proxy = None;
+
+    let routes = build_update_download_routes(system_proxy, has_environment_proxy_for_url(url));
+    for route in routes {
+        let client =
+            match build_update_client(route.proxy_url.as_deref(), route.use_environment_proxy) {
+                Ok(client) => client,
+                Err(error) => {
+                    errors.push(format!("{}: {error}", route.name));
+                    continue;
+                }
+            };
+        match download_to_path_with_client(
+            app_handle,
+            request_id,
+            &client,
+            url,
+            target_path,
+            expected_size,
+            expected_sha256,
+        )
+        .await
+        {
+            Ok(()) => return Ok(()),
+            Err(error) => errors.push(format!("{}: {error}", route.name)),
+        }
+    }
+    Err(format!(
+        "Failed to download installer from '{url}': {}",
+        errors.join(" | ")
+    ))
+}
 fn open_installer(path: &Path) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
@@ -1290,17 +1449,57 @@ fn open_installer(path: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        checked_downloaded_size, cleanup_previous_windows_ui_install,
-        extract_managed_codex_archive, extract_windows_ui_archive, resolve_release_architecture,
-        sanitize_release_asset_file_name, should_preserve_installer_downloads,
-        validate_download_request_id, validate_real_child_directory,
-        validate_real_windows_ui_executable, validate_release_asset_url,
+        append_update_mirror_routes, build_update_download_routes, checked_downloaded_size,
+        cleanup_previous_windows_ui_install, extract_managed_codex_archive,
+        extract_windows_ui_archive, resolve_release_architecture, sanitize_release_asset_file_name,
+        should_preserve_installer_downloads, validate_download_request_id,
+        validate_real_child_directory, validate_real_windows_ui_executable,
+        validate_release_asset_url,
     };
     use crate::windows_installer::{
         classify_windows_installer_registration, select_windows_installer_kind,
     };
     use std::io::Write;
 
+    #[test]
+    fn tries_system_proxy_then_environment_proxy_then_direct() {
+        let routes = build_update_download_routes(Some("http://127.0.0.1:7890".to_string()), true);
+        assert_eq!(
+            routes.iter().map(|route| route.name).collect::<Vec<_>>(),
+            vec!["system-proxy", "environment-proxy", "direct"]
+        );
+        assert_eq!(
+            build_update_download_routes(None, false)
+                .iter()
+                .map(|route| route.name)
+                .collect::<Vec<_>>(),
+            vec!["direct"]
+        );
+    }
+
+    #[test]
+    fn appends_configured_mirror_routes_after_github() {
+        let file_name = "ThreadFleet_1.2.3_x64.msi";
+        let github =
+            format!("https://github.com/wzxmer/ThreadFleet/releases/download/v1.2.3/{file_name}");
+        let routes = append_update_mirror_routes(
+            vec![github.clone()],
+            [
+                Some("https://cos.example/updates/"),
+                Some("https://oss.example"),
+            ],
+        );
+        assert_eq!(routes[0], github);
+        assert_eq!(
+            routes[1],
+            format!("https://cos.example/updates/v1.2.3/{file_name}")
+        );
+        assert_eq!(routes[2], format!("https://oss.example/v1.2.3/{file_name}"));
+        assert_eq!(
+            append_update_mirror_routes(routes.clone(), [None, None]),
+            routes
+        );
+    }
     #[test]
     fn accepts_matching_github_release_asset() {
         let file_name = "ThreadFleet_1.2.3_x64.msi";

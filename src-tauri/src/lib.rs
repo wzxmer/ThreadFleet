@@ -44,6 +44,9 @@ mod updater;
 mod utils;
 mod window;
 mod windows_installer;
+
+#[cfg(target_os = "windows")]
+mod windows_proxy;
 mod workspaces;
 
 #[cfg(desktop)]
