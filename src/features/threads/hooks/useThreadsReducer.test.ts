@@ -925,6 +925,46 @@ describe("threadReducer", () => {
     expect(next.turnDiffByThread["thread-1"]).toBeUndefined();
   });
 
+  it("clears thread snapshot state when a thread is removed", () => {
+    const base: ThreadState = {
+      ...initialState,
+      threadsByWorkspace: {
+        "ws-1": [{ id: "thread-1", name: "Agent 1", updatedAt: 1 }],
+      },
+      tokenUsageByThread: {
+        "thread-1": {
+          total: {
+            inputTokens: 10,
+            cachedInputTokens: 0,
+            outputTokens: 20,
+            reasoningOutputTokens: 0,
+            totalTokens: 30,
+          },
+          last: {
+            inputTokens: 10,
+            cachedInputTokens: 0,
+            outputTokens: 20,
+            reasoningOutputTokens: 0,
+            totalTokens: 30,
+          },
+          modelContextWindow: null,
+        },
+      },
+      lastAgentMessageByThread: {
+        "thread-1": { text: "retained until removal", timestamp: 1 },
+      },
+    };
+
+    const next = threadReducer(base, {
+      type: "removeThread",
+      workspaceId: "ws-1",
+      threadId: "thread-1",
+    });
+
+    expect(next.tokenUsageByThread["thread-1"]).toBeUndefined();
+    expect(next.lastAgentMessageByThread["thread-1"]).toBeUndefined();
+  });
+
   it("hides background threads and keeps them hidden on future syncs", () => {
     const withThread = threadReducer(initialState, {
       type: "ensureThread",
@@ -1415,9 +1455,36 @@ describe("threadReducer", () => {
       threadListLoadingByWorkspace: { "ws-1": true },
       threadListCursorByWorkspace: { "ws-1": "cursor-later" },
       threadListFirstPageCursorByWorkspace: { "ws-1": "cursor-first" },
+      itemsByThread: {
+        "root-1": [
+          { id: "retained-item", kind: "message", role: "assistant", text: "retained" },
+        ],
+        "root-21": [
+          { id: "released-item", kind: "message", role: "assistant", text: "released" },
+        ],
+      },
       lastAgentMessageByThread: {
         "root-1": { text: "Retained preview", timestamp: 1_000 },
         "root-21": { text: "Released preview", timestamp: 980 },
+      },
+      tokenUsageByThread: {
+        "root-21": {
+          total: {
+            inputTokens: 1,
+            cachedInputTokens: 0,
+            outputTokens: 2,
+            reasoningOutputTokens: 0,
+            totalTokens: 3,
+          },
+          last: {
+            inputTokens: 1,
+            cachedInputTokens: 0,
+            outputTokens: 2,
+            reasoningOutputTokens: 0,
+            totalTokens: 3,
+          },
+          modelContextWindow: null,
+        },
       },
     };
 
@@ -1450,6 +1517,9 @@ describe("threadReducer", () => {
       "Retained preview",
     );
     expect(next.lastAgentMessageByThread["root-21"]).toBeUndefined();
+    expect(next.tokenUsageByThread["root-21"]).toBeUndefined();
+    expect(next.itemsByThread["root-1"]).toBeDefined();
+    expect(next.itemsByThread["root-21"]).toBeUndefined();
     expect(next.threadParentById[activeChild.id]).toBe("root-30");
   });
 
@@ -1690,6 +1760,19 @@ describe("threadReducer", () => {
     ]);
   });
 
+  it("does not create an empty assistant message when completion has no content", () => {
+    const next = threadReducer(initialState, {
+      type: "completeAgentMessage",
+      workspaceId: "ws-1",
+      threadId: "thread-1",
+      itemId: "assistant-empty",
+      text: "",
+      hasCustomName: false,
+    });
+
+    expect(next).toBe(initialState);
+    expect(next.itemsByThread["thread-1"]).toBeUndefined();
+  });
   it("keeps unlimited live thread history", () => {
     const items: ConversationItem[] = Array.from({ length: 3 }, (_, index) => ({
       id: `msg-${index}`,

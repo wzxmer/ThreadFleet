@@ -270,12 +270,6 @@ describe("useThreadItemEvents", () => {
           item: toolItem,
           hasCustomName: false,
         },
-        {
-          workspaceId: "ws-1",
-          threadId: "thread-1",
-          item: toolItem,
-          hasCustomName: false,
-        },
       ],
     });
   });
@@ -519,6 +513,40 @@ describe("useThreadItemEvents", () => {
     });
   });
 
+  it("coalesces interleaved deltas by item instead of retaining one queue entry per event", () => {
+    const { result, dispatch } = makeOptions();
+
+    act(() => {
+      for (let index = 0; index < 100; index += 1) {
+        result.current.onAgentMessageDelta({
+          workspaceId: "ws-1",
+          threadId: "thread-1",
+          itemId: index % 2 === 0 ? "assistant-a" : "assistant-b",
+          delta: String(index),
+        });
+      }
+      result.current.flushStreamingDeltas();
+    });
+
+    const appendCalls = dispatch.mock.calls
+      .map(([action]) => action)
+      .filter((action) => action?.type === "appendAgentDelta");
+    expect(appendCalls).toHaveLength(2);
+    expect(appendCalls).toContainEqual(
+      expect.objectContaining({
+        type: "appendAgentDelta",
+        itemId: "assistant-a",
+        delta: Array.from({ length: 50 }, (_, index) => String(index * 2)),
+      }),
+    );
+    expect(appendCalls).toContainEqual(
+      expect.objectContaining({
+        type: "appendAgentDelta",
+        itemId: "assistant-b",
+        delta: Array.from({ length: 50 }, (_, index) => String(index * 2 + 1)),
+      }),
+    );
+  });
   it("completes agent messages and updates thread activity", () => {
     const nowSpy = vi.spyOn(Date, "now").mockReturnValue(1234);
     const { result, dispatch, recordThreadActivity, safeMessageActivity } = makeOptions({

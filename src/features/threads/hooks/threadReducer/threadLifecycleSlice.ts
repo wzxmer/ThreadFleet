@@ -243,8 +243,12 @@ export function reduceThreadLifecycle(
         [action.threadId]: ___________,
         ...restCompletedContextCompactionIds
       } = state.completedContextCompactionIdsByThread;
+      const { [action.threadId]: ____________, ...restTokenUsage } =
+        state.tokenUsageByThread;
+      const { [action.threadId]: _____________, ...restLastAgentMessage } =
+        state.lastAgentMessageByThread;
       const {
-        [action.threadId]: ____________,
+        [action.threadId]: ______________,
         ...restHistoryRestoreStates
       } = state.threadHistoryRestoreStateById;
       return {
@@ -265,6 +269,8 @@ export function reduceThreadLifecycle(
         pendingUserMessageReplacementByThread: restPendingUserMessageReplacement,
         completedContextCompactionIdsByThread:
           restCompletedContextCompactionIds,
+        tokenUsageByThread: restTokenUsage,
+        lastAgentMessageByThread: restLastAgentMessage,
         threadHistoryRestoreStateById: restHistoryRestoreStates,
         threadHistoryRecoveryAnchorThreadId:
           state.threadHistoryRecoveryAnchorThreadId === action.threadId
@@ -884,6 +890,7 @@ export function reduceThreadLifecycle(
             state.threadListFirstPageCursorByWorkspace[action.workspaceId] ?? null,
         },
         threadParentById: nextThreadParentById,
+        itemsByThread: omitThreadKeys(state.itemsByThread, omittedThreadIds),
         threadStatusById: omitThreadKeys(
           state.threadStatusById,
           omittedThreadIds,
@@ -898,6 +905,39 @@ export function reduceThreadLifecycle(
         ),
         lastAgentMessageByThread: omitThreadKeys(
           state.lastAgentMessageByThread,
+          omittedThreadIds,
+        ),
+        tokenUsageByThread: omitThreadKeys(
+          state.tokenUsageByThread,
+          omittedThreadIds,
+        ),
+        activeTurnIdByThread: omitThreadKeys(
+          state.activeTurnIdByThread,
+          omittedThreadIds,
+        ),
+        turnDiffByThread: omitThreadKeys(
+          state.turnDiffByThread,
+          omittedThreadIds,
+        ),
+        turnExecutionSummaryByThread: omitThreadKeys(
+          state.turnExecutionSummaryByThread,
+          omittedThreadIds,
+        ),
+        turnExecutionSummariesByThread: omitThreadKeys(
+          state.turnExecutionSummariesByThread,
+          omittedThreadIds,
+        ),
+        planByThread: omitThreadKeys(state.planByThread, omittedThreadIds),
+        interruptedThreadById: omitThreadKeys(
+          state.interruptedThreadById,
+          omittedThreadIds,
+        ),
+        pendingUserMessageReplacementByThread: omitThreadKeys(
+          state.pendingUserMessageReplacementByThread,
+          omittedThreadIds,
+        ),
+        completedContextCompactionIdsByThread: omitThreadKeys(
+          state.completedContextCompactionIdsByThread,
           omittedThreadIds,
         ),
       };

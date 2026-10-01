@@ -172,6 +172,9 @@ export function reduceThreadItems(state: ThreadState, action: ThreadAction): Thr
     case "completeAgentMessage": {
       const list = [...(state.itemsByThread[action.threadId] ?? [])];
       const index = list.findIndex((msg) => msg.id === action.itemId);
+      if (index < 0 && !action.text.trim()) {
+        return state;
+      }
       if (index >= 0 && list[index].kind === "message") {
         const existing = list[index];
         list[index] = {

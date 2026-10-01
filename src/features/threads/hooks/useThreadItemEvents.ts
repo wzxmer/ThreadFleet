@@ -99,15 +99,8 @@ function shouldDeferItemPreparation(item: ConversationItem) {
   );
 }
 
-function isSameStreamingDelta(
-  left: PendingStreamingDelta,
-  right: StreamingDeltaInput,
-) {
-  return (
-    left.kind === right.kind &&
-    left.threadId === right.threadId &&
-    left.itemId === right.itemId
-  );
+function getStreamingDeltaKey(input: StreamingDeltaInput) {
+  return [input.workspaceId, input.threadId, input.kind, input.itemId].join(":");
 }
 
 export function useThreadItemEvents({
@@ -126,8 +119,8 @@ export function useThreadItemEvents({
   onExecutionBindingObserved,
   onThreadActivity,
 }: UseThreadItemEventsOptions) {
-  const pendingStreamingDeltasRef = useRef<PendingStreamingDelta[]>([]);
-  const pendingItemUpsertsRef = useRef<PendingItemUpsert[]>([]);
+  const pendingStreamingDeltasRef = useRef<Map<string, PendingStreamingDelta>>(new Map());
+  const pendingItemUpsertsRef = useRef<Map<string, PendingItemUpsert>>(new Map());
   const ensuredStreamingThreadsRef = useRef<Set<string>>(new Set());
   const processingStreamingThreadsRef = useRef<Set<string>>(new Set());
   const streamingFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -139,10 +132,10 @@ export function useThreadItemEvents({
       itemUpsertFlushTimerRef.current = null;
     }
     const pending = pendingItemUpsertsRef.current;
-    if (pending.length === 0) {
+    if (pending.size === 0) {
       return;
     }
-    pendingItemUpsertsRef.current = [];
+    pendingItemUpsertsRef.current = new Map();
     const grouped = new Map<string, PendingItemUpsert[]>();
     pending.forEach((entry) => {
       const key = `${entry.workspaceId}:${entry.threadId}`;
@@ -179,12 +172,20 @@ export function useThreadItemEvents({
       replaceExisting,
       hasCustomName,
     }: PendingItemUpsert) => {
-      pendingItemUpsertsRef.current.push({
+      const key = `${workspaceId}:${threadId}:${item.id}`;
+      const previous = pendingItemUpsertsRef.current.get(key);
+      pendingItemUpsertsRef.current.set(key, {
         workspaceId,
         threadId,
         item,
-        ...(replaceExisting ? { replaceExisting } : {}),
-        ...(hasCustomName !== undefined ? { hasCustomName } : {}),
+        ...(previous?.replaceExisting || replaceExisting
+          ? { replaceExisting: true }
+          : {}),
+        ...(hasCustomName !== undefined
+          ? { hasCustomName }
+          : previous?.hasCustomName !== undefined
+            ? { hasCustomName: previous.hasCustomName }
+            : {}),
       });
       scheduleItemUpsertFlush();
     },
@@ -197,10 +198,10 @@ export function useThreadItemEvents({
       streamingFlushTimerRef.current = null;
     }
     const pending = pendingStreamingDeltasRef.current;
-    if (pending.length === 0) {
+    if (pending.size === 0) {
       return;
     }
-    pendingStreamingDeltasRef.current = [];
+    pendingStreamingDeltasRef.current = new Map();
     pending.forEach((entry) => {
       if (entry.kind === "agent") {
         dispatch({
@@ -274,8 +275,9 @@ export function useThreadItemEvents({
         hasCustomName,
         createIfMissing,
       };
-      const existing = pending[pending.length - 1];
-      if (existing && isSameStreamingDelta(existing, incoming)) {
+      const key = getStreamingDeltaKey(incoming);
+      const existing = pending.get(key);
+      if (existing) {
         existing.deltas.push(delta);
         if (turnId) {
           existing.turnId = turnId;
@@ -283,8 +285,11 @@ export function useThreadItemEvents({
         if (hasCustomName !== undefined) {
           existing.hasCustomName = hasCustomName;
         }
+        if (createIfMissing) {
+          existing.createIfMissing = true;
+        }
       } else {
-        pending.push({ ...incoming, deltas: [delta] });
+        pending.set(key, { ...incoming, deltas: [delta] });
       }
       scheduleStreamingFlush();
     },
