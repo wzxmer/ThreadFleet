@@ -63,6 +63,9 @@ export function useMessagesViewState({
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const autoScrollRef = useRef(true);
+  const previousScrollKeyRef = useRef<string | null>(null);
+  const pendingContentScrollIntentRef = useRef<boolean | null>(null);
+  const pendingContentScrollFrameRef = useRef<number | null>(null);
   const previousThreadIdRef = useRef(threadId);
   const resizeScrollFrameRef = useRef<number | null>(null);
   const copyTimeoutRef = useRef<number | null>(null);
@@ -101,6 +104,12 @@ export function useMessagesViewState({
   });
 
   const scrollKey = `${scrollKeyForItems(displayItems)}-${activeUserInputRequestId ?? "no-input"}`;
+  if (previousScrollKeyRef.current === null) {
+    previousScrollKeyRef.current = scrollKey;
+  } else if (previousScrollKeyRef.current !== scrollKey) {
+    pendingContentScrollIntentRef.current = autoScrollRef.current;
+    previousScrollKeyRef.current = scrollKey;
+  }
 
   const isNearBottom = useCallback(
     (node: HTMLDivElement) =>
@@ -110,11 +119,25 @@ export function useMessagesViewState({
   );
 
   const updateAutoScroll = useCallback(() => {
-    if (!containerRef.current) {
+    const container = containerRef.current;
+    if (!container) {
       return;
     }
-    handleHistoryScroll(containerRef.current);
-    const nearBottom = isNearBottom(containerRef.current);
+    const pendingIntent = pendingContentScrollIntentRef.current;
+    const nearBottom = isNearBottom(container);
+    if (pendingIntent === true && !nearBottom) {
+      autoScrollRef.current = true;
+      setShowScrollToLatest(false);
+      return;
+    }
+    if (pendingIntent !== null) {
+      pendingContentScrollIntentRef.current = null;
+      if (pendingContentScrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(pendingContentScrollFrameRef.current);
+        pendingContentScrollFrameRef.current = null;
+      }
+    }
+    handleHistoryScroll(container);
     autoScrollRef.current = nearBottom;
     setShowScrollToLatest(!nearBottom);
   }, [handleHistoryScroll, isNearBottom]);
@@ -162,18 +185,35 @@ export function useMessagesViewState({
 
   useLayoutEffect(() => {
     const container = containerRef.current;
+    const pendingIntent = pendingContentScrollIntentRef.current;
+    if (pendingIntent !== null) {
+      autoScrollRef.current = pendingIntent;
+    }
     const shouldScroll =
-      autoScrollRef.current || (container ? isNearBottom(container) : true);
-    if (!shouldScroll) {
-      return;
+      pendingIntent ??
+      (autoScrollRef.current ||
+        (container ? isNearBottom(container) : true));
+    if (shouldScroll) {
+      if (container) {
+        container.scrollTop = container.scrollHeight;
+        setShowScrollToLatest(false);
+      } else {
+        bottomRef.current?.scrollIntoView({ block: "end" });
+        setShowScrollToLatest(false);
+      }
     }
-    if (container) {
-      container.scrollTop = container.scrollHeight;
-      setShowScrollToLatest(false);
-      return;
+    if (pendingIntent !== null) {
+      if (pendingContentScrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(pendingContentScrollFrameRef.current);
+      }
+      const frameId = window.requestAnimationFrame(() => {
+        if (pendingContentScrollFrameRef.current === frameId) {
+          pendingContentScrollIntentRef.current = null;
+          pendingContentScrollFrameRef.current = null;
+        }
+      });
+      pendingContentScrollFrameRef.current = frameId;
     }
-    bottomRef.current?.scrollIntoView({ block: "end" });
-    setShowScrollToLatest(false);
   }, [scrollKey, isThinking, isNearBottom, threadId]);
 
   useLayoutEffect(() => {
@@ -212,6 +252,10 @@ export function useMessagesViewState({
     return () => {
       if (copyTimeoutRef.current) {
         window.clearTimeout(copyTimeoutRef.current);
+      }
+      if (pendingContentScrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(pendingContentScrollFrameRef.current);
+        pendingContentScrollFrameRef.current = null;
       }
     };
   }, []);

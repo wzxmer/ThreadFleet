@@ -5251,6 +5251,79 @@ describe("Messages", () => {
     expect(scrollNode.scrollTop).toBe(900);
   });
 
+  it("keeps the latest scroll intent when message replacement emits a transient top scroll", () => {
+    const requestAnimationFrameSpy = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation(() => 1);
+    const initialItems: ConversationItem[] = [
+      {
+        id: "msg-initial",
+        kind: "message",
+        role: "assistant",
+        text: "Initial",
+      },
+    ];
+    const { container, rerender } = render(
+      <Messages
+        items={initialItems}
+        threadId="thread-scroll-intent"
+        workspaceId="ws-1"
+        isThinking={false}
+        openTargets={[]}
+        selectedOpenAppId=""
+      />,
+    );
+    const scrollNode = container.querySelector(
+      ".messages.messages-full",
+    ) as HTMLDivElement;
+    let scrollHeight = 600;
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: {
+        configurable: true,
+        get: () => scrollHeight,
+      },
+      scrollTop: { configurable: true, writable: true, value: 400 },
+    });
+    fireEvent.scroll(scrollNode);
+
+    const nextItems: ConversationItem[] = [
+      ...initialItems,
+      {
+        id: "msg-next",
+        kind: "message",
+        role: "user",
+        text: "Send this",
+      },
+    ];
+    scrollHeight = 900;
+    rerender(
+      <Messages
+        items={nextItems}
+        threadId="thread-scroll-intent"
+        workspaceId="ws-1"
+        isThinking={false}
+        openTargets={[]}
+        selectedOpenAppId=""
+      />,
+    );
+
+    scrollNode.scrollTop = 0;
+    fireEvent.scroll(scrollNode);
+    rerender(
+      <Messages
+        items={nextItems}
+        threadId="thread-scroll-intent"
+        workspaceId="ws-1"
+        isThinking
+        openTargets={[]}
+        selectedOpenAppId=""
+      />,
+    );
+
+    expect(scrollNode.scrollTop).toBe(900);
+    requestAnimationFrameSpy.mockRestore();
+  });
   it("pins to the latest batch when history arrives after a thread switch", () => {
     const onUpdateConversationStyle = vi.fn();
     const { container, rerender } = render(
