@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkCodexCliUpdate, runCodexUpdate } from "@services/tauri";
 import { useCodexCliUpdater } from "./useCodexCliUpdater";
 
@@ -22,24 +22,22 @@ const availableCheck = {
   currentVersion: "0.144.0",
   latestVersion: "0.147.0",
   platform: "windows-x86_64",
-  source: "tencent",
-  package: {
-    version: "0.147.0",
-    fileName: "codex-cli-0.147.0-windows-x86_64.zip",
-    urls: ["https://download.example/codex.zip"],
-    size: 100,
-    sha256: "a".repeat(64),
-  },
+  source: "npm",
+  package: null,
   reasonCode: null,
 };
 
 describe("useCodexCliUpdater", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     checkMock.mockResolvedValue(availableCheck);
     updateMock.mockResolvedValue({
       ok: true,
-      method: "npm",
+      method: "codex",
       package: "@openai/codex",
       beforeVersion: "0.144.0",
       afterVersion: "0.147.0",
@@ -47,6 +45,26 @@ describe("useCodexCliUpdater", () => {
       output: "updated",
       details: null,
     });
+  });
+
+  it("automatically updates the current CLI when startup finds a newer version", async () => {
+    vi.stubEnv("DEV", false);
+    const onUpdated = vi.fn();
+    const { result } = renderHook(() =>
+      useCodexCliUpdater({
+        autoCheckOnMount: true,
+        autoInstallOnMount: true,
+        codexBin: "codex",
+        onUpdated,
+      }),
+    );
+
+    await waitFor(() => expect(result.current.state.stage).toBe("updated"));
+
+    expect(checkMock).toHaveBeenCalledWith("codex");
+    expect(updateMock).toHaveBeenCalledWith("codex", null);
+    expect(onUpdated).toHaveBeenCalledWith("0.147.0");
+    expect(result.current.promptOpen).toBe(false);
   });
 
   it("checks and prompts without installing", async () => {
@@ -67,7 +85,7 @@ describe("useCodexCliUpdater", () => {
     expect(updateMock).not.toHaveBeenCalled();
   });
 
-  it("updates the existing installation only after confirmation", async () => {
+  it("updates the current npm installation in place", async () => {
     const onUpdated = vi.fn();
     const { result } = renderHook(() =>
       useCodexCliUpdater({
@@ -76,16 +94,15 @@ describe("useCodexCliUpdater", () => {
         onUpdated,
       }),
     );
-    await act(async () => {
-      await result.current.checkForUpdates();
-    });
 
     await act(async () => {
+      await result.current.checkForUpdates();
       await result.current.startInstall();
     });
 
     expect(updateMock).toHaveBeenCalledWith("codex", null);
     expect(onUpdated).toHaveBeenCalledWith("0.147.0");
+    expect(result.current.state.update?.method).toBe("codex");
     expect(result.current.state.stage).toBe("updated");
   });
 
@@ -93,7 +110,7 @@ describe("useCodexCliUpdater", () => {
     let resolveInstall:
       | ((value: {
           ok: boolean;
-          method: "npm";
+          method: "codex";
           package: string;
           beforeVersion: string;
           afterVersion: string;
@@ -127,12 +144,10 @@ describe("useCodexCliUpdater", () => {
     await waitFor(() => expect(result.current.state.stage).toBe("installing"));
     expect(result.current.promptOpen).toBe(true);
 
-    expect(result.current.state.stage).toBe("installing");
-
     act(() => {
       resolveInstall?.({
         ok: true,
-        method: "npm",
+        method: "codex",
         package: "@openai/codex",
         beforeVersion: "0.144.0",
         afterVersion: "0.147.0",

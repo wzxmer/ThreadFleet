@@ -1446,7 +1446,7 @@ describe("SettingsView Codex section", () => {
     });
 
     fireEvent.click(
-      screen.getByRole("button", { name: "启动时检查 Codex CLI 更新" }),
+      screen.getByRole("button", { name: "启动时检查并更新 Codex CLI" }),
     );
 
     await waitFor(() => {

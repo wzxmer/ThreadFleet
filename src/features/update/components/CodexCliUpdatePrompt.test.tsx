@@ -10,21 +10,15 @@ const check = {
   currentVersion: "0.144.0",
   latestVersion: "0.147.0",
   platform: "windows-x86_64",
-  source: "tencent",
-  package: {
-    version: "0.147.0",
-    fileName: "codex.zip",
-    urls: ["https://download.example/codex.zip"],
-    size: 1024,
-    sha256: "a".repeat(64),
-  },
+  source: "npm",
+  package: null,
   reasonCode: null,
 };
 
 describe("CodexCliUpdatePrompt", () => {
   afterEach(cleanup);
 
-  it("requires explicit confirmation for a local in-place update", () => {
+  it("offers a retry action for a local in-place update", () => {
     const onConfirm = vi.fn();
     render(
       <I18nProvider preference="zh">
@@ -38,8 +32,8 @@ describe("CodexCliUpdatePrompt", () => {
         />
       </I18nProvider>,
     );
-    expect(screen.getByText("通过当前 Codex CLI 的 npm 或 Homebrew 安装来源原地更新，不创建应用副本。")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "确认更新" }));
+    expect(screen.getByText("启动时调用当前 Codex CLI 的检查逻辑；发现新版后执行 codex update 原地更新，不创建应用副本。")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "立即更新" }));
     expect(onConfirm).toHaveBeenCalledTimes(1);
   });
 
@@ -56,7 +50,7 @@ describe("CodexCliUpdatePrompt", () => {
         />
       </I18nProvider>,
     );
-    expect(screen.queryByRole("button", { name: "确认更新" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "立即更新" })).toBeNull();
     expect(screen.getByText(/远程执行主机/)).toBeTruthy();
   });
 

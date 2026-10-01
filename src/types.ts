@@ -1062,13 +1062,6 @@ export type InstalledManagedCodex = {
   version: string;
 };
 
-export type CodexCliManagedPackage = {
-  version: string;
-  fileName: string;
-  urls: string[];
-  size: number;
-  sha256: string;
-};
 
 export type CodexCliUpdateCheckResult = {
   status: "available" | "upToDate" | "notInstalled" | "unsupported";
@@ -1076,8 +1069,8 @@ export type CodexCliUpdateCheckResult = {
   currentVersion: string | null;
   latestVersion: string | null;
   platform: string;
-  source: "tencent" | "aliyun" | "github" | string | null;
-  package: CodexCliManagedPackage | null;
+  source: "npm" | "brew_formula" | "brew_cask" | string | null;
+  package: null;
   reasonCode: string | null;
 };
 
@@ -1110,7 +1103,12 @@ export type CodexSyncDiagnostics = {
   latestSessionModifiedMs: number | null;
 };
 
-export type CodexUpdateMethod = "brew_formula" | "brew_cask" | "npm" | "unknown";
+export type CodexUpdateMethod =
+  | "codex"
+  | "brew_formula"
+  | "brew_cask"
+  | "npm"
+  | "unknown";
 
 export type CodexUpdateResult = {
   ok: boolean;

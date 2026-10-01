@@ -22,7 +22,7 @@ export function CodexCliUpdatePrompt({
   onConfirm,
 }: CodexCliUpdatePromptProps) {
   const { t } = useI18n();
-  if (!open || check?.status !== "available" || !check.package) {
+  if (!open || check?.status !== "available") {
     return null;
   }
   return (
@@ -47,7 +47,7 @@ export function CodexCliUpdatePrompt({
         </div>
         <div>
           <dt>{t("codexUpdate.targetVersion")}</dt>
-          <dd><code>{check.latestVersion ?? check.package.version}</code></dd>
+          <dd><code>{check.latestVersion ?? "-"}</code></dd>
         </div>
       </dl>
       {error && <div className="ds-modal-error">{error}</div>}

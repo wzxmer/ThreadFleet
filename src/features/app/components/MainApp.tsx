@@ -146,10 +146,6 @@ const SettingsView = lazy(() =>
   })),
 );
 
-function isManagedCodexPath(path: string | null | undefined) {
-  return Boolean(path?.replace(/\\/g, "/").toLowerCase().includes("/managed-codex/"));
-}
-
 function resolveWorkspaceIdForLocalCodexPath(
   path: string,
   workspaces: WorkspaceInfo[],
@@ -1158,26 +1154,14 @@ export default function MainApp() {
       appSettings.automaticWindowsUiUpdateChecksEnabled,
     onDebug: addDebugEntry,
   });
-  const handleCodexCliUpdaterUpdated = useCallback(
-    async () => {
-      const currentPath = appSettingsRef.current.codexBin;
-      if (!isManagedCodexPath(currentPath)) {
-        return;
-      }
-      const nextSettings = { ...appSettingsRef.current, codexBin: null };
-      await queueSaveSettings(nextSettings);
-      setAppSettings((current) => ({ ...current, codexBin: null }));
-    },
-    [queueSaveSettings, setAppSettings],
-  );
-  const codexCliUpdaterEnabled = updaterEnabled;
+  const codexCliUpdaterEnabled = !isMobileRuntime;
   const codexCliUpdater = useCodexCliUpdater({
     enabled: codexCliUpdaterEnabled,
     installEnabled: appSettings.backendMode === "local",
     autoCheckOnMount:
       !appSettingsLoading && appSettings.automaticCodexCliUpdateChecksEnabled,
+    autoInstallOnMount: true,
     codexBin: appSettings.codexBin,
-    onUpdated: handleCodexCliUpdaterUpdated,
     onDebug: addDebugEntry,
   });
   const gitState = useMainAppGitState({

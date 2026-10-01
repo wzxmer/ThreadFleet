@@ -1,20 +1,17 @@
 use semver::Version;
-use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use serde::Serialize;
+use serde_json::Value;
 #[cfg(target_os = "macos")]
 use std::process::Command;
+use std::process::Stdio;
 use std::time::Duration;
 use tokio::sync::Mutex;
+use tokio::time::timeout;
 
-use crate::backend::app_server::check_codex_installation;
+use crate::backend::app_server::{build_codex_command_with_bin, check_codex_installation};
 use crate::types::AppSettings;
 
-const DEFAULT_MANIFEST_URL: &str =
-    "https://github.com/wzxmer/ThreadFleet/releases/latest/download/codex-cli-latest.json";
-const MANIFEST_RESPONSE_MAX_BYTES: usize = 1024 * 1024;
-const TENCENT_MANIFEST_URL: Option<&str> =
-    option_env!("VITE_TENCENT_CODEX_CLI_MANIFEST_URL");
-const ALIYUN_MANIFEST_URL: Option<&str> = option_env!("VITE_ALIYUN_CODEX_CLI_MANIFEST_URL");
+const CODEX_DOCTOR_TIMEOUT: Duration = Duration::from_secs(45);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -27,16 +24,6 @@ pub(crate) enum CodexCliUpdateCheckStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct ManagedCodexPackage {
-    pub(crate) version: String,
-    pub(crate) file_name: String,
-    pub(crate) urls: Vec<String>,
-    pub(crate) size: u64,
-    pub(crate) sha256: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub(crate) struct CodexCliUpdateCheckResult {
     pub(crate) status: CodexCliUpdateCheckStatus,
     pub(crate) installed: bool,
@@ -44,30 +31,108 @@ pub(crate) struct CodexCliUpdateCheckResult {
     pub(crate) latest_version: Option<String>,
     pub(crate) platform: String,
     pub(crate) source: Option<String>,
-    pub(crate) package: Option<ManagedCodexPackage>,
+    pub(crate) package: Option<()>,
     pub(crate) reason_code: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-struct ManagedCodexManifest {
-    version: Option<String>,
-    packages: Option<std::collections::HashMap<String, ManagedCodexManifestPackage>>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ManagedCodexManifestPackage {
-    file_name: Option<String>,
-    urls: Option<Vec<String>>,
-    size: Option<u64>,
-    sha256: Option<String>,
+#[derive(Debug)]
+struct CommandOutput {
+    success: bool,
+    stdout: String,
+    stderr: String,
 }
 
 fn normalize_codex_version(raw: &str) -> Result<Version, String> {
     raw.split_whitespace()
         .rev()
-        .find_map(|token| Version::parse(token.trim_start_matches(['v', 'V'])).ok())
+        .find_map(|token| Version::parse(token.trim_matches(['"', '\'', 'v', 'V'])).ok())
         .ok_or_else(|| format!("Unable to parse Codex CLI version from `{}`.", raw.trim()))
+}
+
+fn command_output_details(output: &CommandOutput) -> String {
+    let stdout = output.stdout.trim();
+    let stderr = output.stderr.trim();
+    match (stdout.is_empty(), stderr.is_empty()) {
+        (true, true) => "no output".to_string(),
+        (false, true) => stdout.to_string(),
+        (true, false) => stderr.to_string(),
+        (false, false) => format!("{stdout}\n{stderr}"),
+    }
+}
+
+async fn run_codex_command(
+    codex_bin: Option<String>,
+    args: Vec<String>,
+    timeout_duration: Duration,
+) -> Result<CommandOutput, String> {
+    let mut command = build_codex_command_with_bin(codex_bin, None, args)?;
+    command.stdout(Stdio::piped());
+    command.stderr(Stdio::piped());
+
+    let output = match timeout(timeout_duration, command.output()).await {
+        Ok(result) => result.map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                "Codex CLI was not found on PATH.".to_string()
+            } else {
+                format!("Failed to run Codex CLI: {error}")
+            }
+        })?,
+        Err(_) => return Err("Timed out while running Codex CLI.".to_string()),
+    };
+
+    Ok(CommandOutput {
+        success: output.status.success(),
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+    })
+}
+
+fn doctor_update_details(report: &Value) -> Option<&serde_json::Map<String, Value>> {
+    report
+        .get("checks")
+        .and_then(Value::as_object)
+        .and_then(|checks| checks.get("updates.status"))
+        .and_then(|check| check.get("details"))
+        .and_then(Value::as_object)
+}
+
+fn doctor_detail<'a>(details: &'a serde_json::Map<String, Value>, key: &str) -> Option<&'a str> {
+    details.get(key).and_then(Value::as_str)
+}
+
+fn update_source_from_action(action: &str) -> Option<&'static str> {
+    let action = action.trim().to_ascii_lowercase();
+    if action.starts_with("npm ") {
+        return Some("npm");
+    }
+    if action.starts_with("brew upgrade --cask") {
+        return Some("brew_cask");
+    }
+    if action.starts_with("brew upgrade") {
+        return Some("brew_formula");
+    }
+    if action.starts_with("installer ") || action == "standalone installer" {
+        return Some("standalone");
+    }
+    None
+}
+
+fn unsupported_result(
+    platform: String,
+    current: Version,
+    reason_code: &str,
+    source: Option<&str>,
+) -> CodexCliUpdateCheckResult {
+    CodexCliUpdateCheckResult {
+        status: CodexCliUpdateCheckStatus::Unsupported,
+        installed: true,
+        current_version: Some(current.to_string()),
+        latest_version: None,
+        platform,
+        source: source.map(str::to_string),
+        package: None,
+        reason_code: Some(reason_code.to_string()),
+    }
 }
 
 pub(crate) fn resolve_managed_codex_architecture(
@@ -86,9 +151,7 @@ pub(crate) fn resolve_managed_codex_architecture(
         Some(false) if matches!(process_architecture, "x86_64" | "amd64" | "x64") => {
             "x86_64".to_string()
         }
-        None if matches!(process_architecture, "x86_64" | "amd64" | "x64") => {
-            "x86_64".to_string()
-        }
+        None if matches!(process_architecture, "x86_64" | "amd64" | "x64") => "x86_64".to_string(),
         _ => "unknown".to_string(),
     }
 }
@@ -123,130 +186,6 @@ pub(crate) fn managed_codex_platform() -> String {
     format!("{}-{architecture}", std::env::consts::OS)
 }
 
-fn manifest_routes_from(
-    tencent_url: Option<&str>,
-    aliyun_url: Option<&str>,
-) -> Vec<(String, String)> {
-    let mut seen = HashSet::new();
-    [
-        ("tencent", tencent_url),
-        ("aliyun", aliyun_url),
-        ("github", Some(DEFAULT_MANIFEST_URL)),
-    ]
-    .into_iter()
-    .filter_map(|(source, url)| {
-        let url = url?.trim();
-        if !url.starts_with("https://") || !seen.insert(url.to_string()) {
-            return None;
-        }
-        Some((source.to_string(), url.to_string()))
-    })
-    .collect()
-}
-
-fn manifest_routes() -> Vec<(String, String)> {
-    manifest_routes_from(TENCENT_MANIFEST_URL, ALIYUN_MANIFEST_URL)
-}
-
-fn parse_manifest_package(
-    manifest: ManagedCodexManifest,
-    platform: &str,
-) -> Result<ManagedCodexPackage, String> {
-    let version = manifest
-        .version
-        .map(|value| value.trim().trim_start_matches(['v', 'V']).to_string())
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| "Managed Codex manifest version is missing.".to_string())?;
-    Version::parse(&version)
-        .map_err(|error| format!("Invalid managed Codex version `{version}`: {error}"))?;
-    let package = manifest
-        .packages
-        .and_then(|packages| packages.into_iter().find(|(key, _)| key == platform))
-        .map(|(_, package)| package)
-        .ok_or_else(|| format!("Managed Codex package is unavailable for `{platform}`."))?;
-    let file_name = package
-        .file_name
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| "Managed Codex package file name is missing.".to_string())?;
-    if !file_name.to_ascii_lowercase().ends_with(".zip") {
-        return Err("Managed Codex package must be a ZIP archive.".to_string());
-    }
-    let urls = package
-        .urls
-        .unwrap_or_default()
-        .into_iter()
-        .map(|value| value.trim().to_string())
-        .filter(|value| value.starts_with("https://"))
-        .collect::<Vec<_>>();
-    if urls.is_empty() {
-        return Err("Managed Codex package has no HTTPS download route.".to_string());
-    }
-    let size = package
-        .size
-        .filter(|size| *size > 0)
-        .ok_or_else(|| "Managed Codex package size is invalid.".to_string())?;
-    let sha256 = package
-        .sha256
-        .map(|value| value.trim().to_ascii_lowercase())
-        .filter(|value| value.len() == 64 && value.chars().all(|ch| ch.is_ascii_hexdigit()))
-        .ok_or_else(|| "Managed Codex package checksum is invalid.".to_string())?;
-
-    Ok(ManagedCodexPackage {
-        version,
-        file_name,
-        urls,
-        size,
-        sha256,
-    })
-}
-
-async fn fetch_managed_codex_package(
-    platform: &str,
-) -> Result<(ManagedCodexPackage, String), String> {
-    let client = reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(5))
-        .timeout(Duration::from_secs(10))
-        .build()
-        .map_err(|error| format!("Failed to create Codex update client: {error}"))?;
-    let mut errors = Vec::new();
-    for (source, url) in manifest_routes() {
-        let result = async {
-            let response = client
-                .get(&url)
-                .header(reqwest::header::ACCEPT, "application/json")
-                .send()
-                .await
-                .map_err(|error| error.to_string())?;
-            if !response.status().is_success() {
-                return Err(format!("HTTP {}", response.status()));
-            }
-            if response
-                .content_length()
-                .is_some_and(|size| size > MANIFEST_RESPONSE_MAX_BYTES as u64)
-            {
-                return Err("response is too large".to_string());
-            }
-            let bytes = response.bytes().await.map_err(|error| error.to_string())?;
-            if bytes.len() > MANIFEST_RESPONSE_MAX_BYTES {
-                return Err("response is too large".to_string());
-            }
-            let manifest = serde_json::from_slice::<ManagedCodexManifest>(&bytes)
-                .map_err(|error| format!("invalid JSON: {error}"))?;
-            parse_manifest_package(manifest, platform)
-        }
-        .await;
-        match result {
-            Ok(package) => return Ok((package, source)),
-            Err(error) => errors.push(format!("{source}: {error}")),
-        }
-    }
-    Err(format!(
-        "All Codex CLI update metadata routes failed: {}",
-        errors.join(" | ")
-    ))
-}
-
 pub(crate) async fn check_codex_cli_update_core(
     app_settings: &Mutex<AppSettings>,
     codex_bin: Option<String>,
@@ -256,7 +195,7 @@ pub(crate) async fn check_codex_cli_update_core(
         .filter(|value| !value.trim().is_empty())
         .or(default_bin);
     let platform = managed_codex_platform();
-    let current_raw = match check_codex_installation(resolved_bin).await {
+    let current_raw = match check_codex_installation(resolved_bin.clone()).await {
         Ok(Some(version)) => version,
         Ok(None) => {
             return Ok(CodexCliUpdateCheckResult {
@@ -285,34 +224,59 @@ pub(crate) async fn check_codex_cli_update_core(
         Err(error) => return Err(error),
     };
     let current = normalize_codex_version(&current_raw)?;
-    if platform.ends_with("-unknown") {
+
+    let doctor = run_codex_command(
+        resolved_bin,
+        vec!["doctor".to_string(), "--json".to_string()],
+        CODEX_DOCTOR_TIMEOUT,
+    )
+    .await?;
+    if !doctor.success {
+        return Err(format!(
+            "Codex CLI update check failed: {}",
+            command_output_details(&doctor)
+        ));
+    }
+    let report = serde_json::from_str::<Value>(&doctor.stdout)
+        .map_err(|error| format!("Codex CLI returned invalid doctor JSON: {error}"))?;
+    let details = doctor_update_details(&report)
+        .ok_or_else(|| "Codex CLI did not return update metadata.".to_string())?;
+    let latest_raw = doctor_detail(details, "latest version")
+        .ok_or_else(|| "Codex CLI did not return a latest version.".to_string())?;
+    let latest = normalize_codex_version(latest_raw)?;
+    let action = doctor_detail(details, "update action").unwrap_or("manual or unknown");
+    let source = update_source_from_action(action);
+
+    if latest <= current {
         return Ok(CodexCliUpdateCheckResult {
-            status: CodexCliUpdateCheckStatus::Unsupported,
+            status: CodexCliUpdateCheckStatus::UpToDate,
             installed: true,
             current_version: Some(current.to_string()),
-            latest_version: None,
+            latest_version: Some(latest.to_string()),
             platform,
-            source: None,
+            source: source.map(str::to_string),
             package: None,
-            reason_code: Some("unsupportedArchitecture".to_string()),
+            reason_code: None,
         });
     }
-    let (package, source) = fetch_managed_codex_package(&platform).await?;
-    let latest = Version::parse(&package.version)
-        .map_err(|error| format!("Invalid managed Codex version: {error}"))?;
-    let status = if latest > current {
-        CodexCliUpdateCheckStatus::Available
-    } else {
-        CodexCliUpdateCheckStatus::UpToDate
+
+    let Some(source) = source else {
+        return Ok(unsupported_result(
+            platform,
+            current,
+            "unsupportedInstallSource",
+            None,
+        ));
     };
+
     Ok(CodexCliUpdateCheckResult {
-        status,
+        status: CodexCliUpdateCheckStatus::Available,
         installed: true,
         current_version: Some(current.to_string()),
         latest_version: Some(latest.to_string()),
         platform,
-        source: Some(source),
-        package: Some(package),
+        source: Some(source.to_string()),
+        package: None,
         reason_code: None,
     })
 }
@@ -320,14 +284,16 @@ pub(crate) async fn check_codex_cli_update_core(
 #[cfg(test)]
 mod tests {
     use super::{
-        manifest_routes_from, normalize_codex_version, parse_manifest_package,
-        resolve_managed_codex_architecture, ManagedCodexManifest,
+        doctor_update_details, normalize_codex_version, resolve_managed_codex_architecture,
+        update_source_from_action,
     };
 
     #[test]
     fn parses_codex_cli_version_output() {
         assert_eq!(
-            normalize_codex_version("codex-cli 0.147.0").unwrap().to_string(),
+            normalize_codex_version("codex-cli 0.147.0")
+                .unwrap()
+                .to_string(),
             "0.147.0"
         );
         assert_eq!(
@@ -336,7 +302,54 @@ mod tests {
                 .to_string(),
             "0.148.0-alpha.15"
         );
+        assert_eq!(
+            normalize_codex_version("\"0.149.0\"\n")
+                .unwrap()
+                .to_string(),
+            "0.149.0"
+        );
         assert!(normalize_codex_version("codex unknown").is_err());
+    }
+
+    #[test]
+    fn recognizes_native_update_actions() {
+        assert_eq!(
+            update_source_from_action("npm install -g @openai/codex"),
+            Some("npm")
+        );
+        assert_eq!(
+            update_source_from_action("standalone installer"),
+            Some("standalone")
+        );
+        assert_eq!(
+            update_source_from_action("brew upgrade --cask codex"),
+            Some("brew_cask")
+        );
+        assert_eq!(
+            update_source_from_action("brew upgrade codex"),
+            Some("brew_formula")
+        );
+        assert_eq!(update_source_from_action("manual or unknown"), None);
+    }
+
+    #[test]
+    fn reads_update_metadata_from_doctor_report() {
+        let report = serde_json::json!({
+            "checks": {
+                "updates.status": {
+                    "details": {
+                        "latest version": "0.159.3",
+                        "update action": "npm install -g @openai/codex"
+                    }
+                }
+            }
+        });
+        let details = doctor_update_details(&report).unwrap();
+        assert_eq!(details.get("latest version").unwrap(), "0.159.3");
+        assert_eq!(
+            details.get("update action").unwrap(),
+            "npm install -g @openai/codex"
+        );
     }
 
     #[test]
@@ -357,62 +370,5 @@ mod tests {
             resolve_managed_codex_architecture("macos", "riscv64", None),
             "unknown"
         );
-    }
-
-    #[test]
-    fn accepts_only_complete_platform_packages() {
-        let manifest = serde_json::from_value::<ManagedCodexManifest>(serde_json::json!({
-            "version": "0.147.0",
-            "packages": {
-                "windows-x86_64": {
-                    "fileName": "codex-cli-0.147.0-windows-x86_64.zip",
-                    "urls": ["https://download.example/codex.zip"],
-                    "size": 42,
-                    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-                }
-            }
-        }))
-        .unwrap();
-        let package = parse_manifest_package(manifest, "windows-x86_64").unwrap();
-        assert_eq!(package.version, "0.147.0");
-        assert_eq!(package.size, 42);
-    }
-
-    #[test]
-    fn rejects_missing_platform_package() {
-        let manifest = serde_json::from_value::<ManagedCodexManifest>(serde_json::json!({
-            "version": "0.147.0",
-            "packages": {}
-        }))
-        .unwrap();
-        assert!(parse_manifest_package(manifest, "macos-aarch64")
-            .unwrap_err()
-            .contains("unavailable"));
-    }
-
-    #[test]
-    fn prefers_domestic_routes_and_deduplicates_before_github() {
-        let routes = manifest_routes_from(
-            Some("https://cos.example/codex-cli-latest.json"),
-            Some("https://oss.example/codex-cli-latest.json"),
-        );
-        assert_eq!(routes[0].0, "tencent");
-        assert_eq!(routes[1].0, "aliyun");
-        assert_eq!(routes[2].0, "github");
-
-        let duplicate = manifest_routes_from(
-            Some("https://mirror.example/codex-cli-latest.json"),
-            Some("https://mirror.example/codex-cli-latest.json"),
-        );
-        assert_eq!(duplicate.len(), 2);
-        assert_eq!(duplicate[0].0, "tencent");
-        assert_eq!(duplicate[1].0, "github");
-
-        let insecure = manifest_routes_from(
-            Some("http://cos.example/codex-cli-latest.json"),
-            None,
-        );
-        assert_eq!(insecure.len(), 1);
-        assert_eq!(insecure[0].0, "github");
     }
 }
