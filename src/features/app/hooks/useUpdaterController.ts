@@ -15,6 +15,7 @@ import type { DebugEntry } from "../../../types";
 type Params = {
   enabled?: boolean;
   autoCheckOnMount?: boolean;
+  onCheckCodexCliUpdates?: () => void | Promise<unknown>;
   experimentalWindowsInstallerMigrationEnabled?: boolean;
   notificationSoundsEnabled: boolean;
   systemNotificationsEnabled: boolean;
@@ -34,6 +35,7 @@ type Params = {
 export function useUpdaterController({
   enabled = true,
   autoCheckOnMount = true,
+  onCheckCodexCliUpdates,
   experimentalWindowsInstallerMigrationEnabled = false,
   notificationSoundsEnabled,
   systemNotificationsEnabled,
@@ -66,6 +68,7 @@ export function useUpdaterController({
   const handledAvailableVersionRef = useRef<string | null>(null);
 
   const checkForUpdatesWithNotice = useCallback(async () => {
+    void onCheckCodexCliUpdates?.();
     const result = await checkForUpdates();
     if (result?.stage !== "upToDate" || !systemNotificationsEnabled) {
       return result;
@@ -86,6 +89,7 @@ export function useUpdaterController({
     return result;
   }, [
     checkForUpdates,
+    onCheckCodexCliUpdates,
     onDebug,
     systemNotificationsEnabled,
     updateNotificationTitle,

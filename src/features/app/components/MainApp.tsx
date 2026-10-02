@@ -1116,6 +1116,16 @@ export default function MainApp() {
       refreshThread,
       reconnectLive,
     });
+  const codexCliUpdaterEnabled = !isMobileRuntime;
+  const codexCliUpdater = useCodexCliUpdater({
+    enabled: codexCliUpdaterEnabled,
+    installEnabled: appSettings.backendMode === "local",
+    autoCheckOnMount:
+      !appSettingsLoading && appSettings.automaticCodexCliUpdateChecksEnabled,
+    autoInstallOnMount: true,
+    codexBin: appSettings.codexBin,
+    onDebug: addDebugEntry,
+  });
   const {
     updaterState,
     startUpdate,
@@ -1129,6 +1139,7 @@ export default function MainApp() {
     enabled: updaterEnabled,
     autoCheckOnMount:
       !appSettingsLoading && appSettings.automaticAppUpdateChecksEnabled,
+    onCheckCodexCliUpdates: codexCliUpdater.checkForUpdates,
     experimentalWindowsInstallerMigrationEnabled:
       appSettings.experimentalWindowsInstallerMigrationEnabled,
     notificationSoundsEnabled: appSettings.notificationSoundsEnabled,
@@ -1152,16 +1163,6 @@ export default function MainApp() {
     autoCheckOnMount:
       !appSettingsLoading &&
       appSettings.automaticWindowsUiUpdateChecksEnabled,
-    onDebug: addDebugEntry,
-  });
-  const codexCliUpdaterEnabled = !isMobileRuntime;
-  const codexCliUpdater = useCodexCliUpdater({
-    enabled: codexCliUpdaterEnabled,
-    installEnabled: appSettings.backendMode === "local",
-    autoCheckOnMount:
-      !appSettingsLoading && appSettings.automaticCodexCliUpdateChecksEnabled,
-    autoInstallOnMount: true,
-    codexBin: appSettings.codexBin,
     onDebug: addDebugEntry,
   });
   const gitState = useMainAppGitState({
