@@ -110,6 +110,7 @@ export default defineConfig(async () => ({
         "**/src-tauri/**",
         "**/.codex-worktrees/**",
         "**/.codex-monitor/**",
+        "**/.agents/**",
       ],
     },
   },
