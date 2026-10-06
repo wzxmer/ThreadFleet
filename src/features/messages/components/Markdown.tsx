@@ -896,6 +896,7 @@ export function Markdown({
             }
             if (
               isFileLinkUrl(url) ||
+              url.startsWith("thread://") ||
               url.startsWith("http://") ||
               url.startsWith("https://") ||
               url.startsWith("mailto:") ||

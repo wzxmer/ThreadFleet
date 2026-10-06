@@ -739,6 +739,40 @@ describe("Markdown file-like href behavior", () => {
     expect(screen.getByText("Updated reply")).toBeTruthy();
   });
 
+  it("preserves a thread link and uses the latest thread opener", () => {
+    const firstOpen = vi.fn();
+    const nextOpen = vi.fn();
+    const value = "Open [conversation](thread://thread-2)";
+    const { container, rerender } = render(
+      <Markdown value={value} className="markdown" onOpenThreadLink={firstOpen} />,
+    );
+    const link = container.querySelector("a");
+
+    expect(link?.getAttribute("href")).toBe("thread://thread-2");
+    rerender(
+      <Markdown value={value} className="markdown" onOpenThreadLink={nextOpen} />,
+    );
+    expect(container.querySelector("a")).toBe(link);
+    const event = createEvent.click(link as HTMLAnchorElement, {
+      bubbles: true,
+      cancelable: true,
+    });
+    fireEvent(link as HTMLAnchorElement, event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(nextOpen).toHaveBeenCalledWith("thread-2");
+    expect(firstOpen).not.toHaveBeenCalled();
+  });
+
+  it.each(["javascript:alert(1)", "data:text/html,preview"])(
+    "keeps unsupported link protocols blocked: %s",
+    (href) => {
+      const { container } = render(
+        <Markdown value={`[preview](${href})`} className="markdown" />,
+      );
+      expect(container.querySelector("a")?.getAttribute("href")).toBe("");
+    },
+  );
+
   it("preserves a focused inline file reference and uses the latest opener", () => {
     const firstOpen = vi.fn();
     const nextOpen = vi.fn();
