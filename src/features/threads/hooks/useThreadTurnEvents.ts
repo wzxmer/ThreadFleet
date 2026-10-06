@@ -730,6 +730,15 @@ export function useThreadTurnEvents({
       payload: { explanation: unknown; plan: unknown },
     ) => {
       dispatch({ type: "ensureThread", workspaceId, threadId });
+      const isTerminalTurn = hasRecentTurnId(
+        terminalPlanTurnIdsByThreadRef.current,
+        threadId,
+        turnId,
+      );
+      const currentPlan = planByThreadRef.current[threadId];
+      if (isTerminalTurn && currentPlan && currentPlan.turnId !== turnId) {
+        return;
+      }
       const normalized = normalizePlanUpdate(
         turnId,
         payload.explanation,
@@ -744,13 +753,7 @@ export function useThreadTurnEvents({
         syncState: "live" as const,
         updatedAt: Date.now(),
       };
-      if (
-        hasRecentTurnId(terminalPlanTurnIdsByThreadRef.current, threadId, turnId)
-      ) {
-        const currentPlan = planByThreadRef.current[threadId];
-        if (currentPlan && currentPlan.turnId !== turnId) {
-          return;
-        }
+      if (isTerminalTurn) {
         if (
           nextPlan.steps.length > 0 &&
           nextPlan.steps.every((step) => step.status === "completed")

@@ -2241,6 +2241,46 @@ describe("useThreads UX integration", () => {
     expect(result.current.planByThread["thread-1"]).toBeNull();
   });
 
+  it.each([
+    { updateTurnId: "turn-1", keepsCurrentPlan: true },
+    { updateTurnId: "turn-2", keepsCurrentPlan: false },
+  ])("handles an empty plan update from $updateTurnId without losing another turn's plan", async ({
+    updateTurnId,
+    keepsCurrentPlan,
+  }) => {
+    const { result } = renderHook(() =>
+      useThreads({
+        activeWorkspace: workspace,
+        onWorkspaceConnected: vi.fn(),
+      }),
+    );
+
+    await act(async () => {
+      handlers?.onTurnStarted?.("ws-1", "thread-1", "turn-1");
+      handlers?.onTurnCompleted?.("ws-1", "thread-1", "turn-1");
+      handlers?.onTurnStarted?.("ws-1", "thread-1", "turn-2");
+      handlers?.onTurnPlanUpdated?.("ws-1", "thread-1", "turn-2", {
+        explanation: "Current turn",
+        plan: [{ step: "Verify current work", status: "in_progress" }],
+      });
+    });
+
+    const currentPlan = result.current.planByThread["thread-1"];
+    expect(currentPlan?.turnId).toBe("turn-2");
+
+    await act(async () => {
+      handlers?.onTurnPlanUpdated?.("ws-1", "thread-1", updateTurnId, {
+        explanation: null,
+        plan: [],
+      });
+    });
+
+    expect(result.current.planByThread["thread-1"]).toEqual(
+      keepsCurrentPlan ? currentPlan : null,
+    );
+    expect(result.current.threadStatusById["thread-1"]?.isProcessing).toBe(true);
+  });
+
   it("reconciles once and marks remaining plan steps stale on turn completion", async () => {
     vi.mocked(readThread).mockResolvedValue({
       result: {
