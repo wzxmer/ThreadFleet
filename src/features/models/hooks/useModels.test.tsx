@@ -113,6 +113,36 @@ describe("useModels", () => {
     expect(result.current.reasoningSupported).toBe(true);
   });
 
+  it.each([
+    { preferredEffort: null, expectedEffort: "high" },
+    { preferredEffort: "xhigh", expectedEffort: "xhigh" },
+  ])("resolves a default-only model's effort to $expectedEffort", async ({
+    preferredEffort,
+    expectedEffort,
+  }) => {
+    vi.mocked(getModelList).mockResolvedValueOnce({
+      result: {
+        data: [{
+          id: "default-only-model",
+          model: "default-only-model",
+          supportedReasoningEfforts: [],
+          defaultReasoningEffort: "high",
+          isDefault: true,
+        }],
+      },
+    });
+    vi.mocked(getConfigModel).mockResolvedValueOnce("default-only-model");
+    const { result } = renderHook(() => useModels({
+      activeWorkspace: workspace,
+      preferredEffort,
+    }));
+
+    await waitFor(() => expect(result.current.selectedModelId).toBe("default-only-model"));
+    expect(result.current.reasoningSupported).toBe(true);
+    expect(result.current.reasoningOptions).toEqual(["high"]);
+    expect(result.current.selectedEffort).toBe(expectedEffort);
+  });
+
   it("keeps the selected reasoning effort when switching models", async () => {
     vi.mocked(getModelList).mockResolvedValueOnce({
       result: {

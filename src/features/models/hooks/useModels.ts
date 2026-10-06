@@ -154,7 +154,8 @@ export function useModels({
         return currentEffort;
       }
       if (supportedEfforts.length === 0) {
-        return normalizeEffortValue(preferredEffort);
+        return normalizeEffortValue(preferredEffort) ??
+          normalizeEffortValue(model.defaultReasoningEffort);
       }
       const preferred = normalizeEffortValue(preferredEffort);
       if (supports(preferred)) {
