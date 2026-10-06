@@ -109,6 +109,20 @@ describe("UpdateToast", () => {
     ).toContain("width: 0%");
   });
 
+  it("localizes backend installer errors in the Chinese update prompt", () => {
+    render(
+      <I18nProvider preference="zh">
+        <UpdateToast
+          state={{ stage: "error", error: "No compatible installer asset found in the latest release." }}
+          onUpdate={vi.fn()}
+          onDismiss={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+    expect(screen.getByText("该版本没有适用于当前系统的安装包。")).toBeTruthy();
+    expect(screen.queryByText(/No compatible installer/)).toBeNull();
+  });
+
   it("renders error state and lets you dismiss or retry", () => {
     const onUpdate = vi.fn();
     const onDismiss = vi.fn();
@@ -122,7 +136,7 @@ describe("UpdateToast", () => {
     );
 
     expect(screen.getByText("Update failed.")).toBeTruthy();
-    expect(screen.getByText("Network error")).toBeTruthy();
+    expect(screen.getByText("Could not reach the update service. Check your network or proxy settings and retry.")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));

@@ -13,6 +13,7 @@ import {
   ToastViewport,
 } from "../../design-system/components/toast/ToastPrimitives";
 import { useI18n } from "@/features/i18n/I18nProvider";
+import { formatUpdateError } from "../utils/updatePresentation";
 import { WindowsInstallerRepairDialog } from "./WindowsInstallerRepairDialog";
 import { WindowsInstallerMigrationDialog } from "./WindowsInstallerMigrationDialog";
 
@@ -211,7 +212,7 @@ export function UpdateToast({
               <ToastError className="update-toast-error">
                 {state.errorCode === "mixedInstaller"
                   ? t("update.mixedInstallerBlocked")
-                  : state.error}
+                  : formatUpdateError(state.error ?? "", t)}
               </ToastError>
             ) : null}
             <ToastActions className="update-toast-actions">

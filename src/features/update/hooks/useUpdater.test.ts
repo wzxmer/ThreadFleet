@@ -142,6 +142,26 @@ describe("useUpdater", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it("recovers from a failed first startup request without publishing a transient error", async () => {
+    vi.stubEnv("DEV", false);
+    fetchMock.mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValue(latestReleaseResponse(__APP_VERSION__));
+    const { result } = renderHook(() => useUpdater({ autoCheckOnMount: true }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(result.current.state.stage).toBe("checking");
+    await waitFor(() => expect(result.current.state.stage).toBe("upToDate"));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("deduplicates concurrent manual update checks", async () => {
+    fetchMock.mockResolvedValue(latestReleaseResponse(__APP_VERSION__));
+    const { result } = renderHook(() => useUpdater({ autoCheckOnMount: false }));
+    await act(async () => { await Promise.all([result.current.checkForUpdates(), result.current.checkForUpdates()]); });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.current.state.stage).toBe("upToDate");
   });
 
   it("sets error state when update check fails", async () => {

@@ -86,6 +86,7 @@ export function useUpdater({
   const migrationDownloadRef = useRef(false);
   const cleanupPromiseRef = useRef<Promise<void> | null>(null);
   const hasAttemptedAutoCheckRef = useRef(false);
+  const checkPromiseRef = useRef<Promise<UpdateState | undefined> | null>(null);
 
   const resetToIdle = useCallback(async () => {
     updateRef.current = null;
@@ -94,7 +95,7 @@ export function useUpdater({
     setState({ stage: "idle" });
   }, []);
 
-  const checkForUpdates = useCallback(async () => {
+  const performCheck = useCallback(async (publishError: boolean) => {
     if (!enabled) {
       return undefined;
     }
@@ -169,10 +170,23 @@ export function useUpdater({
         payload: message,
       });
       const nextState: UpdateState = { stage: "error", error: message };
-      setState(nextState);
+      if (publishError) setState(nextState);
       return nextState;
     }
   }, [enabled, experimentalWindowsInstallerMigrationEnabled, onDebug]);
+
+  const checkForUpdates = useCallback(() => {
+    if (checkPromiseRef.current) return checkPromiseRef.current;
+    if (!enabled || activeDownloadIdRef.current) return Promise.resolve(undefined);
+    const promise = (async () => {
+      const result = await performCheck(false);
+      if (result?.stage !== "error" || result.errorCode) return result;
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 500));
+      return performCheck(true);
+    })().finally(() => { checkPromiseRef.current = null; });
+    checkPromiseRef.current = promise;
+    return promise;
+  }, [enabled, performCheck]);
 
   const startUpdate = useCallback(async () => {
     if (!enabled) {
