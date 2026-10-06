@@ -18,7 +18,7 @@ ThreadFleet 与 OpenAI 及原 CodexMonitor 项目不存在隶属、赞助或官�
 
 ## 下载
 
-ThreadFleet 当前尚未发布安装包；需要体验时请先按下方说明从源码构建。未来正式安装包将放在 [Releases](https://github.com/wzxmer/ThreadFleet/releases) 页面：
+ThreadFleet 安装包可在 [Releases](https://github.com/wzxmer/ThreadFleet/releases) 页面下载；也可以按下方说明从源码构建：
 
 - Windows: `.exe` / `.msi`
 - macOS: `.dmg`
@@ -92,7 +92,7 @@ macOS 版本当前采用完整 ad-hoc 签名，但尚未使用 Apple Developer I
 - 侧栏、右侧面板、计划面板、终端和调试面板尺寸持久化。
 - 通知声音、长任务完成系统通知（窗口聚焦或后台均显示）、更新提示、调试日志复制和清空。
 - 应用更新默认从 GitHub 下载；Windows 优先使用当前用户系统代理或 PAC，随后尝试环境代理和直连；其他平台尝试环境代理后直连。GitHub 下载线路失败后，发布者配置的腾讯 COS、阿里 OSS 镜像按序重试，并校验安装包大小与 SHA-256。
-- Codex CLI 与软件更新使用独立更新链路；正式版启动时调用当前 CLI 自带的检查逻辑检查版本，发现新版后调用 `codex update` 按当前安装来源原地更新，不创建应用内副本。手动检查应用更新时也会检查 CLI；发现新版后显示确认提示。自定义安装和无法由 CLI 自更新的安装不会被静默覆盖。
+- Codex CLI 与软件更新使用独立更新链路。点击“检查更新”会同时检查应用和 CLI，并分别显示结果；本机 CLI 有新版时自动开始更新，无需额外安装或配置。由 ThreadFleet 安装的 CLI 直接检查 OpenAI 官方 CLI Release，下载、校验完整包后自动保存新版路径；新连接使用新版，已有连接在任务空闲后自动切换，正在运行的任务不受影响。其他受支持的安装调用 `codex update` 原地更新，自定义安装不会被静默覆盖。正式版启动时按自动检查开关执行 CLI 更新；首次应用检查遇到短暂失败会自动重试一次。
 - 桌面/平板/手机响应式布局，iOS 走远程后端模式。
 
 ## 环境要求
@@ -134,6 +134,12 @@ npm run lint
 cd src-tauri && cargo check
 ```
 
+Windows PowerShell 下需要限制测试并发时，使用 `npm.cmd` 转发参数：
+
+```powershell
+npm.cmd run test -- --maxWorkers=1 --minWorkers=1
+```
+
 生产构建：
 
 ```bash
@@ -163,7 +169,7 @@ Release 工作流统一使用 `src-tauri/tauri.conf.json` 中的合法 SemVer �
 
 `*_UPDATE_BASE_URL` 是公开下载根地址，`*_UPDATE_MANIFEST_URL` 通常为该根地址下的 `latest.json`。发布流程会生成版本目录、校验值和清单，并仅在对应配置完整时上传。Release 在构建前审计两家镜像配置并写入 Actions Summary；半配置、非 HTTPS 公共地址、只有下载线路但缺少上传凭据，都会直接阻止发布，避免生成无法回退的安装包。
 
-首次未检测到 CLI 时，安装流程仍可从 OpenAI 官方 Codex Release 获取对应平台的完整 package，并按已配置线路下载。已安装 CLI 的启动更新独立于软件 Release：ThreadFleet 调用当前 CLI 的 `doctor --json` 获取官方版本检查结果，发现新版后执行 `codex update`，由 CLI 按 npm、Homebrew 或其他受支持的当前安装来源完成更新；这条更新路径不读取 ThreadFleet 的 GitHub/COS/OSS CLI 打包清单。自定义安装和无法由 CLI 自更新的安装不会被静默覆盖。
+首次未检测到 CLI 时，可在软件内安装对应平台的完整 package。ThreadFleet 管理的 CLI 后续更新独立查询 OpenAI 官方 CLI Release，不依赖 ThreadFleet 的发版或 CLI 打包清单；下载包校验通过且实际版本匹配后，软件自动保存新版路径。下载或校验失败时保持旧版可用。其他安装继续通过当前 CLI 的 `doctor --json` 检查并执行 `codex update`；自定义安装和无法自行更新的安装会显示限制。远程模式只检查远程主机版本，更新需在该主机执行。
 
 Windows 已覆盖本机运行验证。macOS 会按 Apple Silicon、Intel 和 Rosetta 选择托管包，Linux 与远程 daemon 在各自执行主机检查版本；这些非 Windows 路径仍需对应设备的发布后反馈验证，远程模式不会在控制端替远程主机安装。
 
@@ -288,7 +294,7 @@ ThreadFleet is not affiliated with, sponsored by, or endorsed by OpenAI or the o
 
 ## Download
 
-ThreadFleet does not have published installers yet; build it from source using the instructions below. Future official installers will be available on the [Releases](https://github.com/wzxmer/ThreadFleet/releases) page:
+Download ThreadFleet installers from the [Releases](https://github.com/wzxmer/ThreadFleet/releases) page, or build it from source using the instructions below:
 
 - Windows: `.exe` / `.msi`
 - macOS: `.dmg`
