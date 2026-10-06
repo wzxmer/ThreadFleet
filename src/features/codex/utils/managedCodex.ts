@@ -1,10 +1,5 @@
-export type ManagedCodexPackage = {
-  version: string;
-  fileName: string;
-  urls: string[];
-  size: number;
-  sha256: string;
-};
+import type { ManagedCodexPackage } from "@/types";
+export type { ManagedCodexPackage } from "@/types";
 
 type ManagedCodexManifest = {
   version?: string;

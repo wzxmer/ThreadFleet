@@ -99,6 +99,7 @@ pub(crate) async fn source_runtime_for_workspace(
         .get_or_spawn_workspace_session_for_source(
             source,
             &workspace_context,
+            default_codex_bin.clone(),
             move |codex_home: PathBuf| {
                 crate::codex::spawn_workspace_session(
                     entry,
@@ -133,6 +134,7 @@ async fn history_runtime_for_workspace(
             &source,
             &workspace_context,
             SourceRuntimePurpose::History,
+            default_codex_bin.clone(),
             move |codex_home| {
                 crate::codex::spawn_history_workspace_session(
                     entry,
@@ -224,6 +226,7 @@ pub(crate) async fn source_runtime_for_bound_thread(
         .get_or_spawn_workspace_session_for_source_with_status(
             &binding.source,
             &workspace_context,
+            default_codex_bin.clone(),
             move |codex_home| {
                 crate::codex::spawn_workspace_session(
                     workspace_for_spawn,

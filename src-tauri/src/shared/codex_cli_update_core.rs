@@ -1,6 +1,7 @@
 use semver::Version;
 use serde::Serialize;
 use serde_json::Value;
+use std::path::Path;
 #[cfg(target_os = "macos")]
 use std::process::Command;
 use std::process::Stdio;
@@ -9,6 +10,9 @@ use tokio::sync::Mutex;
 use tokio::time::timeout;
 
 use crate::backend::app_server::{build_codex_command_with_bin, check_codex_installation};
+use crate::shared::managed_codex_core::{
+    fetch_managed_codex_package, is_managed_codex_bin, ManagedCodexPackage,
+};
 use crate::types::AppSettings;
 
 const CODEX_DOCTOR_TIMEOUT: Duration = Duration::from_secs(45);
@@ -31,7 +35,7 @@ pub(crate) struct CodexCliUpdateCheckResult {
     pub(crate) latest_version: Option<String>,
     pub(crate) platform: String,
     pub(crate) source: Option<String>,
-    pub(crate) package: Option<()>,
+    pub(crate) package: Option<ManagedCodexPackage>,
     pub(crate) reason_code: Option<String>,
 }
 
@@ -42,7 +46,7 @@ struct CommandOutput {
     stderr: String,
 }
 
-fn normalize_codex_version(raw: &str) -> Result<Version, String> {
+pub(crate) fn normalize_codex_version(raw: &str) -> Result<Version, String> {
     raw.split_whitespace()
         .rev()
         .find_map(|token| Version::parse(token.trim_matches(['"', '\'', 'v', 'V'])).ok())
@@ -189,6 +193,7 @@ pub(crate) fn managed_codex_platform() -> String {
 pub(crate) async fn check_codex_cli_update_core(
     app_settings: &Mutex<AppSettings>,
     codex_bin: Option<String>,
+    managed_root: Option<&Path>,
 ) -> Result<CodexCliUpdateCheckResult, String> {
     let default_bin = app_settings.lock().await.codex_bin.clone();
     let resolved_bin = codex_bin
@@ -225,8 +230,28 @@ pub(crate) async fn check_codex_cli_update_core(
     };
     let current = normalize_codex_version(&current_raw)?;
 
-    let doctor = run_codex_command(
-        resolved_bin,
+    if managed_root.is_some_and(|root| is_managed_codex_bin(resolved_bin.as_deref(), root)) {
+        let package = fetch_managed_codex_package(&platform).await?;
+        let latest = Version::parse(&package.version).map_err(|error| error.to_string())?;
+        let available = latest > current;
+        return Ok(CodexCliUpdateCheckResult {
+            status: if available {
+                CodexCliUpdateCheckStatus::Available
+            } else {
+                CodexCliUpdateCheckStatus::UpToDate
+            },
+            installed: true,
+            current_version: Some(current.to_string()),
+            latest_version: Some(latest.to_string()),
+            platform,
+            source: Some("managed".to_string()),
+            package: available.then_some(package),
+            reason_code: None,
+        });
+    }
+
+    let mut doctor = run_codex_command(
+        resolved_bin.clone(),
         vec!["doctor".to_string(), "--json".to_string()],
         CODEX_DOCTOR_TIMEOUT,
     )
@@ -237,8 +262,27 @@ pub(crate) async fn check_codex_cli_update_core(
             command_output_details(&doctor)
         ));
     }
-    let report = serde_json::from_str::<Value>(&doctor.stdout)
+    let mut report = serde_json::from_str::<Value>(&doctor.stdout)
         .map_err(|error| format!("Codex CLI returned invalid doctor JSON: {error}"))?;
+    if doctor_update_details(&report).is_some_and(|details| {
+        doctor_detail(details, "latest version").is_none()
+            && doctor_detail(details, "latest version probe").is_some()
+    }) {
+        doctor = run_codex_command(
+            resolved_bin,
+            vec!["doctor".to_string(), "--json".to_string()],
+            CODEX_DOCTOR_TIMEOUT,
+        )
+        .await?;
+        if !doctor.success {
+            return Err(format!(
+                "Codex CLI update check failed: {}",
+                command_output_details(&doctor)
+            ));
+        }
+        report = serde_json::from_str::<Value>(&doctor.stdout)
+            .map_err(|error| format!("Codex CLI returned invalid doctor JSON: {error}"))?;
+    }
     let details = doctor_update_details(&report)
         .ok_or_else(|| "Codex CLI did not return update metadata.".to_string())?;
     let latest_raw = doctor_detail(details, "latest version")

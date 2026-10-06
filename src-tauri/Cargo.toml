@@ -46,6 +46,8 @@ shell-words = "1.1"
 toml_edit = "0.20.2"
 sha2 = "0.10"
 zip = "4"
+flate2 = "1"
+tar = "0.4"
 semver = "1"
 
 [target."cfg(not(any(target_os = \"android\", target_os = \"ios\")))".dependencies]

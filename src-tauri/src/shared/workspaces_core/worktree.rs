@@ -221,18 +221,18 @@ where
     };
 
     let _spawn_guard = workspace_session_spawn_lock().lock().await;
-    let existing_session = take_live_shared_session(sessions).await;
+    let (default_bin, codex_args, codex_home) = {
+        let settings = app_settings.lock().await;
+        (
+            settings.codex_bin.clone(),
+            resolve_workspace_codex_args(&entry, Some(&parent_entry), Some(&settings)),
+            resolve_settings_codex_home(&settings),
+        )
+    };
+    let existing_session = take_live_shared_session(sessions, default_bin.as_deref()).await;
     let session = if let Some(existing_session) = existing_session {
         existing_session
     } else {
-        let (default_bin, codex_args, codex_home) = {
-            let settings = app_settings.lock().await;
-            (
-                settings.codex_bin.clone(),
-                resolve_workspace_codex_args(&entry, Some(&parent_entry), Some(&settings)),
-                resolve_settings_codex_home(&settings),
-            )
-        };
         spawn_session(entry.clone(), default_bin, codex_args, codex_home).await?
     };
 

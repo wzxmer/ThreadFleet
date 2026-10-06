@@ -37,6 +37,7 @@ import type {
 } from "../SettingsView";
 import { WindowsUiUpdatePrompt } from "@/features/update/components/WindowsUiUpdatePrompt";
 import { CodexSessionSharingStatus } from "./CodexSessionSharingStatus";
+import { formatCodexUpdateMethod, formatUpdateError } from "@/features/update/utils/updatePresentation";
 
 type SettingsCodexSectionProps = {
   mode?: "codex" | "providers";
@@ -1101,7 +1102,7 @@ export function SettingsCodexSection({
                 : t("settings.codex.updateFailed")}
             </div>
             <div className="settings-doctor-body">
-              <div>{t("settings.codex.method")}: {codexUpdateState.result.method}</div>
+              <div>{t("settings.codex.method")}: {formatCodexUpdateMethod(codexUpdateState.result.method, t)}</div>
               {codexUpdateState.result.package && (
                 <div>{t("settings.codex.package")}: {codexUpdateState.result.package}</div>
               )}
@@ -1111,7 +1112,7 @@ export function SettingsCodexSection({
                   codexUpdateState.result.beforeVersion ??
                   unknownLabel}
               </div>
-              {codexUpdateState.result.details && <div>{codexUpdateState.result.details}</div>}
+              {codexUpdateState.result.details && <div>{formatUpdateError(codexUpdateState.result.details, t)}</div>}
               {codexUpdateState.result.output && (
                 <details>
                   <summary>{t("settings.codex.output")}</summary>
@@ -1958,7 +1959,7 @@ export function SettingsCodexSection({
                                  : codexCliUpdater.state.stage === "updated"
                                    ? `${t("settings.codex.updated")} ${codexCliUpdater.state.installedVersion ?? ""}`
                                    : codexCliUpdater.state.stage === "error"
-                                     ? `${t("settings.codex.codexCliUpdateFailed")}: ${codexCliUpdater.state.error ?? unknownLabel}`
+                                     ? `${t("settings.codex.codexCliUpdateFailed")}: ${formatUpdateError(codexCliUpdater.state.error ?? unknownLabel, t)}`
                                      : t("settings.codex.codexCliUpdateIdle")}
                 </div>
               </div>
@@ -2064,7 +2065,7 @@ export function SettingsCodexSection({
                                         windowsUiUpdater.state.version ?? "-"
                                       } · ${t("settings.codex.windowsUiUpdateRestartNotice")}`
                                     : `${t("settings.codex.windowsUiUpdateFailed")}: ${
-                                        windowsUiUpdater.state.error ?? t("common.unknown")
+                                        formatUpdateError(windowsUiUpdater.state.error ?? t("common.unknown"), t)
                                       }`}
                 </div>
               </div>

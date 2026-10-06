@@ -82,15 +82,18 @@ async fn unique_sessions(
 
 fn runtime_matches_target(
     session: &WorkspaceSession,
+    codex_bin: Option<&str>,
     codex_args: &Option<String>,
     provider_runtime_fingerprint: &Option<String>,
 ) -> bool {
-    session.codex_args == *codex_args
+    session.uses_codex_bin(codex_bin)
+        && session.codex_args == *codex_args
         && session.provider_runtime_fingerprint == *provider_runtime_fingerprint
 }
 
 async fn source_runtimes_match_target(
     source_runtimes: Option<&SessionSourceRuntimePool>,
+    codex_bin: Option<&str>,
     codex_args: &Option<String>,
     provider_runtime_fingerprint: &Option<String>,
 ) -> bool {
@@ -101,7 +104,9 @@ async fn source_runtimes_match_target(
         .sessions_snapshot_for_purpose(SourceRuntimePurpose::Execution)
         .await
         .iter()
-        .all(|session| runtime_matches_target(session, codex_args, provider_runtime_fingerprint))
+        .all(|session| {
+            runtime_matches_target(session, codex_bin, codex_args, provider_runtime_fingerprint)
+        })
 }
 
 async fn ensure_all_runtimes_quiescent(
@@ -145,6 +150,7 @@ fn provider_transaction_matches(
     let current_source =
         resolve_settings_codex_home(settings).map(|path| source_id_for_codex_home(&path));
     active_profile_runtime_fingerprint(settings) == *expected_provider_runtime_fingerprint
+        && settings.codex_bin == expected_settings.codex_bin
         && current_source.as_deref() == Some(expected_session_source_id)
         && settings.sync_provider_profile_to_local_config
             == expected_settings.sync_provider_profile_to_local_config
@@ -314,17 +320,56 @@ where
 
     let current_runtime_matches = runtime_matches_target(
         &current_session,
+        default_bin.as_deref(),
         &effective_target_args,
         &provider_runtime_fingerprint,
     );
     let source_runtimes_match = source_runtimes_match_target(
         source_runtimes,
+        default_bin.as_deref(),
         &effective_target_args,
         &provider_runtime_fingerprint,
     )
     .await;
 
-    if current_runtime_matches && source_runtimes_match {
+    let mut all_sessions = unique_session_values(&*sessions.lock().await);
+    if let Some(pool) = source_runtimes {
+        all_sessions.extend(
+            pool.sessions_snapshot_for_purpose(SourceRuntimePurpose::Execution)
+                .await,
+        );
+    }
+    let primary_runtimes_match =
+        unique_session_values(&*sessions.lock().await)
+            .iter()
+            .all(|session| {
+                runtime_matches_target(
+                    session,
+                    default_bin.as_deref(),
+                    &effective_target_args,
+                    &provider_runtime_fingerprint,
+                )
+            });
+    // A managed CLI update takes effect on the next idle turn. Keep the old
+    // process while a task is running so streaming, steering and interruption
+    // continue to target that task's runtime.
+    let only_binary_changed = all_sessions.iter().all(|session| {
+        session.codex_args == effective_target_args
+            && session.provider_runtime_fingerprint == provider_runtime_fingerprint
+    });
+    let mut binary_switch_deferred = false;
+    if only_binary_changed {
+        for session in &all_sessions {
+            if !session.active_turns.lock().await.is_empty() {
+                binary_switch_deferred = true;
+                break;
+            }
+        }
+    }
+
+    if (current_runtime_matches && primary_runtimes_match && source_runtimes_match)
+        || binary_switch_deferred
+    {
         let config_synced = sync_provider_config_if_current(
             app_settings,
             settings_snapshot,
@@ -343,7 +388,7 @@ where
         });
     }
 
-    if current_runtime_matches {
+    if current_runtime_matches && primary_runtimes_match {
         ensure_all_runtimes_quiescent(sessions, source_runtimes).await?;
         let config_synced = sync_provider_config_if_current(
             app_settings,
@@ -370,13 +415,14 @@ where
 
     let new_session = spawn_session(
         entry.clone(),
-        default_bin,
+        default_bin.clone(),
         target_args.clone(),
         Some(codex_home.clone()),
         settings_snapshot.clone(),
     )
     .await?;
-    if new_session.codex_args != effective_target_args
+    if !new_session.uses_codex_bin(default_bin.as_deref())
+        || new_session.codex_args != effective_target_args
         || new_session.provider_runtime_fingerprint != provider_runtime_fingerprint
     {
         terminate_unpublished_session(&new_session).await;
@@ -523,7 +569,10 @@ mod tests {
     ) -> WorkspaceSession {
         let effective =
             active_profile_codex_args(settings, codex_args).expect("resolve effective test args");
-        make_session_with_provider(effective, active_profile_runtime_fingerprint(settings))
+        let mut session =
+            make_session_with_provider(effective, active_profile_runtime_fingerprint(settings));
+        session.codex_bin = settings.codex_bin.clone();
+        session
     }
 
     async fn make_exited_session_with_provider(
@@ -625,6 +674,61 @@ mod tests {
             assert!(!result.respawned);
             assert!(!result.session_source_id.is_empty());
             assert_eq!(spawn_calls.load(Ordering::SeqCst), 0);
+        });
+    }
+
+    #[test]
+    fn managed_cli_switch_preserves_active_turn_then_uses_new_binary_when_idle() {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let entry = make_workspace_entry("managed-switch");
+            let workspaces = Mutex::new(HashMap::from([(entry.id.clone(), entry.clone())]));
+            let mut old = make_session(entry.clone(), None);
+            old.codex_bin = Some("old/codex.exe".into());
+            let old = Arc::new(old);
+            old.active_turns
+                .lock()
+                .await
+                .insert("thread".into(), "turn".into());
+            let sessions = Mutex::new(HashMap::from([(entry.id.clone(), old.clone())]));
+            let home = std::env::temp_dir().join(format!("tf-cli-switch-{}", uuid::Uuid::new_v4()));
+            let mut settings = AppSettings::default();
+            settings.codex_bin = Some("new/codex.exe".into());
+            settings.codex_home = Some(home.to_string_lossy().into_owned());
+            let app_settings = Mutex::new(settings);
+            let spawn = |_entry, _bin, args, _home, settings: AppSettings| async move {
+                Ok(Arc::new(make_session_for_settings(args, &settings)))
+            };
+            let deferred = set_workspace_runtime_codex_args_core(
+                entry.id.clone(),
+                None,
+                &workspaces,
+                &sessions,
+                &app_settings,
+                spawn,
+            )
+            .await
+            .unwrap();
+            assert!(!deferred.respawned);
+            assert!(Arc::ptr_eq(&sessions.lock().await[&entry.id], &old));
+            assert!(old.is_process_alive().await);
+            assert!(old.has_active_turn("thread").await);
+            old.clear_active_turn_if_matches("thread", "turn").await;
+            let switched = set_workspace_runtime_codex_args_core(
+                entry.id.clone(),
+                None,
+                &workspaces,
+                &sessions,
+                &app_settings,
+                spawn,
+            )
+            .await
+            .unwrap();
+            assert!(switched.respawned);
+            let new = sessions.lock().await[&entry.id].clone();
+            assert!(new.uses_codex_bin(Some("new/codex.exe")));
+            assert!(!old.is_process_alive().await);
+            new.shutdown().await;
+            let _ = std::fs::remove_dir_all(home);
         });
     }
 

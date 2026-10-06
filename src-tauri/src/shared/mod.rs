@@ -29,6 +29,7 @@ pub(crate) mod installer_migration_store;
 pub(crate) mod installer_migration_windows;
 pub(crate) mod knowledge_adapter_core;
 pub(crate) mod local_usage_core;
+pub(crate) mod managed_codex_core;
 pub(crate) mod message_reference_core;
 pub(crate) mod process_core;
 pub(crate) mod prompts_core;

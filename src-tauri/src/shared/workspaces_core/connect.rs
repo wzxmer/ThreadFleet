@@ -36,20 +36,19 @@ async fn remove_session_references(
 
 pub(super) async fn take_live_shared_session(
     sessions: &Mutex<HashMap<String, Arc<WorkspaceSession>>>,
+    codex_bin: Option<&str>,
 ) -> Option<Arc<WorkspaceSession>> {
-    loop {
-        let existing_session = {
-            let sessions = sessions.lock().await;
-            sessions.values().next().cloned()
-        };
-        let Some(existing_session) = existing_session else {
-            return None;
-        };
+    let candidates = sessions.lock().await.values().cloned().collect::<Vec<_>>();
+    for existing_session in candidates {
         if session_process_is_alive(&existing_session).await {
-            return Some(existing_session);
+            if existing_session.uses_codex_bin(codex_bin) {
+                return Some(existing_session);
+            }
+            continue;
         }
         remove_session_references(sessions, &existing_session).await;
     }
+    None
 }
 
 fn local_codex_workspace_entry() -> WorkspaceEntry {
@@ -104,7 +103,16 @@ where
         }
         remove_session_references(sessions, &existing_for_entry).await;
     }
-    if let Some(existing_session) = take_live_shared_session(sessions).await {
+    let (default_bin, codex_args, codex_home) = {
+        let settings = app_settings.lock().await;
+        (
+            settings.codex_bin.clone(),
+            resolve_workspace_codex_args(&entry, parent_entry.as_ref(), Some(&settings)),
+            resolve_settings_codex_home(&settings),
+        )
+    };
+    if let Some(existing_session) = take_live_shared_session(sessions, default_bin.as_deref()).await
+    {
         existing_session
             .register_workspace_with_path(&entry.id, Some(&entry.path))
             .await;
@@ -114,14 +122,6 @@ where
             .insert(entry.id.clone(), existing_session);
         return Ok(());
     }
-    let (default_bin, codex_args, codex_home) = {
-        let settings = app_settings.lock().await;
-        (
-            settings.codex_bin.clone(),
-            resolve_workspace_codex_args(&entry, parent_entry.as_ref(), Some(&settings)),
-            resolve_settings_codex_home(&settings),
-        )
-    };
     let session = spawn_session(entry.clone(), default_bin, codex_args, codex_home).await?;
     session
         .register_workspace_with_path(&entry.id, Some(&entry.path))
@@ -238,6 +238,20 @@ mod tests {
 
             assert_eq!(spawn_calls.load(Ordering::SeqCst), 0);
             kill_session_by_id(&sessions, &entry.id).await;
+        });
+    }
+
+    #[test]
+    fn new_connections_do_not_reuse_previous_managed_cli() {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let entry = make_workspace_entry("old");
+            let old = make_session(entry);
+            let sessions = Mutex::new(HashMap::from([("old".into(), old.clone())]));
+            assert!(take_live_shared_session(&sessions, Some("new/codex.exe"))
+                .await
+                .is_none());
+            assert!(old.is_process_alive().await);
+            old.shutdown().await;
         });
     }
 

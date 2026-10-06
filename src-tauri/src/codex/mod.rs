@@ -181,6 +181,11 @@ pub(crate) async fn check_codex_cli_update(
     crate::shared::codex_cli_update_core::check_codex_cli_update_core(
         &state.app_settings,
         codex_bin,
+        state
+            .settings_path
+            .parent()
+            .map(|parent| parent.join("managed-codex"))
+            .as_deref(),
     )
     .await
     .and_then(|value| serde_json::to_value(value).map_err(|error| error.to_string()))

@@ -102,6 +102,8 @@
 }
 
 .ds-modal-error {
+  min-width: 0;
+  overflow-wrap: anywhere;
   font-size: 12px;
   line-height: 1.45;
   color: color-mix(in srgb, var(--status-error) 72%, var(--cm-text-strong));

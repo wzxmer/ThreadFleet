@@ -125,6 +125,7 @@ import {
 } from "@services/tauri";
 import { subscribeReleaseAssetDownloadProgress } from "@services/events";
 import { fetchManagedCodexPackage } from "@/features/codex/utils/managedCodex";
+import { useManagedCodexActivation } from "@app/hooks/useManagedCodexActivation";
 import { CodexInstallPrompt } from "@/features/codex/components/CodexInstallPrompt";
 import { CodexCliUpdatePrompt } from "@/features/update/components/CodexCliUpdatePrompt";
 import { useCodexCliUpdater } from "@/features/update/hooks/useCodexCliUpdater";
@@ -200,7 +201,6 @@ export default function MainApp() {
     appSettings,
     setAppSettings,
     doctor,
-    codexUpdate,
     appSettingsLoading,
     reduceTransparency,
     setReduceTransparency,
@@ -1117,6 +1117,7 @@ export default function MainApp() {
       reconnectLive,
     });
   const codexCliUpdaterEnabled = !isMobileRuntime;
+  const activateManagedCodex = useManagedCodexActivation(appSettings, queueSaveSettings, setAppSettings);
   const codexCliUpdater = useCodexCliUpdater({
     enabled: codexCliUpdaterEnabled,
     installEnabled: appSettings.backendMode === "local",
@@ -1124,6 +1125,7 @@ export default function MainApp() {
       !appSettingsLoading && appSettings.automaticCodexCliUpdateChecksEnabled,
     autoInstallOnMount: true,
     codexBin: appSettings.codexBin,
+    onInstalled: activateManagedCodex,
     onDebug: addDebugEntry,
   });
   const {
@@ -1139,7 +1141,7 @@ export default function MainApp() {
     enabled: updaterEnabled,
     autoCheckOnMount:
       !appSettingsLoading && appSettings.automaticAppUpdateChecksEnabled,
-    onCheckCodexCliUpdates: codexCliUpdater.checkForUpdates,
+    onCheckCodexCliUpdates: codexCliUpdater.checkAndUpdate,
     experimentalWindowsInstallerMigrationEnabled:
       appSettings.experimentalWindowsInstallerMigrationEnabled,
     notificationSoundsEnabled: appSettings.notificationSoundsEnabled,
@@ -1766,9 +1768,10 @@ export default function MainApp() {
         enabled: codexCliUpdaterEnabled,
         installEnabled: appSettings.backendMode === "local",
         ...codexCliUpdater,
+        checkForUpdates: codexCliUpdater.checkAndUpdate,
       },
       doctor,
-      codexUpdate,
+      codexUpdate: codexCliUpdater.updateFromSettings,
       updateWorkspaceSettings,
       scaleShortcutTitle,
       scaleShortcutText,
@@ -2944,12 +2947,16 @@ export default function MainApp() {
         <CodexCliUpdatePrompt
           open={codexCliUpdater.promptOpen}
           check={codexCliUpdater.state.check ?? null}
+          stage={codexCliUpdater.state.stage}
+          installedVersion={codexCliUpdater.state.installedVersion}
+          progress={codexCliUpdater.state.progress}
           installEnabled={appSettings.backendMode === "local"}
           busy={
             codexCliUpdater.state.stage === "installing"
           }
           error={codexCliUpdater.state.error}
           onCancel={codexCliUpdater.dismissPrompt}
+          onRecheck={() => void codexCliUpdater.checkAndUpdate()}
           onConfirm={() => void codexCliUpdater.startInstall()}
         />
         <SessionResumeChoicePrompt />

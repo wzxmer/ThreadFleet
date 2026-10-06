@@ -1062,6 +1062,13 @@ export type InstalledManagedCodex = {
   version: string;
 };
 
+export type ManagedCodexPackage = {
+  version: string;
+  fileName: string;
+  urls: string[];
+  size: number;
+  sha256: string;
+};
 
 export type CodexCliUpdateCheckResult = {
   status: "available" | "upToDate" | "notInstalled" | "unsupported";
@@ -1070,7 +1077,7 @@ export type CodexCliUpdateCheckResult = {
   latestVersion: string | null;
   platform: string;
   source: "npm" | "brew_formula" | "brew_cask" | string | null;
-  package: null;
+  package: ManagedCodexPackage | null;
   reasonCode: string | null;
 };
 
@@ -1105,6 +1112,7 @@ export type CodexSyncDiagnostics = {
 
 export type CodexUpdateMethod =
   | "codex"
+  | "managed"
   | "brew_formula"
   | "brew_cask"
   | "npm"

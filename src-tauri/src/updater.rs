@@ -11,6 +11,8 @@ use tauri::State;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::process::{ChildStdin, ChildStdout};
 
+use crate::shared::codex_cli_update_core::normalize_codex_version;
+use crate::shared::managed_codex_core::extract_managed_codex_archive;
 use crate::shared::process_core::{kill_child_process_tree, tokio_command};
 use crate::shared::windows_ui_update_core::{
     configure_windows_ui, inspect_windows_ui_installation, load_windows_ui_installation_snapshot,
@@ -39,6 +41,7 @@ const WINDOWS_UI_RELEASE_RESPONSE_MAX_BYTES: usize = 1024 * 1024;
 const WINDOWS_UI_MCP_PROBE_TIMEOUT_SECS: u64 = 10;
 
 static WINDOWS_UI_INSTALL_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+static MANAGED_CODEX_INSTALL_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -456,6 +459,7 @@ pub async fn install_managed_codex(
     expected_size: u64,
     expected_sha256: String,
 ) -> Result<InstalledManagedCodex, String> {
+    let _install_guard = MANAGED_CODEX_INSTALL_LOCK.lock().await;
     if matches!(
         state.app_settings.lock().await.backend_mode,
         BackendMode::Remote
@@ -468,32 +472,36 @@ pub async fn install_managed_codex(
         return Err("No Codex CLI download URL was provided.".to_string());
     }
     let safe_file_name = sanitize_release_asset_file_name(&file_name)?;
-    if !safe_file_name.to_ascii_lowercase().ends_with(".zip") {
-        return Err("Managed Codex package must be a ZIP archive.".to_string());
+    if !safe_file_name.ends_with(".zip") && !safe_file_name.ends_with(".tar.gz") {
+        return Err("Managed Codex package must be a ZIP or tar.gz archive.".to_string());
     }
+    validate_download_request_id(&request_id)?;
     for url in &urls {
         validate_release_asset_url(url, &safe_file_name)?;
     }
-    let normalized_version = version.trim().trim_start_matches(['v', 'V']);
-    if normalized_version.is_empty()
-        || !normalized_version
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_'))
-    {
-        return Err("Invalid managed Codex version.".to_string());
-    }
+    let normalized_version = semver::Version::parse(version.trim().trim_start_matches(['v', 'V']))
+        .map_err(|error| format!("Invalid managed Codex version: {error}"))?;
 
     let mut root = app_handle
         .path()
         .app_data_dir()
         .map_err(|error| format!("Failed to resolve app data directory: {error}"))?;
     root.push("managed-codex");
-    root.push(normalized_version);
+    let staging_root = root.join(format!(".install-{}", uuid::Uuid::new_v4()));
+    let mut final_root = root.join(normalized_version.to_string());
+    if tokio::fs::try_exists(&final_root)
+        .await
+        .map_err(|error| error.to_string())?
+    {
+        final_root = root.join(format!("{}-{}", normalized_version, uuid::Uuid::new_v4()));
+    }
+    root = staging_root;
     tokio::fs::create_dir_all(&root)
         .await
         .map_err(|error| format!("Failed to create managed Codex directory: {error}"))?;
+    let result = async {
     let archive_path = root.join(&safe_file_name);
-    let temp_path = archive_path.with_extension("zip.download");
+    let temp_path = archive_path.with_extension("download");
 
     let mut errors = Vec::new();
     let mut downloaded = false;
@@ -540,10 +548,25 @@ pub async fn install_managed_codex(
         executable_path.to_string_lossy().into_owned(),
     ))
     .await?;
+    let detected_version = detected_version
+        .ok_or_else(|| "Installed Codex CLI did not report a version.".to_string())?;
+    let detected_version = normalize_codex_version(&detected_version)?;
+    if detected_version != normalized_version {
+        return Err(format!("Codex CLI package version mismatch: expected {normalized_version}, got {detected_version}."));
+    }
+    let relative_executable = executable_path.strip_prefix(&root)
+        .map_err(|error| format!("Invalid managed Codex executable path: {error}"))?.to_path_buf();
+    tokio::fs::rename(&root, &final_root).await
+        .map_err(|error| format!("Failed to activate Codex CLI package: {error}"))?;
     Ok(InstalledManagedCodex {
-        path: executable_path.to_string_lossy().into_owned(),
-        version: detected_version.unwrap_or_else(|| normalized_version.to_string()),
+        path: final_root.join(relative_executable).to_string_lossy().into_owned(),
+        version: detected_version.to_string(),
     })
+    }.await;
+    if result.is_err() {
+        let _ = tokio::fs::remove_dir_all(&root).await;
+    }
+    result
 }
 
 fn validate_download_request_id(request_id: &str) -> Result<(), String> {
@@ -1008,64 +1031,17 @@ async fn read_mcp_response(
     Err("windows-ui MCP probe returned too many unrelated messages.".to_string())
 }
 
-fn extract_managed_codex_archive(
-    archive_path: &Path,
-    install_root: &Path,
-) -> Result<PathBuf, String> {
-    let archive_file = std::fs::File::open(archive_path)
-        .map_err(|error| format!("Failed to open Codex CLI package: {error}"))?;
-    let mut archive = zip::ZipArchive::new(archive_file)
-        .map_err(|error| format!("Invalid Codex CLI package: {error}"))?;
-    let expected_name = if cfg!(target_os = "windows") {
-        "codex.exe"
-    } else {
-        "codex"
-    };
-    let mut executable_path = None;
-    for index in 0..archive.len() {
-        let mut entry = archive
-            .by_index(index)
-            .map_err(|error| format!("Failed to read Codex CLI package: {error}"))?;
-        let Some(relative_path) = entry.enclosed_name() else {
-            continue;
-        };
-        if entry.is_dir() {
-            continue;
-        }
-        let target = install_root.join(&relative_path);
-        if let Some(parent) = target.parent() {
-            std::fs::create_dir_all(parent).map_err(|error| {
-                format!("Failed to create managed Codex package directory: {error}")
-            })?;
-        }
-        let mut output = std::fs::File::create(&target)
-            .map_err(|error| format!("Failed to create managed Codex package file: {error}"))?;
-        std::io::copy(&mut entry, &mut output)
-            .map_err(|error| format!("Failed to extract managed Codex package file: {error}"))?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            if let Some(mode) = entry.unix_mode() {
-                std::fs::set_permissions(&target, std::fs::Permissions::from_mode(mode)).map_err(
-                    |error| format!("Failed to apply Codex package permissions: {error}"),
-                )?;
-            }
-        }
-        if relative_path.file_name().and_then(|value| value.to_str()) == Some(expected_name) {
-            executable_path = Some(target);
-        }
-    }
-    executable_path.ok_or_else(|| format!("Codex CLI package does not contain {expected_name}."))
-}
-
 fn validate_release_asset_url(url: &str, expected_file_name: &str) -> Result<(), String> {
     let parsed =
         reqwest::Url::parse(url).map_err(|error| format!("Invalid release asset URL: {error}"))?;
     if parsed.scheme() != "https" {
         return Err("Only HTTPS release assets can be downloaded.".to_string());
     }
-    let is_github =
-        parsed.host_str() == Some(RELEASE_HOST) && parsed.path().starts_with(RELEASE_PATH_PREFIX);
+    let is_github = parsed.host_str() == Some(RELEASE_HOST)
+        && (parsed.path().starts_with(RELEASE_PATH_PREFIX)
+            || parsed
+                .path()
+                .starts_with("/openai/codex/releases/download/"));
     let is_configured_mirror = [
         TENCENT_UPDATE_BASE_URL,
         ALIYUN_UPDATE_BASE_URL,

@@ -382,6 +382,7 @@ const renderCodexSection = (
   options: {
     appSettings?: Partial<AppSettings>;
     onUpdateAppSettings?: ComponentProps<typeof SettingsView>["onUpdateAppSettings"];
+    onRunCodexUpdate?: ComponentProps<typeof SettingsView>["onRunCodexUpdate"];
     initialSection?: ComponentProps<typeof SettingsView>["initialSection"];
     providerSessionDiagnostics?: ComponentProps<
       typeof SettingsView
@@ -442,6 +443,7 @@ const renderCodexSection = (
     onCancelDictationDownload: vi.fn(),
     onRemoveDictationModel: vi.fn(),
     providerSessionDiagnostics: options.providerSessionDiagnostics,
+    onRunCodexUpdate: options.onRunCodexUpdate,
     windowsUiUpdater,
     codexCliUpdater,
     initialSection: options.initialSection ?? "codex",
@@ -1438,6 +1440,55 @@ describe("SettingsView Environments", () => {
 });
 
 describe("SettingsView Codex section", () => {
+  it("localizes automatic CLI update failures in settings", () => {
+    renderCodexSection({
+      codexCliUpdater: { state: { stage: "error", error: "HTTP proxy connection failed" } },
+    });
+    expect(screen.getByText(/无法连接更新服务，请检查网络或代理设置后重试/)).toBeTruthy();
+    expect(screen.queryByText(/HTTP proxy connection failed/)).toBeNull();
+  });
+
+  it("localizes Windows UI update failures in settings", () => {
+    renderCodexSection({
+      windowsUiUpdater: { state: { stage: "error", error: "download failed" } },
+    });
+    expect(screen.getByText(/更新包下载失败，请检查网络后重试/)).toBeTruthy();
+    expect(screen.queryByText(/download failed/)).toBeNull();
+  });
+
+  it.each([
+    ["managed", "软件管理的安装"],
+    ["codex", "Codex 内置更新"],
+    ["brew_formula", "Homebrew"],
+  ])("localizes the %s update method", async (method, label) => {
+    renderCodexSection({
+      onRunCodexUpdate: vi.fn().mockResolvedValue({
+        ...createUpdateResult(), method,
+      }),
+    });
+
+    fireEvent.click(screen.getByTitle("更新 Codex"));
+
+    expect(await screen.findByText(`方式: ${label}`)).toBeTruthy();
+  });
+
+  it("localizes native CLI update failures while retaining diagnostic output", async () => {
+    const output = "codex update failed: connection timed out";
+    renderCodexSection({
+      onRunCodexUpdate: vi.fn().mockResolvedValue({
+        ...createUpdateResult(), ok: false, upgraded: false,
+        output, details: output,
+      }),
+    });
+
+    fireEvent.click(screen.getByTitle("更新 Codex"));
+
+    expect(await screen.findByText("无法连接更新服务，请检查网络或代理设置后重试。")).toBeTruthy();
+    const diagnostics = screen.getByText(output).closest("details");
+    expect(diagnostics).not.toBeNull();
+    expect(diagnostics?.open).toBe(false);
+  });
+
   it("toggles automatic Codex CLI update checks", async () => {
     const onUpdateAppSettings = vi.fn().mockResolvedValue(undefined);
     renderCodexSection({

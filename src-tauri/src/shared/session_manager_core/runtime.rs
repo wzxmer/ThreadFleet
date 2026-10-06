@@ -327,21 +327,28 @@ impl SourceRuntimePool<WorkspaceSession> {
         &self,
         source: &SessionSource,
         workspace_context: &str,
+        codex_bin: Option<String>,
         spawn: F,
     ) -> Result<Arc<WorkspaceSession>, String>
     where
         F: FnOnce(PathBuf) -> Fut,
         Fut: Future<Output = Result<Arc<WorkspaceSession>, String>>,
     {
-        self.get_or_spawn_workspace_session_for_source_with_status(source, workspace_context, spawn)
-            .await
-            .map(|(runtime, _)| runtime)
+        self.get_or_spawn_workspace_session_for_source_with_status(
+            source,
+            workspace_context,
+            codex_bin,
+            spawn,
+        )
+        .await
+        .map(|(runtime, _)| runtime)
     }
 
     pub(crate) async fn get_or_spawn_workspace_session_for_source_with_status<F, Fut>(
         &self,
         source: &SessionSource,
         workspace_context: &str,
+        codex_bin: Option<String>,
         spawn: F,
     ) -> Result<(Arc<WorkspaceSession>, bool), String>
     where
@@ -352,6 +359,7 @@ impl SourceRuntimePool<WorkspaceSession> {
             source,
             workspace_context,
             SourceRuntimePurpose::Execution,
+            codex_bin,
             spawn,
         )
         .await
@@ -362,6 +370,7 @@ impl SourceRuntimePool<WorkspaceSession> {
         source: &SessionSource,
         workspace_context: &str,
         purpose: SourceRuntimePurpose,
+        codex_bin: Option<String>,
         spawn: F,
     ) -> Result<Arc<WorkspaceSession>, String>
     where
@@ -372,6 +381,7 @@ impl SourceRuntimePool<WorkspaceSession> {
             source,
             workspace_context,
             purpose,
+            codex_bin,
             spawn,
         )
         .await
@@ -383,6 +393,7 @@ impl SourceRuntimePool<WorkspaceSession> {
         source: &SessionSource,
         workspace_context: &str,
         purpose: SourceRuntimePurpose,
+        codex_bin: Option<String>,
         spawn: F,
     ) -> Result<(Arc<WorkspaceSession>, bool), String>
     where
@@ -391,16 +402,38 @@ impl SourceRuntimePool<WorkspaceSession> {
     {
         let key =
             SourceRuntimeKey::for_purpose(&source.codex_home_path, workspace_context, purpose)?;
-        if let Some(runtime) = self.get(&key).await {
-            if runtime.is_process_alive().await {
-                return Ok((runtime, false));
+        let _spawn_guard = self.spawn_lock.lock().await;
+        let previous = self.get(&key).await;
+        if let Some(runtime) = &previous {
+            if runtime.is_process_alive().await
+                && (runtime.uses_codex_bin(codex_bin.as_deref())
+                    || !runtime.active_turns.lock().await.is_empty()
+                    || !runtime.pending.lock().await.is_empty())
+            {
+                return Ok((Arc::clone(runtime), false));
             }
-            self.remove_and_close(&key).await;
         }
         let codex_home = PathBuf::from(&source.codex_home_path);
-        self.get_or_spawn(key, || spawn(codex_home))
-            .await
-            .map(|runtime| (runtime, true))
+        let runtime = spawn(codex_home).await?;
+        if let Some(previous) = &previous {
+            if !previous.active_turns.lock().await.is_empty()
+                || !previous.pending.lock().await.is_empty()
+            {
+                runtime.shutdown().await;
+                return Ok((Arc::clone(previous), false));
+            }
+        }
+        self.entries.lock().await.insert(
+            key,
+            RuntimeEntry {
+                runtime: Arc::clone(&runtime),
+                last_activity: Instant::now(),
+            },
+        );
+        if let Some(previous) = previous {
+            previous.shutdown().await;
+        }
+        Ok((runtime, true))
     }
 
     pub(crate) async fn remove_and_close(&self, key: &SourceRuntimeKey) {
@@ -656,6 +689,81 @@ mod tests {
             let stored = bindings.get("ws-a", "thread-a").await.unwrap();
             assert_eq!(stored.source.id, "source-a");
             assert_eq!(stored.workspace.id, "ws-a");
+        });
+    }
+
+    #[test]
+    fn cli_update_preserves_busy_source_runtime_and_failed_replacements() {
+        fn make_runtime(bin: &str) -> Arc<WorkspaceSession> {
+            let mut command = if cfg!(windows) {
+                let mut command = tokio::process::Command::new("cmd");
+                command.args(["/D", "/C", "more"]);
+                command
+            } else {
+                tokio::process::Command::new("cat")
+            };
+            command
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null());
+            let mut child = command.spawn().unwrap();
+            let stdin = child.stdin.take().unwrap();
+            let mut session =
+                WorkspaceSession::test_new(None, None, child, stdin, "workspace".into());
+            session.codex_bin = Some(bin.into());
+            Arc::new(session)
+        }
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let pool = SessionSourceRuntimePool::default();
+            let selected = source("source", "test-codex-home");
+            let old = pool
+                .get_or_spawn_workspace_session_for_source(
+                    &selected,
+                    "workspace",
+                    Some("old".into()),
+                    |_| async { Ok(make_runtime("old")) },
+                )
+                .await
+                .unwrap();
+            old.active_turns
+                .lock()
+                .await
+                .insert("thread".into(), "turn".into());
+            let (busy, spawned) = pool
+                .get_or_spawn_workspace_session_for_source_with_status(
+                    &selected,
+                    "workspace",
+                    Some("new".into()),
+                    |_| async { panic!("busy runtime must be preserved") },
+                )
+                .await
+                .unwrap();
+            assert!(!spawned);
+            assert!(Arc::ptr_eq(&old, &busy));
+            old.clear_active_turn_if_matches("thread", "turn").await;
+            assert!(pool
+                .get_or_spawn_workspace_session_for_source(
+                    &selected,
+                    "workspace",
+                    Some("new".into()),
+                    |_| async { Err("spawn failed".into()) }
+                )
+                .await
+                .is_err());
+            assert!(old.is_process_alive().await);
+            let (new, spawned) = pool
+                .get_or_spawn_workspace_session_for_source_with_status(
+                    &selected,
+                    "workspace",
+                    Some("new".into()),
+                    |_| async { Ok(make_runtime("new")) },
+                )
+                .await
+                .unwrap();
+            assert!(spawned);
+            assert!(new.uses_codex_bin(Some("new")));
+            assert!(!old.is_process_alive().await);
+            pool.close_all().await;
         });
     }
 

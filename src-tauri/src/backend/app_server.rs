@@ -611,6 +611,7 @@ fn build_initialize_params(client_version: &str) -> Value {
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
 
 pub(crate) struct WorkspaceSession {
+    pub(crate) codex_bin: Option<String>,
     pub(crate) codex_args: Option<String>,
     pub(crate) provider_runtime_fingerprint: Option<String>,
     pub(crate) computer_control_runtime_fingerprint: String,
@@ -647,6 +648,7 @@ impl WorkspaceSession {
             provider_runtime_fingerprint.as_deref(),
         );
         Self {
+            codex_bin: None,
             codex_args,
             provider_runtime_fingerprint,
             computer_control_runtime_fingerprint,
@@ -671,6 +673,17 @@ impl WorkspaceSession {
 
     pub(crate) fn mark_output_closed(&self) {
         self.output_closed.store(true, Ordering::SeqCst);
+    }
+
+    pub(crate) fn uses_codex_bin(&self, codex_bin: Option<&str>) -> bool {
+        let normalize = |value: Option<&str>| {
+            value
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("codex")
+                .to_string()
+        };
+        normalize(self.codex_bin.as_deref()) == normalize(codex_bin)
     }
 
     pub(crate) async fn invalidate_computer_control_snapshot(&self) {
@@ -1157,7 +1170,7 @@ pub(crate) async fn spawn_workspace_session<E: EventSink>(
     let _ = check_codex_installation(codex_bin.clone()).await?;
 
     let mut command = build_codex_command_with_bin(
-        codex_bin,
+        codex_bin.clone(),
         codex_args.as_deref(),
         computer_control_app_server_args(),
     )?;
@@ -1183,6 +1196,7 @@ pub(crate) async fn spawn_workspace_session<E: EventSink>(
         provider_runtime_fingerprint.as_deref(),
     );
     let session = Arc::new(WorkspaceSession {
+        codex_bin,
         codex_args: comparison_codex_args,
         provider_runtime_fingerprint,
         computer_control_runtime_fingerprint,
