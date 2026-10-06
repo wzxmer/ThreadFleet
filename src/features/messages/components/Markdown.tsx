@@ -1,7 +1,9 @@
 import {
   Children,
   cloneElement,
+  createContext,
   isValidElement,
+  useContext,
   useEffect,
   useRef,
   useState,
@@ -675,6 +677,31 @@ function ModifierCopyMessagePreBlock({ node, children }: MessagePreProps) {
   );
 }
 
+function MarkdownImage({ src, alt }: ComponentPropsWithoutRef<"img"> & ExtraProps) {
+  const normalizedSrc = normalizeMessageImageSrc(src ?? "");
+  if (!normalizedSrc) {
+    return null;
+  }
+  return <img src={normalizedSrc} alt={alt ?? ""} loading="lazy" />;
+}
+
+type MarkdownRenderContextValue = {
+  renderLink: (props: ComponentPropsWithoutRef<"a"> & ExtraProps) => ReactNode;
+  renderCode: (props: ComponentPropsWithoutRef<"code"> & ExtraProps) => ReactNode;
+};
+
+const MarkdownRenderContext = createContext<MarkdownRenderContextValue | null>(null);
+
+function MarkdownLink(props: ComponentPropsWithoutRef<"a"> & ExtraProps) {
+  const renderers = useContext(MarkdownRenderContext);
+  return renderers?.renderLink(props) ?? null;
+}
+
+function MarkdownCode(props: ComponentPropsWithoutRef<"code"> & ExtraProps) {
+  const renderers = useContext(MarkdownRenderContext);
+  return renderers?.renderCode(props) ?? null;
+}
+
 export function Markdown({
   value,
   className,
@@ -723,16 +750,8 @@ export function Markdown({
     resolvedHrefFilePathCache.set(url, resolvedPath);
     return resolvedPath;
   };
-  const components: Components = {
-    table: MarkdownTable,
-    img: ({ src, alt }) => {
-      const normalizedSrc = normalizeMessageImageSrc(src ?? "");
-      if (!normalizedSrc) {
-        return null;
-      }
-      return <img src={normalizedSrc} alt={alt ?? ""} loading="lazy" />;
-    },
-    a: ({ href, children }) => {
+  const renderers: MarkdownRenderContextValue = {
+    renderLink: ({ href, children }) => {
       const url = (href ?? "").trim();
       const threadId = url.startsWith("thread://")
         ? url.slice("thread://".length).trim()
@@ -827,7 +846,7 @@ export function Markdown({
         </a>
       );
     },
-    code: ({ className: codeClassName, children }) => {
+    renderCode: ({ className: codeClassName, children }) => {
       if (codeClassName) {
         return <code className={codeClassName}>{children}</code>;
       }
@@ -850,6 +869,13 @@ export function Markdown({
     },
   };
 
+  const components: Components = {
+    table: MarkdownTable,
+    img: MarkdownImage,
+    a: MarkdownLink,
+    code: MarkdownCode,
+  };
+
   if (codeBlockStyle === "message") {
     components.pre = codeBlockCopyUseModifier
       ? ModifierCopyMessagePreBlock
@@ -858,36 +884,38 @@ export function Markdown({
 
   return (
     <div className={className}>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkFileLinks]}
-        urlTransform={(url) => {
-          const hasScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(url);
-          // Keep file-like hrefs intact before scheme sanitization runs, otherwise
-          // Windows absolute paths such as C:/repo/file.ts look like unknown schemes.
-          if (resolveHrefFilePath(url)) {
-            return url;
-          }
-          if (
-            isFileLinkUrl(url) ||
-            url.startsWith("http://") ||
-            url.startsWith("https://") ||
-            url.startsWith("mailto:") ||
-            url.startsWith("#") ||
-            url.startsWith("/") ||
-            url.startsWith("./") ||
-            url.startsWith("../")
-          ) {
-            return url;
-          }
-          if (!hasScheme) {
-            return url;
-          }
-          return "";
-        }}
-        components={components}
-      >
-        {content}
-      </ReactMarkdown>
+      <MarkdownRenderContext.Provider value={renderers}>
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm, remarkFileLinks]}
+          urlTransform={(url) => {
+            const hasScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(url);
+            // Keep file-like hrefs intact before scheme sanitization runs, otherwise
+            // Windows absolute paths such as C:/repo/file.ts look like unknown schemes.
+            if (resolveHrefFilePath(url)) {
+              return url;
+            }
+            if (
+              isFileLinkUrl(url) ||
+              url.startsWith("http://") ||
+              url.startsWith("https://") ||
+              url.startsWith("mailto:") ||
+              url.startsWith("#") ||
+              url.startsWith("/") ||
+              url.startsWith("./") ||
+              url.startsWith("../")
+            ) {
+              return url;
+            }
+            if (!hasScheme) {
+              return url;
+            }
+            return "";
+          }}
+          components={components}
+        >
+          {content}
+        </ReactMarkdown>
+      </MarkdownRenderContext.Provider>
     </div>
   );
 }

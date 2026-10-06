@@ -76,7 +76,7 @@ function ThreadsMessagesHarness() {
   );
 }
 
-describe("useThreads app-server markdown code block scroll", () => {
+describe("useThreads app-server markdown DOM state", () => {
   beforeEach(() => {
     listener = null;
     setActiveThreadId = null;
@@ -158,6 +158,74 @@ describe("useThreads app-server markdown code block scroll", () => {
       status: { type: "interrupted" },
     });
     assertScrollState();
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("keeps session 2 image nodes when session 1 runs, completes, and is interrupted", async () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<ThreadsMessagesHarness />);
+    });
+    expect(listener).toBeTypeOf("function");
+
+    const send = (method: string, params: Record<string, unknown>) => {
+      act(() => {
+        listener?.({ workspace_id: workspace.id, message: { method, params } });
+      });
+    };
+
+    send("thread/started", { thread: { id: "thread-1", preview: "Background" } });
+    send("thread/started", { thread: { id: "thread-2", preview: "Visible" } });
+    send("item/completed", {
+      threadId: "thread-2",
+      turnId: "turn-2",
+      item: {
+        type: "agentMessage",
+        id: "thread-2-images",
+        text: [
+          "![first](https://example.com/first.png)",
+          "",
+          "![second](https://example.com/second.png)",
+          "",
+          "[![linked](https://example.com/preview.png)](https://example.com/full-size.png)",
+        ].join("\n"),
+      },
+    });
+    act(() => {
+      setActiveThreadId?.("thread-2");
+    });
+
+    const images = Array.from(container.querySelectorAll(".markdown img"));
+    expect(images).toHaveLength(3);
+
+    const assertImageState = () => {
+      const currentImages = Array.from(container.querySelectorAll(".markdown img"));
+      expect(currentImages).toHaveLength(3);
+      images.forEach((image, index) => {
+        expect(currentImages[index]).toBe(image);
+        expect(container.contains(image)).toBe(true);
+      });
+    };
+
+    send("item/agentMessage/delta", {
+      threadId: "thread-1",
+      itemId: "thread-1-live-message",
+      delta: "Still running",
+    });
+    assertImageState();
+
+    send("turn/completed", { threadId: "thread-1", turnId: "turn-1" });
+    assertImageState();
+
+    send("thread/status/changed", {
+      threadId: "thread-1",
+      status: { type: "interrupted" },
+    });
+    assertImageState();
 
     await act(async () => {
       root.unmount();

@@ -654,6 +654,113 @@ describe("Markdown file-like href behavior", () => {
     );
   });
 
+  it("preserves Markdown images across unrelated rerenders and text updates", () => {
+    const value = [
+      "![first](/D:/Pictures/first.png)",
+      "",
+      "![second](/Users/tester/Pictures/second.png)",
+      "",
+      "Original reply",
+    ].join("\n");
+    const { container, rerender } = render(<Markdown value={value} className="markdown" />);
+    const images = Array.from(container.querySelectorAll("img"));
+    const sources = images.map((image) => image.getAttribute("src"));
+
+    expect(images).toHaveLength(2);
+
+    const assertImageState = () => {
+      const currentImages = Array.from(container.querySelectorAll("img"));
+      expect(currentImages).toHaveLength(2);
+      images.forEach((image, index) => {
+        expect(currentImages[index]).toBe(image);
+        expect(image.isConnected).toBe(true);
+        expect(image.getAttribute("src")).toBe(sources[index]);
+        expect(image.getAttribute("loading")).toBe("lazy");
+      });
+    };
+
+    rerender(<Markdown value={value} className="markdown" />);
+    assertImageState();
+
+    rerender(<Markdown value={value} className="markdown updated" onOpenThreadLink={() => {}} />);
+    assertImageState();
+
+    rerender(<Markdown value={value.replace("Original", "Updated")} className="markdown" />);
+    assertImageState();
+    expect(screen.getByText("Updated reply")).toBeTruthy();
+  });
+
+  it("updates an existing Markdown image when its source and label change", () => {
+    const { container, rerender } = render(
+      <Markdown value="![first](/D:/Pictures/first.png)" className="markdown" />,
+    );
+    const image = container.querySelector("img");
+
+    expect(image).not.toBeNull();
+
+    rerender(
+      <Markdown value="![second](/D:/Pictures/second.png)" className="markdown" />,
+    );
+
+    expect(container.querySelector("img")).toBe(image);
+    expect(image?.getAttribute("src")).toBe("asset://localhost/D%3A%2FPictures%2Fsecond.png");
+    expect(image?.getAttribute("alt")).toBe("second");
+  });
+
+  it.each([
+    "https://example.com/full-size.png",
+    "./Pictures/full-size.png",
+    "thread://thread-2",
+    "#preview",
+  ])("preserves a linked image and its focused link across rerenders: %s", (href) => {
+    const value = `[![preview](/D:/Pictures/preview.png)](${href})\n\nOriginal reply`;
+    const { container, rerender } = render(
+      <Markdown value={value} className="markdown" />,
+    );
+    const image = container.querySelector("img");
+    const link = image?.closest("a");
+
+    expect(image).not.toBeNull();
+    expect(link).not.toBeNull();
+    link?.focus();
+    expect(document.activeElement).toBe(link);
+
+    rerender(
+      <Markdown
+        value={value.replace("Original", "Updated")}
+        className="markdown updated"
+        onOpenThreadLink={() => {}}
+      />,
+    );
+
+    expect(container.querySelector("img")).toBe(image);
+    expect(container.querySelector("a")).toBe(link);
+    expect(document.activeElement).toBe(link);
+    expect(screen.getByText("Updated reply")).toBeTruthy();
+  });
+
+  it("preserves a focused inline file reference and uses the latest opener", () => {
+    const firstOpen = vi.fn();
+    const nextOpen = vi.fn();
+    const value = "Inspect `./src/main.ts`";
+    const { container, rerender } = render(
+      <Markdown value={value} className="markdown" onOpenFileLink={firstOpen} />,
+    );
+    const link = container.querySelector("a");
+
+    expect(link).not.toBeNull();
+    link?.focus();
+    rerender(
+      <Markdown value={value} className="markdown" onOpenFileLink={nextOpen} />,
+    );
+
+    expect(container.querySelector("a")).toBe(link);
+    expect(document.activeElement).toBe(link);
+    fireEvent.click(link as HTMLAnchorElement);
+    expectOpenedFileTarget(nextOpen, "./src/main.ts");
+    expect(firstOpen).not.toHaveBeenCalled();
+  });
+
   it("preserves message code block scroll position across markdown rerenders", () => {
     const value = [
       "```text",
