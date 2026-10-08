@@ -1280,6 +1280,19 @@ describe("threadItems", () => {
     }
   });
 
+  it("preserves the original file path when loading a document attachment from history", () => {
+    const path = `C:/Codex/codex-monitor/attachments/sessions/${"a".repeat(64)}/${"b".repeat(64)}/slides&notes.pptx`;
+    const item = buildConversationItemFromThreadItem({
+      type: "userMessage",
+      id: "msg-document",
+      content: [{
+        type: "text",
+        text: `please read\n<attached_file name="slides&amp;notes.pptx" path="${path.replace(/&/g, "&amp;")}" bytes="1200" mode="file">Read the original file with presentation tools.</attached_file>`,
+      }],
+    });
+    expect(item).toMatchObject({ kind: "message", text: "please read", attachments: [path] });
+  });
+
   it("extracts content references from user text", () => {
     const item = buildConversationItemFromThreadItem({
       type: "userMessage",

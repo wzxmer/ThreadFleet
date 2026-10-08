@@ -168,7 +168,7 @@ function parseUserInputs(inputs: Array<Record<string, unknown>>) {
         if (parsed.text) {
           textParts.push(parsed.text);
         }
-        attachments.push(...parsed.attachments.map((attachment) => attachment.name));
+        attachments.push(...parsed.attachments.map((attachment) => attachment.source ?? attachment.name));
       }
       return;
     }

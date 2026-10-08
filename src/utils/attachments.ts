@@ -87,8 +87,17 @@ export function splitImageAndFileAttachments(paths: string[] = []) {
   return { images, attachments };
 }
 
+export function isStoredFileAttachmentPath(path: string) {
+  return /[/\\]codex-monitor[/\\]attachments[/\\]sessions[/\\][0-9a-f]{64}[/\\][0-9a-f]{64}[/\\][^/\\]+$/i.test(path);
+}
+
 function decodeAttachedFileName(value: string) {
-  return value.replace(/&quot;/g, "\"").trim();
+  return value
+    .replace(/&quot;/g, "\"")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&")
+    .trim();
 }
 
 export function extractAttachedFilesFromText(text: string): {
@@ -109,7 +118,13 @@ export function extractAttachedFilesFromText(text: string): {
       const name = nameMatch?.[1]
         ? decodeAttachedFileName(nameMatch[1])
         : fallbackName;
-      attachments.push({ name });
+      const pathMatch = tagName === "attached_file" && /\bmode="file"/.test(attrs)
+        ? String(attrs).match(/\bpath="([^"]*)"/)
+        : null;
+      attachments.push({
+        name,
+        ...(pathMatch?.[1] ? { source: decodeAttachedFileName(pathMatch[1]) } : {}),
+      });
       return "";
     },
   );

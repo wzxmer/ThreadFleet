@@ -2899,6 +2899,62 @@ mod tests {
     }
 
     #[test]
+    fn rpc_file_attachments_upload_original_bytes_and_reuse_saved_files() {
+        run_async_test(async {
+            let tmp = make_temp_dir("rpc-file-attachments");
+            let codex_home = tmp.join("codex-home");
+            std::fs::create_dir_all(&codex_home).unwrap();
+            let state = test_state(&tmp);
+            state.app_settings.lock().await.codex_home =
+                Some(codex_home.to_string_lossy().to_string());
+            let staged = rpc::handle_rpc_request(
+                &state,
+                "stage_file_attachment",
+                json!({
+                    "workspaceId": "workspace-1",
+                    "threadId": "thread-1",
+                    "source": { "kind": "data", "name": "slides.pptx", "base64Data": "UEsAAf8=" },
+                }),
+                "daemon-test".to_string(),
+            )
+            .await
+            .unwrap();
+            let path = staged.get("path").and_then(Value::as_str).unwrap();
+            assert_eq!(
+                staged.get("name").and_then(Value::as_str),
+                Some("slides.pptx")
+            );
+            assert_eq!(staged.get("byteLength").and_then(Value::as_u64), Some(5));
+            assert_eq!(std::fs::read(path).unwrap(), b"PK\x00\x01\xff");
+            let reused = rpc::handle_rpc_request(
+                &state,
+                "stage_file_attachment",
+                json!({
+                    "workspaceId": "workspace-1", "threadId": "thread-1",
+                    "source": { "kind": "stored", "path": path },
+                }),
+                "daemon-test".to_string(),
+            )
+            .await
+            .unwrap();
+            assert_eq!(staged, reused);
+            let error = rpc::handle_rpc_request(
+                &state,
+                "stage_file_attachment",
+                json!({
+                    "workspaceId": "workspace-1", "threadId": "thread-1",
+                    "source": { "kind": "path", "path": path },
+                }),
+                "daemon-test".to_string(),
+            )
+            .await
+            .unwrap_err();
+            assert!(error.contains("uploaded data"));
+            let _ = std::fs::remove_dir_all(tmp);
+        });
+    }
+
+    #[test]
     fn rpc_local_usage_snapshot_returns_snapshot_shape() {
         run_async_test(async {
             let tmp = make_temp_dir("rpc-local-usage");

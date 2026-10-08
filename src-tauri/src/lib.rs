@@ -242,6 +242,7 @@ pub fn run() {
             files::read_image_as_data_url,
             files::save_composer_images,
             files::promote_composer_images,
+            files::stage_file_attachment,
             files::create_message_reference,
             files::create_content_reference,
             files::write_text_file,

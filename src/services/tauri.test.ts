@@ -103,6 +103,8 @@ import {
   installWindowsUiUpdate,
   saveComposerImages,
   promoteComposerImages,
+  stageFileAttachment,
+  type FileAttachmentSource,
   generateAgentDescription,
   writeAgentConfigToml,
   writeAgentMd,
@@ -130,6 +132,19 @@ vi.mock("@tauri-apps/plugin-notification", () => ({
 }));
 
 describe("tauri invoke wrappers", () => {
+  it.each<FileAttachmentSource>([
+    { kind: "path", path: "C:/Documents/slides.pptx" },
+    { kind: "data", name: "report.pdf", base64Data: "JVBERg==" },
+    { kind: "stored", path: "/remote/session/report.pdf" },
+  ])("stages a file attachment using its $kind source", async (source) => {
+    const response = { name: "report.pdf", path: "/remote/report.pdf", byteLength: 4 };
+    vi.mocked(invoke).mockResolvedValueOnce(response);
+    await expect(stageFileAttachment("workspace-1", "thread-1", source)).resolves.toEqual(response);
+    expect(invoke).toHaveBeenCalledWith("stage_file_attachment", {
+      request: { workspaceId: "workspace-1", threadId: "thread-1", source },
+    });
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     clearDevRuntimeFaults();

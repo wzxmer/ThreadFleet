@@ -10,6 +10,7 @@ pub(crate) mod computer_control_core;
 pub(crate) mod config_toml_core;
 pub(crate) mod execution_binding_core;
 pub(crate) mod execution_router_core;
+pub(crate) mod file_attachment_core;
 pub(crate) mod files_core;
 pub(crate) mod git_core;
 pub(crate) mod git_rpc;

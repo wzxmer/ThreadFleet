@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as Sentry from "@sentry/react";
 import {
   promoteComposerImages,
+  stageFileAttachment,
   sendUserMessage as sendUserMessageService,
   steerTurn as steerTurnService,
   startReview as startReviewService,
@@ -19,6 +20,7 @@ import {
 } from "@services/tauri";
 import type { SendMessageResult, WorkspaceInfo } from "@/types";
 import { useThreadMessaging } from "./useThreadMessaging";
+import { I18N_STRINGS } from "@/features/i18n/strings";
 
 vi.mock("@sentry/react", () => ({
   metrics: {
@@ -28,6 +30,7 @@ vi.mock("@sentry/react", () => ({
 
 vi.mock("@services/tauri", () => ({
   promoteComposerImages: vi.fn(),
+  stageFileAttachment: vi.fn(),
   sendUserMessage: vi.fn(),
   steerTurn: vi.fn(),
   startReview: vi.fn(),
@@ -2364,7 +2367,243 @@ describe("useThreadMessaging telemetry", () => {
     expect(fallbackText).toContain(largeLog);
   });
 
-  it("blocks unsupported binary attachments instead of dropping them silently", async () => {
+  describe("original file attachments", () => {
+    const stagedDirectory = `/home/.codex/codex-monitor/attachments/sessions/${"a".repeat(64)}/${"b".repeat(64)}`;
+    const setup = (processing = false) => {
+      const dispatch = vi.fn();
+      const pushThreadErrorMessage = vi.fn();
+      const hook = renderHook(() => useThreadMessaging({
+        activeWorkspace: workspace,
+        activeThreadId: "thread-1",
+        accessMode: "current",
+        model: null,
+        effort: null,
+        collaborationMode: null,
+        reviewDeliveryMode: "inline",
+        steerEnabled: processing,
+        customPrompts: [],
+        threadStatusById: processing ? {
+          "thread-1": {
+            isProcessing: true,
+            isReviewing: false,
+            hasUnread: false,
+            processingStartedAt: 0,
+            lastDurationMs: null,
+          },
+        } : {},
+        activeTurnIdByThread: processing ? { "thread-1": "turn-1" } : {},
+        rateLimitsByWorkspace: {},
+        pendingInterruptsRef: { current: new Set<string>() },
+        dispatch,
+        getCustomName: vi.fn(() => undefined),
+        markProcessing: vi.fn(),
+        markReviewing: vi.fn(),
+        setActiveTurnId: vi.fn(),
+        recordThreadActivity: vi.fn(),
+        safeMessageActivity: vi.fn(),
+        onDebug: vi.fn(),
+        pushThreadErrorMessage,
+        ensureThreadForActiveWorkspace: vi.fn(async () => "thread-1"),
+        ensureThreadForWorkspace: vi.fn(async () => "thread-1"),
+        refreshThread: vi.fn(async () => null),
+        forkThreadForWorkspace: vi.fn(async () => null),
+        updateThreadParent: vi.fn(),
+      }));
+      return { ...hook, dispatch, pushThreadErrorMessage };
+    };
+
+    it.each(["ppt", "pptx", "docx", "xlsx", "pdf", "zip", "mp4", "custom"])(
+      "sends a .%s file outside the workspace using its original snapshot",
+      async (extension) => {
+        const name = `document.${extension}`;
+        const path = `${stagedDirectory}/${name}`;
+        vi.mocked(stageFileAttachment).mockResolvedValueOnce({ name, path, byteLength: 1200 });
+        const { result, dispatch, pushThreadErrorMessage } = setup();
+        await act(async () => {
+          await expect(result.current.sendUserMessageToThread(
+            workspace, "thread-1", "please read", [`/downloads/${name}`, "/tmp/workspace/photo.png"],
+          )).resolves.toEqual({ status: "sent" });
+        });
+        expect(stageFileAttachment).toHaveBeenCalledWith("ws-1", "thread-1", {
+          kind: "path", path: `/downloads/${name}`,
+        });
+        const sentText = vi.mocked(sendUserMessageService).mock.calls[0]?.[2] ?? "";
+        expect(sentText).toContain(`name="${name}"`);
+        expect(sentText).toContain(`path="${path}"`);
+        expect(sentText).toContain('bytes="1200" mode="file"');
+        expect(sentText).toContain("complete bytes are available");
+        expect(readWorkspaceFile).not.toHaveBeenCalled();
+        expect(sendUserMessageService).toHaveBeenCalledWith(
+          "ws-1", "thread-1", expect.any(String),
+          expect.objectContaining({ images: ["/tmp/workspace/photo.png"] }),
+        );
+        expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
+          type: "upsertItem",
+          item: expect.objectContaining({ attachments: [path] }),
+        }));
+        expect(pushThreadErrorMessage).not.toHaveBeenCalled();
+      },
+    );
+
+    it("sends more than ten files including an extensionless file", async () => {
+      const files = Array.from({ length: 12 }, (_, index) => ({
+        name: index === 0 ? "extensionless" : `file-${index}.custom`,
+        byteLength: 1,
+      }));
+      for (const file of files) {
+        vi.mocked(stageFileAttachment).mockResolvedValueOnce({
+          ...file, path: `${stagedDirectory}/${file.name}`,
+        });
+      }
+      const { result } = setup();
+      await act(async () => {
+        await expect(result.current.sendUserMessageToThread(
+          workspace, "thread-1", "read all files", files.map((file) => `/downloads/${file.name}`),
+        )).resolves.toEqual({ status: "sent" });
+      });
+      expect(stageFileAttachment).toHaveBeenCalledTimes(12);
+      const sentText = vi.mocked(sendUserMessageService).mock.calls[0]?.[2] ?? "";
+      for (const file of files) {
+        expect(sentText).toContain(`path="${stagedDirectory}/${file.name}"`);
+      }
+    });
+
+    it.each([
+      { name: "large.custom", mime: "application/octet-stream" },
+      { name: "large.txt", mime: "text/plain" },
+    ])("sends a pasted $name larger than the former 32 MiB limit", async ({ name, mime }) => {
+      const path = `${stagedDirectory}/${name}`;
+      const base64Data = "AAAA".repeat(Math.ceil(32 * 1024 * 1024 / 3) + 1);
+      const byteLength = base64Data.length / 4 * 3;
+      vi.mocked(stageFileAttachment).mockResolvedValueOnce({ name, path, byteLength });
+      const { result } = setup();
+      await act(async () => {
+        await expect(result.current.sendUserMessageToThread(
+          workspace, "thread-1", "read the complete file",
+          [`data:${mime};name="${name}";base64,${base64Data}`],
+        )).resolves.toEqual({ status: "sent" });
+      });
+      expect(stageFileAttachment).toHaveBeenCalledWith("ws-1", "thread-1", {
+        kind: "data", name, base64Data,
+      });
+      expect(createContentReference).not.toHaveBeenCalled();
+      const sentText = vi.mocked(sendUserMessageService).mock.calls[0]?.[2] ?? "";
+      expect(sentText).toContain(`path="${path}"`);
+      expect(sentText).toContain(`bytes="${byteLength}" mode="file"`);
+    });
+
+    it("passes a non-UTF-8 workspace text file to the Agent as original bytes", async () => {
+      const path = `${stagedDirectory}/legacy.txt`;
+      vi.mocked(readWorkspaceFile).mockRejectedValueOnce(new Error("File is not valid UTF-8"));
+      vi.mocked(stageFileAttachment).mockResolvedValueOnce({ name: "legacy.txt", path, byteLength: 4 });
+      const { result } = setup();
+      await act(async () => {
+        await expect(result.current.sendUserMessageToThread(
+          workspace, "thread-1", "read this", ["/tmp/workspace/legacy.txt"],
+        )).resolves.toEqual({ status: "sent" });
+      });
+      expect(stageFileAttachment).toHaveBeenCalledWith("ws-1", "thread-1", {
+        kind: "path", path: "/tmp/workspace/legacy.txt",
+      });
+      expect(sendUserMessageService).toHaveBeenCalledWith(
+        "ws-1", "thread-1", expect.stringContaining(path), expect.any(Object),
+      );
+    });
+
+    it("preserves non-UTF-8 pasted text as original bytes", async () => {
+      const path = `${stagedDirectory}/legacy.txt`;
+      const base64Data = btoa("\xff\xfe\x00\x01");
+      vi.mocked(stageFileAttachment).mockResolvedValueOnce({ name: "legacy.txt", path, byteLength: 4 });
+      const { result } = setup();
+      await act(async () => {
+        await expect(result.current.sendUserMessageToThread(
+          workspace, "thread-1", "read this", [`data:text/plain;name=legacy.txt;base64,${base64Data}`],
+        )).resolves.toEqual({ status: "sent" });
+      });
+      expect(stageFileAttachment).toHaveBeenCalledWith("ws-1", "thread-1", {
+        kind: "data", name: "legacy.txt", base64Data,
+      });
+      expect(sendUserMessageService).toHaveBeenCalledWith(
+        "ws-1", "thread-1", expect.stringContaining(path), expect.any(Object),
+      );
+    });
+
+    it("uploads a pasted PDF as bytes even when its content is valid UTF-8", async () => {
+      const path = `${stagedDirectory}/report.pdf`;
+      const base64Data = btoa("%PDF-1.7\noriginal PDF data");
+      vi.mocked(stageFileAttachment).mockResolvedValueOnce({ name: "report.pdf", path, byteLength: 26 });
+      const { result } = setup();
+      await act(async () => {
+        await result.current.sendUserMessageToThread(
+          workspace, "thread-1", "please read",
+          [`data:application/pdf;name="report.pdf";base64,${base64Data}`],
+        );
+      });
+      expect(stageFileAttachment).toHaveBeenCalledWith("ws-1", "thread-1", {
+        kind: "data", name: "report.pdf", base64Data,
+      });
+      const sentText = vi.mocked(sendUserMessageService).mock.calls[0]?.[2] ?? "";
+      expect(sentText).toContain(path);
+      expect(sentText).not.toContain(base64Data);
+      expect(sentText).not.toContain("%PDF");
+    });
+
+    it("retains a document draft when pasted file data is invalid", async () => {
+      const { result, pushThreadErrorMessage } = setup();
+      await act(async () => {
+        await expect(result.current.sendUserMessageToThread(
+          workspace, "thread-1", "please read", ["data:application/pdf;name=report.pdf,invalid"],
+        )).resolves.toEqual({ status: "blocked" });
+      });
+      expect(stageFileAttachment).not.toHaveBeenCalled();
+      expect(sendUserMessageService).not.toHaveBeenCalled();
+      expect(pushThreadErrorMessage).toHaveBeenCalledWith(
+        "thread-1", I18N_STRINGS.zh["composer.attachmentInvalidData"],
+      );
+    });
+
+    it("resends a stored file using its backend path after history reload", async () => {
+      const path = `${stagedDirectory}/slides.pptx`;
+      vi.mocked(stageFileAttachment).mockResolvedValueOnce({ name: "slides.pptx", path, byteLength: 4 });
+      const { result } = setup();
+      await act(async () => {
+        await result.current.sendUserMessageToThread(workspace, "thread-1", "read again", [path]);
+      });
+      expect(stageFileAttachment).toHaveBeenCalledWith("ws-1", "thread-1", { kind: "stored", path });
+      expect(readWorkspaceFile).not.toHaveBeenCalled();
+      expect(sendUserMessageService).toHaveBeenCalled();
+    });
+
+    it("includes document file references when steering an active turn", async () => {
+      const path = `${stagedDirectory}/report.docx`;
+      vi.mocked(stageFileAttachment).mockResolvedValueOnce({ name: "report.docx", path, byteLength: 4 });
+      const { result } = setup(true);
+      await act(async () => {
+        await result.current.sendUserMessageToThread(workspace, "thread-1", "also read", ["/downloads/report.docx"]);
+      });
+      expect(steerTurnService).toHaveBeenCalledWith(
+        "ws-1", "thread-1", "turn-1", expect.stringContaining(path), [],
+        expect.any(Array), expect.any(Object),
+      );
+      expect(sendUserMessageService).not.toHaveBeenCalled();
+    });
+
+    it("preserves a large text file as an original file instead of sending a truncated preview", async () => {
+      const path = `${stagedDirectory}/large.log`;
+      vi.mocked(readWorkspaceFile).mockResolvedValueOnce({ content: "truncated preview", truncated: true });
+      vi.mocked(stageFileAttachment).mockResolvedValueOnce({ name: "large.log", path, byteLength: 2_000_000 });
+      const { result } = setup();
+      await act(async () => {
+        await result.current.sendUserMessageToThread(workspace, "thread-1", "read full log", ["/tmp/workspace/large.log"]);
+      });
+      const sentText = vi.mocked(sendUserMessageService).mock.calls[0]?.[2] ?? "";
+      expect(sentText).toContain(path);
+      expect(sentText).not.toContain("truncated preview");
+    });
+  });
+
+  it("blocks sending when the original file cannot be staged", async () => {
+    vi.mocked(stageFileAttachment).mockRejectedValueOnce(new Error("Failed to open attachment: file missing"));
     const pushThreadErrorMessage = vi.fn();
     const dispatch = vi.fn();
     const { result } = renderHook(() =>
@@ -2412,7 +2651,7 @@ describe("useThreadMessaging telemetry", () => {
     expect(sendUserMessageService).not.toHaveBeenCalled();
     expect(pushThreadErrorMessage).toHaveBeenCalledWith(
       "thread-1",
-      expect.stringContaining("Unsupported attachment"),
+      expect.stringContaining(I18N_STRINGS.zh["composer.attachmentPersistFailed"]),
     );
     const optimisticAction = dispatch.mock.calls
       .map(([action]) => action)

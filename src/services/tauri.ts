@@ -384,6 +384,26 @@ export async function promoteComposerImages(
   });
 }
 
+export type FileAttachmentSource =
+  | { kind: "path" | "stored"; path: string }
+  | { kind: "data"; name: string; base64Data: string };
+
+export type StagedFileAttachment = {
+  name: string;
+  path: string;
+  byteLength: number;
+};
+
+export async function stageFileAttachment(
+  workspaceId: string,
+  threadId: string,
+  source: FileAttachmentSource,
+): Promise<StagedFileAttachment> {
+  return invoke<StagedFileAttachment>("stage_file_attachment", {
+    request: { workspaceId, threadId, source },
+  });
+}
+
 export type CreateMessageReferenceRequest = {
   workspaceId: string;
   sourceThreadId: string;
