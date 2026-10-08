@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, type RefObject } from "react";
 
 const MAX_PASTE_UNDO_DEPTH = 20;
-const MAX_COMPOSER_ATTACHMENTS = 10;
 
 type PasteAttachmentTransaction = {
   text: string;
@@ -116,7 +115,7 @@ export function useComposerPasteUndo({
         attachmentsAtPasteStart;
       const mergedAttachments = Array.from(
         new Set([...beforeAttachments, ...paths]),
-      ).slice(0, MAX_COMPOSER_ATTACHMENTS);
+      );
       const beforeSet = new Set(beforeAttachments);
       const addedAttachments = mergedAttachments.filter(
         (path) => !beforeSet.has(path),

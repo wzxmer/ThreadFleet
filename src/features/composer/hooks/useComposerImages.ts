@@ -2,8 +2,6 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { pickAttachmentFiles, saveComposerImages } from "../../../services/tauri";
 import { isImageAttachment } from "../../../utils/attachments";
 
-const MAX_COMPOSER_ATTACHMENTS = 10;
-
 type ComposerImageTransferToken = Readonly<{
   draftKey: string;
   generation: number;
@@ -42,10 +40,7 @@ export function useComposerImages({
       const attachImages = (nextPaths: string[]) => {
         setImagesByThread((prev) => {
           const existing = prev[draftKey] ?? [];
-          const merged = Array.from(new Set([...existing, ...nextPaths])).slice(
-            0,
-            MAX_COMPOSER_ATTACHMENTS,
-          );
+          const merged = Array.from(new Set([...existing, ...nextPaths]));
           return { ...prev, [draftKey]: merged };
         });
       };
@@ -172,10 +167,7 @@ export function useComposerImages({
           return prev;
         }
         const existing = prev[token.draftKey] ?? [];
-        const merged = Array.from(new Set([...existing, ...images])).slice(
-          0,
-          MAX_COMPOSER_ATTACHMENTS,
-        );
+        const merged = Array.from(new Set([...existing, ...images]));
         return { ...prev, [token.draftKey]: merged };
       });
     },

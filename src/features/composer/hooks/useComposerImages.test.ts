@@ -88,7 +88,7 @@ describe("useComposerImages", () => {
     hook.unmount();
   });
 
-  it("keeps at most ten attachments in one composer draft", async () => {
+  it("keeps all attachments beyond ten and deduplicates later additions", async () => {
     const hook = renderComposerImages({
       activeThreadId: "thread-limit",
       activeWorkspaceId: "ws-1",
@@ -103,11 +103,39 @@ describe("useComposerImages", () => {
       await Promise.resolve();
     });
 
-    expect(hook.result.activeImages).toHaveLength(10);
-    expect(hook.result.activeImages[hook.result.activeImages.length - 1]).toBe(
-      "/tmp/file-10.md",
-    );
+    expect(hook.result.activeImages).toEqual(attachments);
 
+    act(() => {
+      hook.result.attachImages([attachments[0], "/tmp/another.custom"]);
+    });
+    expect(hook.result.activeImages).toEqual([...attachments, "/tmp/another.custom"]);
+
+    hook.unmount();
+  });
+
+  it("restores every attachment after a failed transfer beyond ten", () => {
+    const hook = renderComposerImages({
+      activeThreadId: "thread-restore",
+      activeWorkspaceId: "ws-1",
+    });
+    const attachments = Array.from(
+      { length: 12 },
+      (_, index) => `/tmp/file-${index}.custom`,
+    );
+    act(() => {
+      hook.result.attachImages(attachments);
+    });
+    let token: { draftKey: string; generation: number } | null = null;
+    act(() => {
+      token = hook.result.transferActiveImages(attachments);
+      hook.result.attachImages(["/tmp/new.custom"]);
+    });
+    expect(hook.result.activeImages).toEqual(["/tmp/new.custom"]);
+
+    act(() => {
+      hook.result.restoreImagesForDraft(token!, attachments);
+    });
+    expect(hook.result.activeImages).toEqual(["/tmp/new.custom", ...attachments]);
     hook.unmount();
   });
 

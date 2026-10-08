@@ -106,7 +106,7 @@ describe("useComposerPasteUndo", () => {
     expect(hook.onReplaceImages).toHaveBeenLastCalledWith([]);
   });
 
-  it("records only the concurrent paste that wins the final attachment slot", () => {
+  it("records both concurrent pastes when the attachment count exceeds ten", () => {
     const existing = Array.from({ length: 9 }, (_, index) => `${index}.png`);
     const hook = setup({
       draftKey: "draft-a",
@@ -123,9 +123,12 @@ describe("useComposerPasteUndo", () => {
     hook.rerender({
       draftKey: "draft-a",
       text: "",
-      attachments: [...existing, "b.png"],
+      attachments: [...existing, "b.png", "a.png"],
     });
 
+    expect(hook.result.current.handlePasteUndoKeyDown(createShortcut())).toBe(true);
+    expect(hook.onReplaceImages).toHaveBeenLastCalledWith([...existing, "b.png"]);
+    hook.rerender({ draftKey: "draft-a", text: "", attachments: [...existing, "b.png"] });
     expect(hook.result.current.handlePasteUndoKeyDown(createShortcut())).toBe(true);
     expect(hook.onReplaceImages).toHaveBeenLastCalledWith(existing);
   });
@@ -156,30 +159,27 @@ describe("useComposerPasteUndo", () => {
     expect(hook.onReplaceImages).toHaveBeenCalledWith([]);
   });
 
-  it("records only attachments accepted by the ten-item limit", () => {
+  it("undoes and redoes all pasted attachments beyond ten", () => {
     const existing = Array.from({ length: 9 }, (_, index) => `${index}.png`);
     const hook = setup({
       draftKey: "draft-a",
       text: "",
       attachments: existing,
     });
-    act(() =>
-      hook.result.current.pasteAttachments([
-        "accepted.png",
-        "overflow-a.png",
-        "overflow-b.png",
-      ]),
-    );
+    const added = ["slides.pptx", "file.custom", "extensionless"];
+    act(() => hook.result.current.pasteAttachments([...added, existing[0]]));
     hook.rerender({
       draftKey: "draft-a",
       text: "",
-      attachments: [...existing, "accepted.png"],
+      attachments: [...existing, ...added],
     });
 
     expect(hook.result.current.handlePasteUndoKeyDown(createShortcut())).toBe(true);
+    expect(hook.onReplaceImages).toHaveBeenCalledWith(existing);
     hook.rerender({ draftKey: "draft-a", text: "", attachments: existing });
+    hook.onAttachImages.mockClear();
     expect(hook.result.current.handlePasteUndoKeyDown(createShortcut(true))).toBe(true);
-    expect(hook.onAttachImages).toHaveBeenCalledWith(["accepted.png"]);
+    expect(hook.onAttachImages).toHaveBeenCalledWith(added);
   });
 
   it("preserves normalized paths for attachments that predate the paste", () => {
