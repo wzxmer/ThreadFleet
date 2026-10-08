@@ -68,7 +68,7 @@ macOS 版本当前采用完整 ad-hoc 签名，但尚未使用 Apple Developer I
 
 ### 输入框与模型控制
 
-- 图片附件支持选择、拖放和粘贴。
+- 附件支持选择、拖放和粘贴任意格式的文件，包括图片、PPT/PPTX、Word、Excel、PDF 和无扩展名文件。TF 不设附件格式、单文件大小或数量上限，具体读取、解析和转换方式由模型与 Agent 工具决定。原文件保存在会话附件目录，工作区外文件也可添加；实际处理能力受 Agent 环境及可用资源影响。远程模式会先上传到 daemon，需同步更新远程端。附件准备失败时不会发送消息，草稿与附件保留。
 - 支持 `$` 技能、`/prompts:` 提示词、`/review`、`@` 文件路径补全。
 - 可配置默认跟进行为：排队发送或在运行中 steer。
 - 模型、推理强度、访问模式、协作模式和上下文用量在输入区集中控制。
@@ -321,6 +321,7 @@ The macOS build is fully ad-hoc signed but not notarized with Apple Developer ID
 - **Subagent result summaries**: parent conversations show compact child-result summaries, while long outputs open in a dedicated detail panel for reading, copying, or opening the child thread without burying the parent conclusion.
 - **Message experience**: references to the current or a new conversation enter the target composer as a draft and require explicit send; long references can be collapsed or previewed, individual references removed, and multiple references reordered; failed message re-send overwrites the original, auto-reconnect per session, large paste auto-converts to a previewable and restorable TXT attachment at 4,000 chars or 80 lines, image paste/drag/drop with hover copy and in-app large view.
 - **Message editing**: re-editing a failed message follows the composer’s current send-shortcut rule and uses a compact action surface without extra shortcut hints.
+- **File attachments**: select, drop or paste files of any format, including images, PPT/PPTX, Word, Excel, PDF and extensionless files, from inside or outside the workspace. TF imposes no file format, per-file size or attachment count limit. Original files are saved with the conversation; the model and Agent tools decide how to read, parse or convert them, subject to the Agent environment and available resources. Remote mode uploads files to the daemon and requires an updated remote backend. Preparation failures retain the draft and attachments without sending the message.
 - **Conversation export**: export selected or all user/AI messages as a portrait A4 PDF or one PNG image. Tool calls and process states are filtered out, message images are preserved, and generation plus chunked-save progress is visible and cancellable.
 - **Execution summaries**: completed runs retain their matching added/deleted line counts and Working duration across thread switches and app restarts, with each turn's duration shown after its final AI message timestamp and all recorded turn durations totaled at the bottom of the session; incomplete older records are labeled as recorded time and are never inferred.
 - **Git workflow**: view changes, diffs, logs, branches, commit, push/pull, plus GitHub Issues/PR lists and PR context questions.

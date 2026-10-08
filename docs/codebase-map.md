@@ -38,6 +38,7 @@ If a behavior must work in both app and daemon, implement it in `src-tauri/src/s
 | Change Git/GitHub backend behavior | `src/features/git/hooks/*`, `src/services/tauri.ts`, `src-tauri/src/git/mod.rs`, `src-tauri/src/shared/git_ui_core.rs`, `src-tauri/src/shared/git_ui_core/*`, `src-tauri/src/shared/git_core.rs`, `src-tauri/src/bin/codex_monitor_daemon/rpc.rs`, `src-tauri/src/bin/codex_monitor_daemon/rpc/git.rs` |
 | Change prompts CRUD/listing behavior | `src/features/prompts/hooks/useCustomPrompts.ts`, `src/features/prompts/components/PromptPanel.tsx`, `src/services/tauri.ts`, `src-tauri/src/prompts.rs`, `src-tauri/src/shared/prompts_core.rs`, `src-tauri/src/bin/codex_monitor_daemon/rpc.rs` |
 | Change file read/write for Agents/config | `src/services/tauri.ts`, `src-tauri/src/files/mod.rs`, `src-tauri/src/shared/files_core.rs`, `src-tauri/src/bin/codex_monitor_daemon/rpc.rs` |
+| Change original file attachment storage, upload, sending or history replay | `src-tauri/src/shared/file_attachment_core.rs`, `src-tauri/src/shared/attachment_storage_core.rs`, `src-tauri/src/files/mod.rs`, `src-tauri/src/bin/codex_monitor_daemon/rpc/files.rs`, `src/services/tauri.ts`, `src/features/threads/hooks/useThreadMessaging.ts`, `src/utils/attachments.ts`, `src/utils/threadItems.conversion.ts` |
 | Add/change daemon JSON-RPC surface | `src-tauri/src/bin/codex_monitor_daemon/rpc.rs`, `src-tauri/src/bin/codex_monitor_daemon/rpc/*`, `src-tauri/src/bin/codex_monitor_daemon.rs`, matching shared core |
 
 ## Frontend Navigation
