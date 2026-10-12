@@ -43,6 +43,18 @@ async function mount(handlers: Handlers) {
 }
 
 describe("useAppServerEvents", () => {
+  it("retains async question metadata from agent message completion", async () => {
+    const onAgentMessageCompleted = vi.fn();
+    const { root } = await mount({ onAgentMessageCompleted });
+    act(() => listener?.({ workspace_id: "ws-1", message: { method: "item/completed", params: {
+      threadId: "t", turnId: "turn", item: { type: "agentMessage", id: "async", text: "如何处理？", phase: "final_answer", delivery: "async",
+        questions: [{ title: "如何处理？", options: ["启用", "停用"] }, { title: "原因？", options: null }] },
+    } } }));
+    expect(onAgentMessageCompleted).toHaveBeenCalledWith(expect.objectContaining({
+      itemId: "async", asyncQuestions: [{ title: "如何处理？", options: ["启用", "停用"] }, { title: "原因？" }],
+    }));
+    await act(async () => root.unmount());
+  });
   it("routes resolved server requests with their typed IDs", async () => {
     const onServerRequestResolved = vi.fn();
     const { root } = await mount({ onServerRequestResolved });

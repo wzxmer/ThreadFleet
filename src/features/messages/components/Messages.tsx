@@ -31,7 +31,7 @@ import type {
 } from "../../../types";
 import { PlanReadyFollowupMessage } from "../../app/components/PlanReadyFollowupMessage";
 import { RequestUserInputMessage } from "../../app/components/RequestUserInputMessage";
-import { getQuestionReplyTarget } from "../utils/questionReply";
+import { getPendingAsyncQuestionIds, getQuestionReplyTarget } from "../utils/questionReply";
 import { useFileLinkOpener } from "../hooks/useFileLinkOpener";
 import {
   formatCount,
@@ -449,7 +449,7 @@ type MessagesProps = {
     response: RequestUserInputResponse,
   ) => Promise<void> | void;
   onPlanAccept?: () => void;
-  onQuestionReply?: (text: string) => Promise<SendMessageResult>;
+  onQuestionReply?: (text: string, delivery?: "async") => Promise<SendMessageResult>;
   onPlanSubmitChanges?: (changes: string) => void;
   onOpenThreadLink?: (threadId: string, workspaceId?: string | null) => void;
   subagentResults?: SubagentResultSummaryData[];
@@ -642,6 +642,10 @@ export const Messages = memo(function Messages({
   const questionReplyTarget = useMemo(
     () => !isThinking && !hasActiveUserInputRequest ? getQuestionReplyTarget(items) : null,
     [items, isThinking, hasActiveUserInputRequest],
+  );
+  const pendingAsyncQuestionIds = useMemo(
+    () => hasActiveUserInputRequest ? new Set<string>() : getPendingAsyncQuestionIds(items),
+    [items, hasActiveUserInputRequest],
   );
   const retryableUserMessageId = useMemo(
     () => getRetryableUserMessageId(resendViewItems, interruptedStatus),
@@ -1457,7 +1461,7 @@ export const Messages = memo(function Messages({
           item={item}
           isCopied={isCopied}
           onCopy={handleCopyMessage}
-          onQuestionReply={item.id === questionReplyTarget?.id ? onQuestionReply : undefined}
+          onQuestionReply={pendingAsyncQuestionIds.has(item.id) || (!item.asyncQuestions && item.id === questionReplyTarget?.id) ? onQuestionReply : undefined}
           onReference={
             onReferenceMessage || onQuoteMessage
               ? handleReferenceMessage

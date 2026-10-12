@@ -1,4 +1,5 @@
 import type { ConversationItem } from "../types";
+import { parseAsyncQuestions } from "./asyncUserInput";
 import { parseSubagentCheckpointEnvelopes } from "./subagentCheckpointEnvelope";
 import { extractAttachedFilesFromText, isImageAttachment } from "./attachments";
 import { parseCollabToolCallItem } from "./threadItems.collab";
@@ -446,12 +447,14 @@ export function buildConversationItemFromThreadItem(
   }
   if (type === "agentMessage") {
     const phase = asString(item.phase).trim();
+    const asyncQuestions = parseAsyncQuestions(item);
     return {
       id,
       kind: "message",
       role: "assistant",
       text: asString(item.text),
       ...(phase ? { phase } : {}),
+      ...(asyncQuestions ? { asyncQuestions } : {}),
       createdAt: extractCreatedAt(item),
     };
   }

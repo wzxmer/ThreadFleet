@@ -12,7 +12,27 @@ export function getQuestionReplyTarget(items: ConversationItem[]) {
   return null;
 }
 
-// Used only after the user explicitly opens the reply form. A list never
+export function getPendingAsyncQuestionIds(items: ConversationItem[]) {
+  const pending = new Set<string>();
+  const replies: string[] = [];
+  for (let index = items.length - 1; index >= 0; index--) {
+    const item = items[index];
+    if (item.kind !== "message") continue;
+    if (item.role === "user") {
+      // Typed follow-ups also answer/replace prior questions. Card replies
+      // quote their source so answering one card leaves other cards available.
+      if (!item.text.startsWith("> ")) break;
+      replies.push(item.text);
+    } else if (item.asyncQuestions?.length && !replies.some((reply) =>
+      reply.startsWith(buildQuestionReplyMessage(item.text, [])),
+    )) {
+      pending.add(item.id);
+    }
+  }
+  return pending;
+}
+
+// A clear list can show a form without a click. A list never
 // creates a server request, changes execution state, or selects an answer.
 export function extractQuestionChoices(text: string): { question: string; options: RequestUserInputOption[] } | null {
   if (/```|~~~/.test(text)) return null;

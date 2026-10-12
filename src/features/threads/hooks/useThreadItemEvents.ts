@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
+import type { AsyncQuestions } from "@utils/asyncUserInput";
 import type { Dispatch } from "react";
 import {
   buildCollabExecutionBindingObservation,
@@ -489,6 +490,7 @@ export function useThreadItemEvents({
       turnId,
       phase,
       text,
+      asyncQuestions,
     }: {
       workspaceId: string;
       threadId: string;
@@ -496,6 +498,7 @@ export function useThreadItemEvents({
       turnId?: string;
       phase?: string | null;
       text: string;
+      asyncQuestions?: AsyncQuestions;
     }) => {
       flushItemUpserts();
       resetStreamingThreadState(workspaceId, threadId);
@@ -511,6 +514,7 @@ export function useThreadItemEvents({
         turnId,
         phase,
         text,
+        ...(asyncQuestions ? { asyncQuestions } : {}),
         hasCustomName,
       });
       dispatch({

@@ -229,6 +229,19 @@ describe("useThreads UX integration", () => {
     expect(result.current.userInputRequests).toHaveLength(0);
   });
 
+  it("preserves asynchronous questions through completed messages and later progress", () => {
+    const { result, unmount } = renderHook(() => useThreads({ activeWorkspace: workspace, onWorkspaceConnected: vi.fn() }));
+    const asyncQuestions = [{ title: "如何处理？", options: ["启用", "停用"] }];
+    act(() => {
+      handlers?.onTurnStarted?.(workspace.id, "thread-q", "turn-q");
+      handlers?.onAgentMessageCompleted?.({ workspaceId: workspace.id, threadId: "thread-q", turnId: "turn-q", itemId: "question", phase: "final_answer", text: "如何处理？", asyncQuestions });
+      handlers?.onAgentMessageCompleted?.({ workspaceId: workspace.id, threadId: "thread-q", turnId: "turn-q", itemId: "progress", phase: "commentary", text: "继续其他工作。" });
+    });
+    expect(result.current.itemsByThread["thread-q"].find((item) => item.id === "question")).toMatchObject({ asyncQuestions });
+    expect(result.current.userInputRequests).toHaveLength(0);
+    unmount();
+  });
+
   it("does not automatically retry a thread while its native question is pending", async () => {
     const { result } = renderHook(() => useThreads({ activeWorkspace: workspace, workspaces: [workspace], onWorkspaceConnected: vi.fn() }));
     act(() => result.current.setThreadAutoContinueEnabled("thread-q", true));
@@ -2667,6 +2680,22 @@ describe("useThreads UX integration", () => {
       [],
     ]);
     expect(sendUserMessageService).not.toHaveBeenCalled();
+  });
+
+  it("steers an async answer to its original thread after the active selection changes", async () => {
+    vi.mocked(steerTurn).mockResolvedValue({ result: { turnId: "question-turn" } } as Awaited<ReturnType<typeof steerTurn>>);
+    const { result, unmount } = renderHook(() => useThreads({ activeWorkspace: workspace, onWorkspaceConnected: vi.fn(), steerEnabled: true }));
+    act(() => {
+      handlers?.onTurnStarted?.(workspace.id, "question-thread", "question-turn");
+      handlers?.onAgentMessageCompleted?.({ workspaceId: workspace.id, threadId: "question-thread", turnId: "question-turn", itemId: "q", text: "如何处理？", phase: "final_answer", asyncQuestions: [{ title: "如何处理？", options: ["启用", "停用"] }] });
+      result.current.setActiveThreadId("other-thread");
+    });
+    await act(async () => {
+      expect(await result.current.sendUserMessageToThread(workspace, "question-thread", "> 如何处理？\n\n停用", [])).toEqual({ status: "sent" });
+    });
+    expect(vi.mocked(steerTurn).mock.calls[0]?.slice(0, 5)).toEqual([workspace.id, "question-thread", "question-turn", "> 如何处理？\n\n停用", []]);
+    expect(sendUserMessageService).not.toHaveBeenCalled();
+    unmount();
   });
 
   it("links detached review thread to its parent", async () => {

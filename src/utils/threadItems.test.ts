@@ -1157,6 +1157,19 @@ describe("threadItems", () => {
     });
   });
 
+  it("preserves async questions independently of the richer message text during history merge", () => {
+    const message: ConversationItem = {
+      id: "async-1", kind: "message", role: "assistant", text: "Which region?",
+    };
+    const asyncQuestions = [{ title: "Which region?", options: ["A", "B"] }];
+    const withQuestions = { ...message, asyncQuestions };
+    const richerText = { ...message, text: "Which region? More streamed context." };
+    expect(mergeThreadItems([withQuestions], [richerText])[0]).toMatchObject({
+      text: richerText.text, asyncQuestions,
+    });
+    expect(mergeThreadItems([message], [withQuestions])[0]).toMatchObject({ asyncQuestions });
+  });
+
   it("uses trusted turn boundaries when historical message item timestamps are absent", () => {
     const items = buildItemsFromThread({
       turns: [

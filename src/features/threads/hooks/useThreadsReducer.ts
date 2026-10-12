@@ -129,6 +129,7 @@ export type ThreadAction =
       turnId?: string;
       text: string;
       phase?: string | null;
+      asyncQuestions?: Extract<ConversationItem, { kind: "message" }>["asyncQuestions"];
       hasCustomName: boolean;
     }
   | {

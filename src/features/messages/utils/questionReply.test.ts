@@ -1,8 +1,17 @@
 import { describe, expect, it } from "vitest";
 import type { ConversationItem } from "@/types";
-import { buildQuestionReplyMessage, extractQuestionChoices, getQuestionReplyTarget } from "./questionReply";
+import { buildQuestionReplyMessage, extractQuestionChoices, getPendingAsyncQuestionIds, getQuestionReplyTarget } from "./questionReply";
 
 describe("questionReply", () => {
+  it("keeps async questions through progress and resolves only the explicitly quoted answer", () => {
+    const first: ConversationItem = { id: "q1", kind: "message", role: "assistant", text: "First?", asyncQuestions: [{ title: "First?" }] };
+    const second: ConversationItem = { ...first, id: "q2", text: "Second?", asyncQuestions: [{ title: "Second?" }] };
+    const progress: ConversationItem = { id: "p", kind: "message", role: "assistant", text: "Working." };
+    const answer: ConversationItem = { id: "a", kind: "message", role: "user", text: buildQuestionReplyMessage(first.text, ["A"]) };
+    expect(getPendingAsyncQuestionIds([first, second, progress])).toEqual(new Set(["q2", "q1"]));
+    expect(getPendingAsyncQuestionIds([first, second, progress, answer])).toEqual(new Set(["q2"]));
+    expect(getPendingAsyncQuestionIds([first, second, { ...answer, text: "Both are fine." }])).toEqual(new Set());
+  });
   it("extracts the screenshot's terminal choices without selecting one", () => {
     expect(extractQuestionChoices("网站有 ICP 备案吗？这会决定服务器地区。\n\n- 没有，香港\n\n- 有，大陆\n\n- 不确定")).toEqual({
       question: "网站有 ICP 备案吗？这会决定服务器地区。",

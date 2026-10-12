@@ -200,10 +200,12 @@ function chooseRicherItem(remote: ConversationItem, local: ConversationItem) {
     const richer = local.text.length > remote.text.length ? local : remote;
     const phase = remote.phase ?? local.phase;
     const turnId = remote.turnId ?? local.turnId;
+    const asyncQuestions = remote.asyncQuestions ?? local.asyncQuestions;
     return {
       ...richer,
       ...(phase ? { phase } : {}),
       ...(turnId ? { turnId } : {}),
+      ...(asyncQuestions ? { asyncQuestions } : {}),
     };
   }
   if (remote.kind === "userInput" && local.kind === "userInput") {

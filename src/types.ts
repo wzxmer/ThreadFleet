@@ -234,6 +234,7 @@ export type ConversationItem = (
       role: "user" | "assistant";
       text: string;
       phase?: string;
+      asyncQuestions?: { title: string; options?: string[] }[];
       createdAt?: number;
       images?: string[];
       attachments?: string[];

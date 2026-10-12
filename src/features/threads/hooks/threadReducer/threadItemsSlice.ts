@@ -181,6 +181,7 @@ export function reduceThreadItems(state: ThreadState, action: ThreadAction): Thr
           ...existing,
           text: action.text || existing.text,
           ...(action.phase ? { phase: action.phase } : {}),
+          ...(action.asyncQuestions ? { asyncQuestions: action.asyncQuestions } : {}),
           ...(action.turnId ? { turnId: action.turnId } : {}),
           createdAt: existing.createdAt ?? Date.now(),
         };
@@ -191,6 +192,7 @@ export function reduceThreadItems(state: ThreadState, action: ThreadAction): Thr
           role: "assistant",
           text: action.text,
           ...(action.phase ? { phase: action.phase } : {}),
+          ...(action.asyncQuestions ? { asyncQuestions: action.asyncQuestions } : {}),
           ...(action.turnId ? { turnId: action.turnId } : {}),
           createdAt: Date.now(),
         });

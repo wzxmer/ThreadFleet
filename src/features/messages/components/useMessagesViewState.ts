@@ -440,7 +440,7 @@ export function useMessagesViewState({
       }
       const { item } = entry;
       if (item.kind === "message") {
-        return item.role === "assistant" && item.phase !== "final_answer";
+        return item.role === "assistant" && !item.asyncQuestions?.length && item.phase !== "final_answer";
       }
       return item.kind !== "subagentCheckpoint";
     };
@@ -450,7 +450,7 @@ export function useMessagesViewState({
       }
       const { item } = entry;
       if (item.kind === "message") {
-        return item.role === "assistant" && item.phase === "commentary";
+        return item.role === "assistant" && !item.asyncQuestions?.length && item.phase === "commentary";
       }
       return item.kind !== "subagentCheckpoint";
     };

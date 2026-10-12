@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { parseAsyncQuestions, type AsyncQuestions } from "@utils/asyncUserInput";
 import type {
   AppServerEvent,
   ApprovalRequest,
@@ -29,6 +30,7 @@ type AgentCompleted = {
   turnId?: string;
   phase?: string | null;
   text: string;
+  asyncQuestions?: AsyncQuestions;
 };
 
 type HookEvent = {
@@ -535,6 +537,7 @@ export function useAppServerEvents(handlers: AppServerEventHandlers) {
           const phaseRaw = item.phase ?? params.phase;
           const phase = typeof phaseRaw === "string" ? phaseRaw : null;
           const text = String(item.text ?? "");
+          const asyncQuestions = parseAsyncQuestions(item);
           if (itemId) {
             currentHandlers.onAgentMessageCompleted?.({
               workspaceId: workspace_id,
@@ -543,6 +546,7 @@ export function useAppServerEvents(handlers: AppServerEventHandlers) {
               turnId: itemTurnId,
               phase,
               text,
+              ...(asyncQuestions ? { asyncQuestions } : {}),
             });
           }
         }

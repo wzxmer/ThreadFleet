@@ -93,7 +93,7 @@ type MessageRowProps = MarkdownFileLinkProps & {
   isCopied: boolean;
   onCopy: (item: Extract<ConversationItem, { kind: "message" }>) => void;
   onReference?: (action: MessageReferenceAction) => void;
-  onQuestionReply?: (text: string) => Promise<SendMessageResult>;
+  onQuestionReply?: (text: string, delivery?: "async") => Promise<SendMessageResult>;
   onResendUserMessage?: (
     item: Extract<ConversationItem, { kind: "message" }>,
     text: string,
@@ -743,8 +743,13 @@ export const MessageRow = memo(function MessageRow({
 }: MessageRowProps) {
   const { t } = useI18n();
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
-  const [questionReplyOpen, setQuestionReplyOpen] = useState(false);
+  const [questionReplyExpanded, setQuestionReplyOpen] = useState<boolean | null>(null);
   const questionChoices = useMemo(() => extractQuestionChoices(item.text), [item.text]);
+  const questionReplyOpen = questionReplyExpanded ?? Boolean(item.asyncQuestions?.length || questionChoices);
+  const replyQuestions = item.asyncQuestions?.map((question, index) => ({
+    id: `reply-${index}`, header: "", question: question.title,
+    options: question.options?.map((label) => ({ label, description: "" })),
+  })) ?? [{ id: "reply", header: "", question: questionChoices?.question ?? t("userInput.replyQuestion"), options: questionChoices?.options }];
   const [isEditing, setIsEditing] = useState(false);
   const [isResending, setIsResending] = useState(false);
   const [editText, setEditText] = useState(item.text);
@@ -1210,7 +1215,7 @@ export const MessageRow = memo(function MessageRow({
         )}
         {!exportSelectionMode && onQuestionReply && hasText ? (
           <button type="button" className="ghost request-user-input-reply-toggle" data-button-elevation="none"
-            aria-expanded={questionReplyOpen} onClick={() => setQuestionReplyOpen((open) => !open)}>
+            aria-expanded={questionReplyOpen} onClick={() => setQuestionReplyOpen(!questionReplyOpen)}>
             {t("userInput.reply")}
           </button>
         ) : null}
@@ -1218,15 +1223,16 @@ export const MessageRow = memo(function MessageRow({
           <UserInputForm
             draftKey={item}
             title={t("userInput.reply")}
-            description={t("userInput.replyDescription")}
-            questions={[{
-              id: "reply", header: "",
-              question: questionChoices?.question ?? t("userInput.replyQuestion"),
-              options: questionChoices?.options,
-            }]}
+            description={t(item.asyncQuestions?.length ? "userInput.asyncDescription" : "userInput.replyDescription")}
+            questions={replyQuestions}
             onClose={() => setQuestionReplyOpen(false)}
             onSubmit={async (response) => {
-              const result = await onQuestionReply(buildQuestionReplyMessage(item.text, response.answers.reply.answers));
+              const answers = replyQuestions.flatMap((question) => {
+                const values = response.answers[question.id].answers;
+                return replyQuestions.length > 1 ? [question.question, ...values] : values;
+              });
+              const text = buildQuestionReplyMessage(item.text, answers);
+              const result = item.asyncQuestions?.length ? await onQuestionReply(text, "async") : await onQuestionReply(text);
               if (result.status !== "sent") throw new Error("Question reply was not sent");
               setQuestionReplyOpen(false);
             }}

@@ -27,6 +27,7 @@ import type { SubagentResultSummary } from "../utils/subagentResults";
 import { expectOpenedFileTarget } from "../test/fileLinkAssertions";
 import { Messages } from "./Messages";
 import { I18N_STRINGS } from "@/features/i18n/strings";
+import { buildConversationItemFromThreadItem } from "@utils/threadItems";
 
 const useFileLinkOpenerMock = vi.fn(
   (
@@ -62,18 +63,70 @@ vi.mock("@services/tauri", async () => {
 });
 
 describe("Messages", () => {
+  it("shows the screenshot's explicit choices as soon as the final answer becomes idle", () => {
+    const onQuestionReply = vi.fn();
+    const question: ConversationItem = {
+      id: "browser-sync-choice", kind: "message", role: "assistant", turnId: "turn-sync", phase: "final_answer",
+      text: "目前派大星、HUB、fluxionai、小新、星辰因旧版无法后台读取而停用了充值同步。建议把这几个改为浏览器同步，沿用各自原来的精确起点；总同步时自动打开它们。你希望怎么处理？\n\n- 改为浏览器同步并启用（推荐）\n- 保留停用，只打开已启用的渠道",
+    };
+    const props = { items: [question], threadId: "thread-sync", workspaceId: "ws-1", openTargets: [], selectedOpenAppId: "", onQuestionReply };
+    const { rerender } = render(<Messages {...props} isThinking />);
+    expect(screen.queryByRole("radio")).toBeNull();
+    rerender(<Messages {...props} isThinking={false} />);
+    expect(screen.getAllByRole("radio")).toHaveLength(2);
+    expect((screen.getByRole("button", { name: I18N_STRINGS.zh["userInput.submit"] }) as HTMLButtonElement).disabled).toBe(true);
+    expect(onQuestionReply).not.toHaveBeenCalled();
+  });
+
   it("replies to a plain question with explicit choices and context, without a native request", async () => {
     const onQuestionReply = vi.fn().mockResolvedValue({ status: "sent" });
     const question: ConversationItem = { id: "q", kind: "message", role: "assistant", text: "ICP 备案吗？\n\n- 香港\n- 大陆\n- 不确定" };
     const props = { items: [question], threadId: "thread-1", workspaceId: "ws-1", isThinking: false, openTargets: [], selectedOpenAppId: "", onQuestionReply };
     const { rerender } = render(<Messages {...props} />);
-    expect(screen.queryByRole("radio")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: I18N_STRINGS.zh["userInput.reply"] }));
+    expect(screen.getAllByRole("radio")).toHaveLength(3);
     fireEvent.click(screen.getByRole("radio", { name: "不确定" }));
     fireEvent.click(screen.getByRole("button", { name: I18N_STRINGS.zh["userInput.submit"] }));
     await waitFor(() => expect(onQuestionReply).toHaveBeenCalledWith("> ICP 备案吗？\n> \n> - 香港\n> - 大陆\n> - 不确定\n\n不确定"));
     rerender(<Messages {...props} items={[question, { id: "reply", kind: "message", role: "user", text: "不确定" }]} />);
     expect(screen.queryByRole("button", { name: I18N_STRINGS.zh["userInput.reply"] })).toBeNull();
+  });
+
+  it("keeps async choices visible during later progress and sends all answers to the original question", async () => {
+    const onQuestionReply = vi.fn().mockResolvedValue({ status: "sent" });
+    const question = buildConversationItemFromThreadItem({
+      type: "agentMessage", id: "async-choice", phase: "final_answer", delivery: "async",
+      text: "你希望怎么处理？\n- 浏览器同步\n- 保留停用\n\n补充要求？",
+      questions: [{ title: "你希望怎么处理？", options: ["浏览器同步", "保留停用"] }, { title: "补充要求？", options: null }],
+    })!;
+    const progress: ConversationItem = { kind: "message", id: "progress", role: "assistant", phase: "commentary", turnId: "t", text: "继续检查其他工作。" };
+    const props = { items: [{ ...question, turnId: "t" }, progress], threadId: "thread-1", workspaceId: "ws-1", activeTurnId: "t", isThinking: true, openTargets: [], selectedOpenAppId: "", onQuestionReply };
+    const { rerender } = render(<Messages {...props} />);
+    expect(screen.getAllByRole("radio")).toHaveLength(2);
+    fireEvent.click(screen.getByRole("radio", { name: "保留停用" }));
+    const submit = screen.getByRole("button", { name: I18N_STRINGS.zh["userInput.submit"] }) as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText(I18N_STRINGS.zh["userInput.answer"]), { target: { value: "等我确认" } });
+    fireEvent.click(submit);
+    await waitFor(() => expect(onQuestionReply).toHaveBeenCalledWith(
+      "> 你希望怎么处理？\n> - 浏览器同步\n> - 保留停用\n> \n> 补充要求？\n\n你希望怎么处理？\n保留停用\n补充要求？\n等我确认", "async",
+    ));
+    rerender(<Messages {...props} items={[...props.items, { kind: "message", role: "user", id: "response", text: onQuestionReply.mock.calls[0][0] }]} />);
+    expect(screen.queryByRole("radio")).toBeNull();
+    expect(screen.queryByRole("button", { name: I18N_STRINGS.zh["userInput.reply"] })).toBeNull();
+  });
+
+  it("allows collapsing choices and keeps free-text replies opt-in", () => {
+    const props = { items: [{ id: "q", kind: "message" as const, role: "assistant" as const, text: "选哪个？\n- A\n- B" }], threadId: "t", isThinking: false, openTargets: [], selectedOpenAppId: "", onQuestionReply: vi.fn() };
+    const { rerender } = render(<Messages {...props} />);
+    fireEvent.click(screen.getByRole("radio", { name: "B" }));
+    fireEvent.click(screen.getByRole("button", { name: I18N_STRINGS.zh["userInput.collapse"] }));
+    expect(screen.queryByRole("radio")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: I18N_STRINGS.zh["userInput.reply"] }));
+    expect((screen.getByRole("radio", { name: "B" }) as HTMLInputElement).checked).toBe(true);
+    rerender(<Messages {...props} items={[{ ...props.items[0], id: "free", text: "你的需求是什么？" }]} />);
+    expect(screen.queryByRole("form")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: I18N_STRINGS.zh["userInput.reply"] }));
+    expect(screen.getByRole("form")).toBeTruthy();
   });
 
   it("hides plain-question replies while execution or a native question is pending", () => {
