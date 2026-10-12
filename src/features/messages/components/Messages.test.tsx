@@ -62,6 +62,27 @@ vi.mock("@services/tauri", async () => {
 });
 
 describe("Messages", () => {
+  it("replies to a plain question with explicit choices and context, without a native request", async () => {
+    const onQuestionReply = vi.fn().mockResolvedValue({ status: "sent" });
+    const question: ConversationItem = { id: "q", kind: "message", role: "assistant", text: "ICP 备案吗？\n\n- 香港\n- 大陆\n- 不确定" };
+    const props = { items: [question], threadId: "thread-1", workspaceId: "ws-1", isThinking: false, openTargets: [], selectedOpenAppId: "", onQuestionReply };
+    const { rerender } = render(<Messages {...props} />);
+    expect(screen.queryByRole("radio")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: I18N_STRINGS.zh["userInput.reply"] }));
+    fireEvent.click(screen.getByRole("radio", { name: "不确定" }));
+    fireEvent.click(screen.getByRole("button", { name: I18N_STRINGS.zh["userInput.submit"] }));
+    await waitFor(() => expect(onQuestionReply).toHaveBeenCalledWith("> ICP 备案吗？\n> \n> - 香港\n> - 大陆\n> - 不确定\n\n不确定"));
+    rerender(<Messages {...props} items={[question, { id: "reply", kind: "message", role: "user", text: "不确定" }]} />);
+    expect(screen.queryByRole("button", { name: I18N_STRINGS.zh["userInput.reply"] })).toBeNull();
+  });
+
+  it("hides plain-question replies while execution or a native question is pending", () => {
+    const props = { items: [{ id: "q", kind: "message" as const, role: "assistant" as const, text: "Which region?" }], threadId: "thread-1", workspaceId: "ws-1", openTargets: [], selectedOpenAppId: "", onQuestionReply: vi.fn() };
+    const { rerender } = render(<Messages {...props} isThinking />);
+    expect(screen.queryByRole("button", { name: I18N_STRINGS.zh["userInput.reply"] })).toBeNull();
+    rerender(<Messages {...props} isThinking={false} userInputRequests={[{ workspace_id: "ws-1", request_id: 1, params: { thread_id: "thread-1", turn_id: "t", item_id: "i", questions: [] } }]} onUserInputSubmit={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: I18N_STRINGS.zh["userInput.reply"] })).toBeNull();
+  });
   beforeAll(() => {
     if (!HTMLElement.prototype.scrollIntoView) {
       HTMLElement.prototype.scrollIntoView = vi.fn();

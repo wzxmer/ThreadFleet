@@ -1,10 +1,11 @@
-import { useMemo, type RefObject } from "react";
+import { useCallback, useMemo, useRef, type RefObject } from "react";
 import type {
   AppSettings,
   ConversationItem,
   DebugEntry,
   ModelOption,
   RequestUserInputRequest,
+  SendMessageResult,
   ServiceTier,
   ThreadSummary,
   WorkspaceInfo,
@@ -229,6 +230,19 @@ export function useMainAppComposerWorkspaceState({
         ? t("userInput.planQueuePaused")
         : null;
 
+  const pendingRequestsRef = useRef(userInputRequests);
+  pendingRequestsRef.current = userInputRequests;
+  const replyToQuestion = useCallback(async (text: string): Promise<SendMessageResult> => {
+    if (!activeWorkspace || !activeThreadId || isProcessing || !text.trim()) return { status: "blocked" };
+    const isPending = () => pendingRequestsRef.current.some((request) =>
+      request.workspace_id === activeWorkspace.id && request.params.thread_id === activeThreadId,
+    );
+    if (isPending()) return { status: "blocked" };
+    if (!activeWorkspace.connected) await connectWorkspace(activeWorkspace);
+    if (isPending()) return { status: "blocked" };
+    return (await sendUserMessageToThread(activeWorkspace, activeThreadId, text, [])) ?? { status: "sent" };
+  }, [activeWorkspace, activeThreadId, isProcessing, connectWorkspace, sendUserMessageToThread]);
+
   const composerState = useComposerController({
     activeThreadId,
     activeTurnId,
@@ -318,6 +332,7 @@ export function useMainAppComposerWorkspaceState({
   const globalAgentMdContent = useGlobalAgentMd();
 
   return {
+    replyToQuestion,
     showWorkspaceHome,
     showComposer,
     files,

@@ -31,6 +31,7 @@ import type {
 } from "../../../types";
 import { PlanReadyFollowupMessage } from "../../app/components/PlanReadyFollowupMessage";
 import { RequestUserInputMessage } from "../../app/components/RequestUserInputMessage";
+import { getQuestionReplyTarget } from "../utils/questionReply";
 import { useFileLinkOpener } from "../hooks/useFileLinkOpener";
 import {
   formatCount,
@@ -448,6 +449,7 @@ type MessagesProps = {
     response: RequestUserInputResponse,
   ) => Promise<void> | void;
   onPlanAccept?: () => void;
+  onQuestionReply?: (text: string) => Promise<SendMessageResult>;
   onPlanSubmitChanges?: (changes: string) => void;
   onOpenThreadLink?: (threadId: string, workspaceId?: string | null) => void;
   subagentResults?: SubagentResultSummaryData[];
@@ -544,6 +546,7 @@ export const Messages = memo(function Messages({
   userInputRequests = [],
   onUserInputSubmit,
   onPlanAccept,
+  onQuestionReply,
   onPlanSubmitChanges,
   onOpenThreadLink,
   subagentResults = [],
@@ -636,6 +639,10 @@ export const Messages = memo(function Messages({
   );
 
   const hasActiveUserInputRequest = activeUserInputRequestId !== null;
+  const questionReplyTarget = useMemo(
+    () => !isThinking && !hasActiveUserInputRequest ? getQuestionReplyTarget(items) : null,
+    [items, isThinking, hasActiveUserInputRequest],
+  );
   const retryableUserMessageId = useMemo(
     () => getRetryableUserMessageId(resendViewItems, interruptedStatus),
     [interruptedStatus, resendViewItems],
@@ -1450,6 +1457,7 @@ export const Messages = memo(function Messages({
           item={item}
           isCopied={isCopied}
           onCopy={handleCopyMessage}
+          onQuestionReply={item.id === questionReplyTarget?.id ? onQuestionReply : undefined}
           onReference={
             onReferenceMessage || onQuoteMessage
               ? handleReferenceMessage

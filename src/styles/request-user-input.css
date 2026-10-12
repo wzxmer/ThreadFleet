@@ -2,6 +2,13 @@
   align-items: flex-start;
 }
 
+.request-user-input-reply-toggle {
+  display: block;
+  width: fit-content;
+  margin: 10px 0;
+  font-size: 12px;
+}
+
 .request-user-input-card {
   width: min(560px, 100%);
   box-sizing: border-box;

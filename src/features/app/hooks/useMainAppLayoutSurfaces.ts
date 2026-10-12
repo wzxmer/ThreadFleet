@@ -720,6 +720,7 @@ function buildPrimarySurface({
       },
       userInputRequests,
       onUserInputSubmit,
+      onQuestionReply: composerWorkspaceState.replyToQuestion,
       onPlanAccept,
       onPlanSubmitChanges,
       onOpenThreadLink: handleOpenThreadLink,

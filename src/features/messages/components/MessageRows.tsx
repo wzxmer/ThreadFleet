@@ -24,6 +24,8 @@ import X from "lucide-react/dist/esm/icons/x";
 import { exportMarkdownFile } from "@services/tauri";
 import { pushErrorToast } from "@services/toasts";
 import { useI18n } from "@/features/i18n/I18nProvider";
+import { UserInputForm } from "@app/components/UserInputForm";
+import { buildQuestionReplyMessage, extractQuestionChoices } from "../utils/questionReply";
 import { ModelActivityCore } from "@/features/models/components/ModelActivityCore";
 import type { ModelActivityState } from "@/features/models/components/ModelActivityCore";
 import type {
@@ -91,6 +93,7 @@ type MessageRowProps = MarkdownFileLinkProps & {
   isCopied: boolean;
   onCopy: (item: Extract<ConversationItem, { kind: "message" }>) => void;
   onReference?: (action: MessageReferenceAction) => void;
+  onQuestionReply?: (text: string) => Promise<SendMessageResult>;
   onResendUserMessage?: (
     item: Extract<ConversationItem, { kind: "message" }>,
     text: string,
@@ -718,6 +721,7 @@ export const MessageRow = memo(function MessageRow({
   isCopied,
   onCopy,
   onReference,
+  onQuestionReply,
   onResendUserMessage,
   composerSendShortcut = "enter",
   assistantActivityState = "idle",
@@ -739,6 +743,8 @@ export const MessageRow = memo(function MessageRow({
 }: MessageRowProps) {
   const { t } = useI18n();
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  const [questionReplyOpen, setQuestionReplyOpen] = useState(false);
+  const questionChoices = useMemo(() => extractQuestionChoices(item.text), [item.text]);
   const [isEditing, setIsEditing] = useState(false);
   const [isResending, setIsResending] = useState(false);
   const [editText, setEditText] = useState(item.text);
@@ -1202,6 +1208,30 @@ export const MessageRow = memo(function MessageRow({
             </button>
           </div>
         )}
+        {!exportSelectionMode && onQuestionReply && hasText ? (
+          <button type="button" className="ghost request-user-input-reply-toggle" data-button-elevation="none"
+            aria-expanded={questionReplyOpen} onClick={() => setQuestionReplyOpen((open) => !open)}>
+            {t("userInput.reply")}
+          </button>
+        ) : null}
+        {!exportSelectionMode && questionReplyOpen && onQuestionReply ? (
+          <UserInputForm
+            draftKey={item}
+            title={t("userInput.reply")}
+            description={t("userInput.replyDescription")}
+            questions={[{
+              id: "reply", header: "",
+              question: questionChoices?.question ?? t("userInput.replyQuestion"),
+              options: questionChoices?.options,
+            }]}
+            onClose={() => setQuestionReplyOpen(false)}
+            onSubmit={async (response) => {
+              const result = await onQuestionReply(buildQuestionReplyMessage(item.text, response.answers.reply.answers));
+              if (result.status !== "sent") throw new Error("Question reply was not sent");
+              setQuestionReplyOpen(false);
+            }}
+          />
+        ) : null}
       </div>
     </div>
   );
