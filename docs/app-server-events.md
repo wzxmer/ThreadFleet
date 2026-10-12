@@ -83,6 +83,7 @@ subscriptions.
 - `item/reasoning/summaryTextDelta`
 - `item/reasoning/textDelta`
 - `item/started`
+- `serverRequest/resolved`
 - `thread/archived`
 - `thread/closed`
 - `thread/name/updated`
@@ -130,6 +131,21 @@ These arrive on the same frontend event stream but are not Codex v2
 - `codex/connected` (ThreadFleet synthetic bridge event)
 - `codex/event/skills_update_available` (handled via
   `isSkillsUpdateAvailableEvent(...)` in `useSkills.ts`)
+
+### User questions
+
+- `item/tool/requestUserInput` renders an explicit per-question choice/free-text
+  form. Submission replies to the original server request; it never starts a
+  second turn. Sensitive inputs are masked and redacted from the local answer
+  summary.
+- `serverRequest/resolved` removes pending question UI by workspace and typed
+  request ID. Terminal turns clear only questions for that turn; closing a
+  thread or reconnecting a workspace invalidates its old request IDs.
+- Live request drafts stay in memory across thread navigation. Restarting the
+  application does not restore live RPC IDs or unsent answers.
+- A plain-text question uses a separate user-initiated reply action. It sends
+  question context and the selected/custom answer as a normal message, without
+  synthesizing a server request or changing execution state.
 
 ### Remote transport continuity
 
@@ -189,7 +205,7 @@ ThreadFleet status:
 Compared against Codex app-server protocol v2 notifications, the following
 events are currently not routed:
 
-At the baseline hash, upstream defines 69 server notifications; CM routes 28 and leaves 41 below unsupported.
+At the baseline hash, upstream defines 69 server notifications; CM routes 29 and leaves 40 below unsupported.
 
 - `command/exec/outputDelta`
 - `configWarning`
@@ -213,7 +229,6 @@ At the baseline hash, upstream defines 69 server notifications; CM routes 28 and
 - `process/outputDelta` (experimental)
 - `rawResponseItem/completed` (internal-only)
 - `remoteControl/status/changed`
-- `serverRequest/resolved`
 - `skills/changed`
 - `thread/compacted` (deprecated; intentionally not routed)
 - `thread/deleted`
