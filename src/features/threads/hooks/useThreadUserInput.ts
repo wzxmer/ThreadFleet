@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import type { Dispatch } from "react";
 import type {
   ConversationItem,
@@ -7,9 +7,11 @@ import type {
 } from "@/types";
 import { respondToUserInputRequest } from "@services/tauri";
 import type { ThreadAction } from "./useThreadsReducer";
+import { useI18n } from "@/features/i18n/I18nProvider";
 
 type UseThreadUserInputOptions = {
   dispatch: Dispatch<ThreadAction>;
+  requests: RequestUserInputRequest[];
 };
 
 function asString(value: unknown) {
@@ -19,6 +21,8 @@ function asString(value: unknown) {
 function buildUserInputConversationItem(
   request: RequestUserInputRequest,
   response: RequestUserInputResponse,
+  secretAnswer: string,
+  fallbackQuestion: string,
 ): Extract<ConversationItem, { kind: "userInput" }> {
   const threadId = asString(request.params.thread_id).trim();
   const turnId = asString(request.params.turn_id).trim();
@@ -37,7 +41,7 @@ function buildUserInputConversationItem(
       id,
       header: asString(question.header).trim(),
       question: asString(question.question).trim(),
-      answers,
+      answers: question.isSecret && answers.length ? [secretAnswer] : answers,
     };
   });
   const extra = Object.entries(answered)
@@ -58,7 +62,7 @@ function buildUserInputConversationItem(
     entries.push({
       id: "user-input",
       header: "",
-      question: "Input requested",
+      question: fallbackQuestion,
       answers: [],
     });
   }
@@ -84,28 +88,41 @@ function buildUserInputConversationItem(
   };
 }
 
-export function useThreadUserInput({ dispatch }: UseThreadUserInputOptions) {
+export function useThreadUserInput({ dispatch, requests }: UseThreadUserInputOptions) {
+  const { t } = useI18n();
+  const requestsRef = useRef(requests);
+  requestsRef.current = requests;
+  const inFlight = useRef(new Map<RequestUserInputRequest, Promise<void>>());
   const handleUserInputSubmit = useCallback(
-    async (request: RequestUserInputRequest, response: RequestUserInputResponse) => {
-      await respondToUserInputRequest(
-        request.workspace_id,
-        request.request_id,
-        response.answers,
-      );
-      const item = buildUserInputConversationItem(request, response);
-      dispatch({
-        type: "upsertItem",
-        workspaceId: request.workspace_id,
-        threadId: request.params.thread_id,
-        item,
-      });
-      dispatch({
-        type: "removeUserInputRequest",
-        requestId: request.request_id,
-        workspaceId: request.workspace_id,
-      });
+    (request: RequestUserInputRequest, response: RequestUserInputResponse): Promise<void> => {
+      const pending = inFlight.current.get(request);
+      if (pending) return pending;
+      if (!requestsRef.current.includes(request)) {
+        return Promise.reject(new Error("User input request is no longer pending"));
+      }
+      const submission = (async () => {
+        await respondToUserInputRequest(
+          request.workspace_id,
+          request.request_id,
+          response.answers,
+        );
+        const item = buildUserInputConversationItem(request, response, t("userInput.secretAnswer"), t("userInput.title"));
+        dispatch({
+          type: "upsertItem",
+          workspaceId: request.workspace_id,
+          threadId: request.params.thread_id,
+          item,
+        });
+        dispatch({
+          type: "removeUserInputRequest",
+          requestId: request.request_id,
+          workspaceId: request.workspace_id,
+        });
+      })().finally(() => { inFlight.current.delete(request); });
+      inFlight.current.set(request, submission);
+      return submission;
     },
-    [dispatch],
+    [dispatch, t],
   );
 
   return { handleUserInputSubmit };

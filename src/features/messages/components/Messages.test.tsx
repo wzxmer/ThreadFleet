@@ -26,6 +26,7 @@ import type {
 import type { SubagentResultSummary } from "../utils/subagentResults";
 import { expectOpenedFileTarget } from "../test/fileLinkAssertions";
 import { Messages } from "./Messages";
+import { I18N_STRINGS } from "@/features/i18n/strings";
 
 const useFileLinkOpenerMock = vi.fn(
   (
@@ -5892,7 +5893,7 @@ describe("Messages", () => {
       />,
     );
 
-    expect(screen.getByText("Input requested")).toBeTruthy();
+    expect(screen.getByText(I18N_STRINGS.zh["userInput.title"])).toBeTruthy();
     expect(screen.queryByText("Plan ready")).toBeNull();
   });
 

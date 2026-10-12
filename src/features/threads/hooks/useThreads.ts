@@ -244,7 +244,7 @@ export function useThreads({
   rateLimitsByWorkspaceRef.current = state.rateLimitsByWorkspace;
   const { approvalAllowlistRef, handleApprovalDecision, handleApprovalRemember } =
     useThreadApprovals({ dispatch, onDebug });
-  const { handleUserInputSubmit } = useThreadUserInput({ dispatch });
+  const { handleUserInputSubmit } = useThreadUserInput({ dispatch, requests: state.userInputRequests });
   const {
     customNamesRef,
     threadActivityRef,
@@ -266,11 +266,14 @@ export function useThreads({
       workspacesRef.current.find((workspace) => workspace.id === workspaceId) ?? null,
     [],
   );
+  const pendingUserInputsRef = useRef(state.userInputRequests);
+  pendingUserInputsRef.current = state.userInputRequests;
   const isThreadProcessingForAutoContinue = useCallback(
     (threadId: string) =>
       Boolean(
         threadStatusByIdRef.current[threadId]?.isProcessing ||
-          activeTurnIdByThreadRef.current[threadId],
+          activeTurnIdByThreadRef.current[threadId] ||
+          pendingUserInputsRef.current.some((request) => request.params.thread_id === threadId),
       ),
     [],
   );

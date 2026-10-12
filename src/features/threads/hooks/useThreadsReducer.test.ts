@@ -7,6 +7,19 @@ import { initialState, threadReducer } from "./useThreadsReducer";
 import type { ThreadState } from "./useThreadsReducer";
 
 describe("threadReducer", () => {
+  it("expires only requests belonging to the resolved workspace, thread and turn", () => {
+    const request = { workspace_id: "a", request_id: 1, params: { thread_id: "t", turn_id: "turn", item_id: "i", questions: [] } };
+    const state = { ...initialState, userInputRequests: [request,
+      { ...request, workspace_id: "b" },
+      { ...request, request_id: "1" },
+      { ...request, request_id: 2, params: { ...request.params, turn_id: "new-turn" } },
+    ] };
+    const resolved = threadReducer(state, { type: "removeUserInputRequest", workspaceId: "a", requestId: 1 });
+    expect(resolved.userInputRequests.map((entry) => entry.request_id)).toEqual([1, "1", 2]);
+    const terminal = threadReducer(state, { type: "clearUserInputRequests", workspaceId: "a", threadId: "t", turnId: "turn" });
+    expect(terminal.userInputRequests).toEqual([state.userInputRequests[1], state.userInputRequests[3]]);
+    expect(threadReducer(state, { type: "clearUserInputRequests", workspaceId: "a" }).userInputRequests).toEqual([state.userInputRequests[1]]);
+  });
   it("ensures thread with default name and active selection", () => {
     const next = threadReducer(initialState, {
       type: "ensureThread",

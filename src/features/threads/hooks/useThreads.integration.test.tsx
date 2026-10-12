@@ -212,6 +212,34 @@ describe("useThreads UX integration", () => {
     });
   });
 
+  it("expires native questions on resolution, turn completion and workspace reconnect", async () => {
+    const { result } = renderHook(() => useThreads({ activeWorkspace: workspace, onWorkspaceConnected: vi.fn() }));
+    const question = { workspace_id: workspace.id, request_id: 1, params: { thread_id: "thread-q", turn_id: "turn-q", item_id: "i", questions: [{ id: "q", question: "Which region?", header: "" }] } };
+    act(() => handlers?.onRequestUserInput?.(question));
+    expect(result.current.userInputRequests).toHaveLength(1);
+    act(() => handlers?.onServerRequestResolved?.(workspace.id, 1));
+    expect(result.current.userInputRequests).toHaveLength(0);
+    act(() => {
+      handlers?.onRequestUserInput?.(question);
+      handlers?.onRequestUserInput?.({ ...question, request_id: 2, params: { ...question.params, turn_id: "new-turn" } });
+    });
+    act(() => handlers?.onTurnCompleted?.(workspace.id, "thread-q", "turn-q", "completed"));
+    expect(result.current.userInputRequests.map((entry) => entry.request_id)).toEqual([2]);
+    act(() => handlers?.onWorkspaceConnected?.(workspace.id));
+    expect(result.current.userInputRequests).toHaveLength(0);
+  });
+
+  it("does not automatically retry a thread while its native question is pending", async () => {
+    const { result } = renderHook(() => useThreads({ activeWorkspace: workspace, workspaces: [workspace], onWorkspaceConnected: vi.fn() }));
+    act(() => result.current.setThreadAutoContinueEnabled("thread-q", true));
+    act(() => handlers?.onTurnError?.(workspace.id, "thread-q", "turn-q", { message: "retry later", willRetry: false }));
+    act(() => handlers?.onRequestUserInput?.({ workspace_id: workspace.id, request_id: 1, params: { thread_id: "thread-q", turn_id: "turn-q", item_id: "i", questions: [{ id: "q", question: "Which region?", header: "" }] } }));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 2100)); });
+    expect(sendUserMessageService).not.toHaveBeenCalled();
+    expect(result.current.autoContinueStatusByThread["thread-q"]?.phase).toBe("waiting");
+    expect(result.current.userInputRequests).toHaveLength(1);
+  });
+
   it("loads history for a persisted active thread after its initial list arrives", async () => {
     localStorage.setItem(
       STORAGE_KEY_ACTIVE_THREADS,

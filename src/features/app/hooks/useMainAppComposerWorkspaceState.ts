@@ -17,6 +17,7 @@ import { useGlobalAgentMd } from "@app/hooks/useGlobalAgentMd";
 import { useWorkspaceAgentMd } from "@/features/workspaces/hooks/useWorkspaceAgentMd";
 import { useWorkspaceHome } from "@/features/workspaces/hooks/useWorkspaceHome";
 import { isLocalCodexWorkspaceId } from "@/features/workspaces/domain/localCodexWorkspace";
+import { useI18n } from "@/features/i18n/I18nProvider";
 
 const RECENT_THREAD_LIMIT = 8;
 
@@ -103,6 +104,7 @@ export function useMainAppComposerWorkspaceState({
   refs,
   actions,
 }: UseMainAppComposerWorkspaceStateArgs) {
+  const { t } = useI18n();
   const {
     centerMode,
     isCompact,
@@ -215,16 +217,16 @@ export function useMainAppComposerWorkspaceState({
   );
 
   const queueFlushPaused = Boolean(
-    settings.pauseQueuedMessagesWhenResponseRequired &&
-      activeThreadId &&
-      (hasUserInputRequestForActiveThread || isPlanReadyAwaitingResponse),
+    activeThreadId &&
+      (hasUserInputRequestForActiveThread ||
+        (settings.pauseQueuedMessagesWhenResponseRequired && isPlanReadyAwaitingResponse)),
   );
 
   const queuePausedReason =
     queueFlushPaused && hasUserInputRequestForActiveThread
-      ? "Paused — waiting for your answers."
+      ? t("userInput.queuePaused")
       : queueFlushPaused && isPlanReadyAwaitingResponse
-        ? "Paused — waiting for plan accept/changes."
+        ? t("userInput.planQueuePaused")
         : null;
 
   const composerState = useComposerController({

@@ -3,10 +3,13 @@
 }
 
 .request-user-input-card {
-  width: min(520px, 72%);
+  width: min(560px, 100%);
+  box-sizing: border-box;
+  font-size: 13px;
+  line-height: 1.5;
   max-width: 100%;
-  background: var(--surface-card-strong);
-  border: 1px solid var(--border-stronger);
+  background: var(--ds-surface-card);
+  border: 1px solid var(--ds-border-strong);
   border-radius: 16px;
   padding: 10px 12px;
   display: flex;
@@ -44,7 +47,11 @@
 
 .request-user-input-question {
   display: grid;
-  gap: 4px;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
 }
 
 .request-user-input-question-header {
@@ -55,8 +62,11 @@
 }
 
 .request-user-input-question-text {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text);
+  padding: 0;
+  margin-bottom: 8px;
+  overflow-wrap: anywhere;
 }
 
 .request-user-input-options {
@@ -70,14 +80,52 @@
   padding: 6px 8px;
   background: var(--surface-card-muted);
   text-align: left;
-  display: grid;
-  gap: 2px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
   transition: border-color 0.15s ease, background 0.15s ease;
 }
 
 .request-user-input-option.is-selected {
-  border-color: rgba(77, 163, 255, 0.7);
-  background: rgba(77, 163, 255, 0.12);
+  border-color: var(--border-accent);
+  background: var(--surface-hover);
+}
+
+.request-user-input-option:hover,
+.request-user-input-option:focus-within {
+  border-color: var(--border-accent);
+}
+
+.request-user-input-option input {
+  flex: 0 0 auto;
+  margin: 3px 0 0;
+  accent-color: var(--border-accent);
+}
+
+.request-user-input-option-content {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.request-user-input-question:disabled {
+  opacity: 0.65;
+}
+
+.request-user-input-description,
+.request-user-input-answer-label {
+  margin: 0;
+  color: var(--text-subtle);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.request-user-input-error {
+  margin: 0;
+  color: var(--status-error);
+  font-size: 12px;
 }
 
 .request-user-input-option-label {
@@ -92,6 +140,10 @@
 }
 
 .request-user-input-notes {
+  width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
   border-radius: 12px;
   border: 1px solid var(--border-subtle);
   background: var(--surface-card-muted);
@@ -103,11 +155,12 @@
 }
 
 .request-user-input-notes:focus {
-  outline: 2px solid rgba(77, 163, 255, 0.35);
+  outline: 2px solid var(--ds-modal-focus-ring);
   outline-offset: 1px;
 }
 
 .request-user-input-actions {
+  flex-wrap: wrap;
   display: flex;
   justify-content: flex-end;
   gap: 8px;

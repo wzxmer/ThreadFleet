@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, renderHook } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { RequestUserInputRequest } from "@/types";
 import { respondToUserInputRequest } from "@services/tauri";
 import { useThreadUserInput } from "./useThreadUserInput";
 
@@ -9,9 +10,9 @@ vi.mock("@services/tauri", () => ({
 }));
 
 describe("useThreadUserInput", () => {
+  beforeEach(() => { vi.mocked(respondToUserInputRequest).mockReset().mockResolvedValue(undefined); });
   it("submits request-user-input answers and appends an answered item", async () => {
     const dispatch = vi.fn();
-    const { result } = renderHook(() => useThreadUserInput({ dispatch }));
     const request = {
       workspace_id: "ws-1",
       request_id: "req-7",
@@ -37,6 +38,7 @@ describe("useThreadUserInput", () => {
         "q-choice": { answers: ["A", "user_note: with details"] },
       },
     };
+    const { result } = renderHook(() => useThreadUserInput({ dispatch, requests: [request] }));
 
     await act(async () => {
       await result.current.handleUserInputSubmit(request, response);
@@ -65,5 +67,46 @@ describe("useThreadUserInput", () => {
       requestId: "req-7",
       workspaceId: "ws-1",
     });
+  });
+
+  const request: RequestUserInputRequest = {
+    workspace_id: "ws-1", request_id: "r", params: { thread_id: "t", turn_id: "turn", item_id: "i",
+      questions: [{ id: "q", question: "Credential?", header: "", isSecret: true }] },
+  };
+  const response = { answers: { q: { answers: ["sensitive-value"] } } };
+
+  it("rejects stale requests before writing to the server", async () => {
+    const dispatch = vi.fn();
+    const { result, rerender } = renderHook(({ requests }) => useThreadUserInput({ dispatch, requests }), { initialProps: { requests: [request] } });
+    rerender({ requests: [] });
+    await expect(result.current.handleUserInputSubmit(request, response)).rejects.toThrow("no longer pending");
+    expect(respondToUserInputRequest).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it("preserves the pending request on transport failure", async () => {
+    vi.mocked(respondToUserInputRequest).mockRejectedValueOnce(new Error("offline"));
+    const dispatch = vi.fn();
+    const { result } = renderHook(() => useThreadUserInput({ dispatch, requests: [request] }));
+    await expect(result.current.handleUserInputSubmit(request, response)).rejects.toThrow("offline");
+    expect(dispatch).not.toHaveBeenCalled();
+    await result.current.handleUserInputSubmit(request, response);
+    expect(dispatch).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(dispatch.mock.calls)).not.toContain("sensitive-value");
+    expect(respondToUserInputRequest).toHaveBeenLastCalledWith("ws-1", "r", response.answers);
+  });
+
+  it("deduplicates submissions until the transport finishes", async () => {
+    let resolve!: () => void;
+    vi.mocked(respondToUserInputRequest).mockImplementation(() => new Promise<void>((done) => { resolve = done; }));
+    const dispatch = vi.fn();
+    const { result } = renderHook(() => useThreadUserInput({ dispatch, requests: [request] }));
+    const a = result.current.handleUserInputSubmit(request, response);
+    const b = result.current.handleUserInputSubmit(request, response);
+    expect(a).toBe(b);
+    expect(respondToUserInputRequest).toHaveBeenCalledTimes(1);
+    resolve();
+    await a;
+    expect(dispatch).toHaveBeenCalledTimes(2);
   });
 });

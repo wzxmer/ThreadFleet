@@ -234,6 +234,7 @@ export type ThreadAction =
   | { type: "addApproval"; approval: ApprovalRequest }
   | { type: "removeApproval"; requestId: number | string; workspaceId: string }
   | { type: "addUserInputRequest"; request: RequestUserInputRequest }
+  | { type: "clearUserInputRequests"; workspaceId: string; threadId?: string; turnId?: string }
   | {
       type: "removeUserInputRequest";
       requestId: number | string;

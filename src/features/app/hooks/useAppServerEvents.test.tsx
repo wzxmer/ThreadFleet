@@ -43,6 +43,26 @@ async function mount(handlers: Handlers) {
 }
 
 describe("useAppServerEvents", () => {
+  it("routes resolved server requests with their typed IDs", async () => {
+    const onServerRequestResolved = vi.fn();
+    const { root } = await mount({ onServerRequestResolved });
+    act(() => {
+      for (const requestId of [0, "0"]) listener?.({ workspace_id: "ws-1", message: { method: "serverRequest/resolved", params: { threadId: "t", requestId } } });
+      listener?.({ workspace_id: "ws-1", message: { method: "serverRequest/resolved", params: { requestId: null } } });
+    });
+    expect(onServerRequestResolved.mock.calls).toEqual([["ws-1", 0], ["ws-1", "0"]]);
+    await act(async () => root.unmount());
+  });
+
+  it("preserves secret-question flags", async () => {
+    const onRequestUserInput = vi.fn();
+    const { root } = await mount({ onRequestUserInput });
+    act(() => listener?.({ workspace_id: "ws-1", message: { method: "item/tool/requestUserInput", id: 1, params: {
+      threadId: "t", turnId: "turn", itemId: "i", questions: [{ id: "q", header: "", question: "Credential?", isSecret: true }],
+    } } }));
+    expect(onRequestUserInput).toHaveBeenCalledWith(expect.objectContaining({ params: expect.objectContaining({ questions: [expect.objectContaining({ isSecret: true })] }) }));
+    await act(async () => root.unmount());
+  });
   it("routes app-server events to handlers", async () => {
     const handlers: Handlers = {
       onAppServerEvent: vi.fn(),

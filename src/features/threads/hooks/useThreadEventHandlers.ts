@@ -137,6 +137,13 @@ export function useThreadEventHandlers({
     approvalAllowlistRef,
   });
   const onRequestUserInput = useThreadUserInputEvents({ dispatch });
+  const onServerRequestResolved = useCallback((workspaceId: string, requestId: string | number) => {
+    dispatch({ type: "removeUserInputRequest", workspaceId, requestId });
+  }, [dispatch]);
+  const onConnected = useCallback((workspaceId: string) => {
+    dispatch({ type: "clearUserInputRequests", workspaceId });
+    onWorkspaceConnected(workspaceId);
+  }, [dispatch, onWorkspaceConnected]);
   const {
     onHookStarted: handleHookStarted,
     onHookCompleted: handleHookCompleted,
@@ -269,9 +276,11 @@ export function useThreadEventHandlers({
         resetStreamingThreadState(workspaceId, threadId);
       }
       handleTurnCompleted(workspaceId, threadId, turnId, status);
+      if (turnId) dispatch({ type: "clearUserInputRequests", workspaceId, threadId, turnId });
     },
     [
       getLatestKnownActiveTurnId,
+      dispatch,
       flushItemUpserts,
       handleTurnCompleted,
       resetStreamingThreadState,
@@ -299,8 +308,9 @@ export function useThreadEventHandlers({
       flushItemUpserts();
       resetStreamingThreadState(workspaceId, threadId);
       handleThreadClosed(workspaceId, threadId);
+      dispatch({ type: "clearUserInputRequests", workspaceId, threadId });
     },
-    [flushItemUpserts, handleThreadClosed, resetStreamingThreadState],
+    [dispatch, flushItemUpserts, handleThreadClosed, resetStreamingThreadState],
   );
 
   const onTurnError = useCallback(
@@ -368,9 +378,10 @@ export function useThreadEventHandlers({
 
   const handlers = useMemo(
     () => ({
-      onWorkspaceConnected,
+      onWorkspaceConnected: onConnected,
       onApprovalRequest,
       onRequestUserInput,
+      onServerRequestResolved,
       onHookStarted,
       onHookCompleted,
       onBackgroundThreadAction,
@@ -402,9 +413,10 @@ export function useThreadEventHandlers({
       getLatestKnownActiveTurnId,
     }),
     [
-      onWorkspaceConnected,
+      onConnected,
       onApprovalRequest,
       onRequestUserInput,
+      onServerRequestResolved,
       onHookStarted,
       onHookCompleted,
       onBackgroundThreadAction,
