@@ -143,7 +143,16 @@ These arrive on the same frontend event stream but are not Codex v2
   thread or reconnecting a workspace invalidates its old request IDs.
 - Live request drafts stay in memory across thread navigation. Restarting the
   application does not restore live RPC IDs or unsent answers.
-- A plain-text question uses a separate user-initiated reply action. It sends
+- `agentMessage` items with `delivery: "async"` and `questions` preserve each
+  question's `title` and optional string `options` through live completion and
+  history conversion. This payload is verified against the installed Codex
+  0.162.1 generated schema. It is a message, not a JSON-RPC server request.
+  Cards remain answerable during execution and later progress messages; replies
+  steer the original thread when steering is enabled, or can be submitted once
+  the turn is idle. Quoted card replies resolve their corresponding question;
+  manually typed follow-ups replace preceding unanswered questions.
+- A plain-text question uses a separate user-submitted reply action. Clear
+  trailing choices expand automatically; other questions use a reply button. It sends
   question context and the selected/custom answer as a normal message, without
   synthesizing a server request or changing execution state.
 
