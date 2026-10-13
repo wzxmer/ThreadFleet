@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ManagedSession, WorkspaceInfo } from "@/types";
 import type { useAppServerEvents } from "@app/hooks/useAppServerEvents";
@@ -190,6 +190,7 @@ describe("useThreads UX integration", () => {
   });
 
   afterEach(() => {
+    cleanup();
     vi.useRealTimers();
     nowSpy.mockRestore();
   });
@@ -1102,6 +1103,7 @@ describe("useThreads UX integration", () => {
 
     await waitFor(() => {
       expect(vi.mocked(readThread)).toHaveBeenCalledWith("ws-1", "thread-1");
+      expect(result.current.threadResumeLoadingById["thread-1"]).toBe(false);
     });
 
     vi.mocked(readThread).mockClear();
