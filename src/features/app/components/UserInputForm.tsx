@@ -1,30 +1,11 @@
-import { useId, useSyncExternalStore } from "react";
+import { useId } from "react";
+import Paperclip from "lucide-react/dist/esm/icons/paperclip";
 import type { RequestUserInputQuestion, RequestUserInputResponse } from "@/types";
 import { useI18n } from "@/features/i18n/I18nProvider";
 import { PanelHeader } from "@/features/design-system/components/panel/PanelPrimitives";
-
-type Draft = {
-  selections: Record<string, number | undefined>;
-  notes: Record<string, string>;
-  submitting: boolean;
-  failed: boolean;
-  submitted: boolean;
-};
-
-// Keep live request/message drafts across navigation. Neither RPC IDs nor
-// secret answers survive an app restart; unreachable requests release drafts.
-const drafts = new WeakMap<object, { snapshot: Draft; listeners: Set<() => void> }>();
-function getDraft(key: object) {
-  let store = drafts.get(key);
-  if (!store) {
-    store = {
-      snapshot: { selections: {}, notes: {}, submitting: false, failed: false, submitted: false },
-      listeners: new Set(),
-    };
-    drafts.set(key, store);
-  }
-  return store;
-}
+import { ComposerAttachments } from "@/features/composer/components/ComposerAttachments";
+import { useComposerImageDrop } from "@/features/composer/hooks/useComposerImageDrop";
+import { useUserInputDraft } from "@app/hooks/useUserInputDraft";
 
 type UserInputFormProps = {
   draftKey: object;
@@ -32,25 +13,17 @@ type UserInputFormProps = {
   title: string;
   description?: string;
   queueLabel?: string;
-  onSubmit: (response: RequestUserInputResponse) => Promise<void> | void;
+  attachmentsEnabled?: boolean;
+  onSubmit: (response: RequestUserInputResponse, attachments?: string[]) => Promise<void> | void;
   onClose?: () => void;
 };
 
-export function UserInputForm({ draftKey, questions, title, description, queueLabel, onSubmit, onClose }: UserInputFormProps) {
+export function UserInputForm({ draftKey, questions, title, description, queueLabel, attachmentsEnabled = false, onSubmit, onClose }: UserInputFormProps) {
   const { t } = useI18n();
   const formId = useId();
-  const store = getDraft(draftKey);
-  const draft = useSyncExternalStore(
-    (listener) => {
-      store.listeners.add(listener);
-      return () => { store.listeners.delete(listener); };
-    },
-    () => store.snapshot,
-  );
-  const update = (patch: Partial<Draft>) => {
-    store.snapshot = { ...store.snapshot, ...patch };
-    store.listeners.forEach((listener) => listener());
-  };
+  const { draft, store, update, attach, readAttachments, pickAttachments, removeAttachment } = useUserInputDraft(draftKey);
+  const disabled = draft.submitting || draft.submitted;
+  const drop = useComposerImageDrop({ disabled: !attachmentsEnabled || disabled, onAttachImages: attach });
   const answers: RequestUserInputResponse["answers"] = {};
   for (const question of questions) {
     const selected = question.options?.[draft.selections[question.id] ?? -1];
@@ -60,14 +33,16 @@ export function UserInputForm({ draftKey, questions, title, description, queueLa
     answers[question.id] = { answers: values };
   }
   const complete = questions.length > 0 && questions.every(
-    (question) => Boolean(question.id && answers[question.id]?.answers.length),
+    (question) => Boolean(question.id && (answers[question.id]?.answers.length ||
+      (attachmentsEnabled && questions.length === 1 && draft.attachments.length))),
   );
   const submit = async () => {
-    if (!complete || store.snapshot.submitting || store.snapshot.submitted) return;
+    if (!complete || store.snapshot.submitting || store.snapshot.submitted || store.snapshot.pendingAttachments) return;
     update({ submitting: true, failed: false });
     try {
-      await onSubmit({ answers });
-      update({ submitting: false, submitted: true, selections: {}, notes: {} });
+      if (attachmentsEnabled) await onSubmit({ answers }, [...store.snapshot.attachments]);
+      else await onSubmit({ answers });
+      update({ submitting: false, submitted: true, selections: {}, notes: {}, attachments: [] });
     } catch {
       update({ submitting: false, failed: true });
     }
@@ -81,7 +56,9 @@ export function UserInputForm({ draftKey, questions, title, description, queueLa
         {queueLabel ? <span className="request-user-input-queue">{queueLabel}</span> : null}
       </PanelHeader>
       {description ? <p className="request-user-input-description">{description}</p> : null}
-      <div className="request-user-input-body">
+      <div className={`request-user-input-body${drop.isDragOver ? " is-drag-over" : ""}`}
+        ref={drop.dropTargetRef} onDragOver={drop.handleDragOver} onDragEnter={drop.handleDragEnter}
+        onDragLeave={drop.handleDragLeave} onDrop={(event) => { if (attachmentsEnabled) void readAttachments(() => drop.handleDrop(event)); }}>
         {questions.map((question, index) => {
           const fieldId = `${formId}-${index}`;
           const hasOptions = Boolean(question.options?.length);
@@ -113,6 +90,7 @@ export function UserInputForm({ draftKey, questions, title, description, queueLa
                   value={draft.notes[question.id] ?? ""} onChange={(event) => changeNote(event.target.value)} />
               ) : (
                 <textarea id={fieldId} className="request-user-input-notes" rows={2}
+                  onPaste={(event) => { if (attachmentsEnabled) void readAttachments(() => drop.handlePaste(event)); }}
                   placeholder={t(hasOptions ? "userInput.notesPlaceholder" : "userInput.answerPlaceholder")}
                   value={draft.notes[question.id] ?? ""} onChange={(event) => changeNote(event.target.value)} />
               )}
@@ -124,12 +102,22 @@ export function UserInputForm({ draftKey, questions, title, description, queueLa
           );
         })}
         {!questions.length ? <p>{t("userInput.empty")}</p> : null}
+        {attachmentsEnabled ? (
+          <>
+            <button type="button" className="ghost request-user-input-attach" data-button-elevation="none"
+              disabled={disabled || Boolean(draft.pendingAttachments)} onClick={() => { void pickAttachments(); }}>
+              <Paperclip size={14} aria-hidden />{t("composer.addAttachment")}
+            </button>
+            <ComposerAttachments attachments={draft.attachments} disabled={disabled} onRemoveAttachment={removeAttachment} />
+          </>
+        ) : null}
       </div>
+      {draft.attachmentFailed ? <p role="alert" className="request-user-input-error">{t("userInput.attachmentFailed")}</p> : null}
       {draft.failed ? <p role="alert" className="request-user-input-error">{t("userInput.failed")}</p> : null}
       {draft.submitted ? <p role="status">{t("userInput.submitted")}</p> : null}
       <div className="request-user-input-actions">
         {onClose ? <button type="button" className="ghost" data-button-elevation="none" onClick={onClose}>{t("userInput.collapse")}</button> : null}
-        <button type="submit" className="primary" data-button-elevation="none" disabled={!complete || draft.submitting || draft.submitted}>
+        <button type="submit" className="primary" data-button-elevation="none" disabled={!complete || disabled || Boolean(draft.pendingAttachments)}>
           {t(draft.submitting ? "userInput.submitting" : draft.failed ? "userInput.retry" : "userInput.submit")}
         </button>
       </div>

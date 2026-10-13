@@ -93,7 +93,7 @@ type MessageRowProps = MarkdownFileLinkProps & {
   isCopied: boolean;
   onCopy: (item: Extract<ConversationItem, { kind: "message" }>) => void;
   onReference?: (action: MessageReferenceAction) => void;
-  onQuestionReply?: (text: string, delivery?: "async") => Promise<SendMessageResult>;
+  onQuestionReply?: (text: string, delivery?: "async", attachments?: string[]) => Promise<SendMessageResult>;
   onResendUserMessage?: (
     item: Extract<ConversationItem, { kind: "message" }>,
     text: string,
@@ -1225,14 +1225,18 @@ export const MessageRow = memo(function MessageRow({
             title={t("userInput.reply")}
             description={t(item.asyncQuestions?.length ? "userInput.asyncDescription" : "userInput.replyDescription")}
             questions={replyQuestions}
+            attachmentsEnabled
             onClose={() => setQuestionReplyOpen(false)}
-            onSubmit={async (response) => {
+            onSubmit={async (response, attachments = []) => {
               const answers = replyQuestions.flatMap((question) => {
                 const values = response.answers[question.id].answers;
                 return replyQuestions.length > 1 ? [question.question, ...values] : values;
               });
               const text = buildQuestionReplyMessage(item.text, answers);
-              const result = item.asyncQuestions?.length ? await onQuestionReply(text, "async") : await onQuestionReply(text);
+              const delivery = item.asyncQuestions?.length ? "async" : undefined;
+              const result = attachments.length
+                ? await onQuestionReply(text, delivery, attachments)
+                : delivery ? await onQuestionReply(text, delivery) : await onQuestionReply(text);
               if (result.status !== "sent") throw new Error("Question reply was not sent");
               setQuestionReplyOpen(false);
             }}

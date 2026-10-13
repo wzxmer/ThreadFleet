@@ -27,6 +27,7 @@ import type { SubagentResultSummary } from "../utils/subagentResults";
 import { expectOpenedFileTarget } from "../test/fileLinkAssertions";
 import { Messages } from "./Messages";
 import { I18N_STRINGS } from "@/features/i18n/strings";
+import { pickAttachmentFiles } from "@services/tauri";
 import { buildConversationItemFromThreadItem } from "@utils/threadItems";
 
 const useFileLinkOpenerMock = vi.fn(
@@ -59,10 +60,29 @@ vi.mock("@services/tauri", async () => {
   return {
     ...actual,
     exportMarkdownFile: exportMarkdownFileMock,
+    pickAttachmentFiles: vi.fn().mockResolvedValue([]),
   };
 });
+vi.mock("@services/dragDrop", () => ({ subscribeWindowDragDrop: vi.fn(() => () => {}) }));
 
 describe("Messages", () => {
+  it.each([false, true])("sends reply attachments with question context (async: %s)", async (async) => {
+    const onQuestionReply = vi.fn().mockResolvedValue({ status: "sent" });
+    vi.mocked(pickAttachmentFiles).mockResolvedValue(["C:/files/error.png", "C:/files/request.log"]);
+    const question: ConversationItem = {
+      id: "attachment-question", kind: "message", role: "assistant", text: "接管页面保留了吗？",
+      ...(async ? { asyncQuestions: [{ title: "接管页面保留了吗？", options: ["已复现", "稍后处理"] }] } : {}),
+    };
+    render(<Messages items={[question]} threadId="original-thread" workspaceId="ws-1" isThinking={async}
+      openTargets={[]} selectedOpenAppId="" onQuestionReply={onQuestionReply} />);
+    if (!async) fireEvent.click(screen.getByRole("button", { name: I18N_STRINGS.zh["userInput.reply"] }));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "依旧不行" } });
+    fireEvent.click(screen.getByRole("button", { name: I18N_STRINGS.zh["composer.addAttachment"] }));
+    await screen.findByText("request.log");
+    fireEvent.click(screen.getByRole("button", { name: I18N_STRINGS.zh["userInput.submit"] }));
+    await waitFor(() => expect(onQuestionReply).toHaveBeenCalledWith("> 接管页面保留了吗？\n\n依旧不行", async ? "async" : undefined, ["C:/files/error.png", "C:/files/request.log"]));
+  });
+
   it("shows the screenshot's explicit choices as soon as the final answer becomes idle", () => {
     const onQuestionReply = vi.fn();
     const question: ConversationItem = {

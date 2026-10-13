@@ -2684,7 +2684,7 @@ describe("useThreads UX integration", () => {
     expect(sendUserMessageService).not.toHaveBeenCalled();
   });
 
-  it("steers an async answer to its original thread after the active selection changes", async () => {
+  it("steers an async answer and its screenshot to the original thread after the active selection changes", async () => {
     vi.mocked(steerTurn).mockResolvedValue({ result: { turnId: "question-turn" } } as Awaited<ReturnType<typeof steerTurn>>);
     const { result, unmount } = renderHook(() => useThreads({ activeWorkspace: workspace, onWorkspaceConnected: vi.fn(), steerEnabled: true }));
     act(() => {
@@ -2693,9 +2693,9 @@ describe("useThreads UX integration", () => {
       result.current.setActiveThreadId("other-thread");
     });
     await act(async () => {
-      expect(await result.current.sendUserMessageToThread(workspace, "question-thread", "> 如何处理？\n\n停用", [])).toEqual({ status: "sent" });
+      expect(await result.current.sendUserMessageToThread(workspace, "question-thread", "> 如何处理？\n\n停用", ["C:/files/screenshot.png"])).toEqual({ status: "sent" });
     });
-    expect(vi.mocked(steerTurn).mock.calls[0]?.slice(0, 5)).toEqual([workspace.id, "question-thread", "question-turn", "> 如何处理？\n\n停用", []]);
+    expect(vi.mocked(steerTurn).mock.calls[0]?.slice(0, 5)).toEqual([workspace.id, "question-thread", "question-turn", "> 如何处理？\n\n停用", ["C:\\promoted\\image-1.png"]]);
     expect(sendUserMessageService).not.toHaveBeenCalled();
     unmount();
   });

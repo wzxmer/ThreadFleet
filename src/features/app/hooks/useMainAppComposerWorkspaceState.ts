@@ -232,7 +232,7 @@ export function useMainAppComposerWorkspaceState({
 
   const pendingRequestsRef = useRef(userInputRequests);
   pendingRequestsRef.current = userInputRequests;
-  const replyToQuestion = useCallback(async (text: string, delivery?: "async"): Promise<SendMessageResult> => {
+  const replyToQuestion = useCallback(async (text: string, delivery?: "async", attachments: string[] = []): Promise<SendMessageResult> => {
     if (!activeWorkspace || !activeThreadId || !text.trim()) return { status: "blocked" };
     if (isProcessing && (delivery !== "async" || !steerAvailable)) return { status: "blocked" };
     const isPending = () => pendingRequestsRef.current.some((request) =>
@@ -241,7 +241,7 @@ export function useMainAppComposerWorkspaceState({
     if (isPending()) return { status: "blocked" };
     if (!activeWorkspace.connected) await connectWorkspace(activeWorkspace);
     if (isPending()) return { status: "blocked" };
-    return (await sendUserMessageToThread(activeWorkspace, activeThreadId, text, [])) ?? { status: "sent" };
+    return (await sendUserMessageToThread(activeWorkspace, activeThreadId, text, attachments)) ?? { status: "sent" };
   }, [activeWorkspace, activeThreadId, isProcessing, steerAvailable, connectWorkspace, sendUserMessageToThread]);
 
   const composerState = useComposerController({

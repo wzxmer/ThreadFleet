@@ -449,7 +449,7 @@ type MessagesProps = {
     response: RequestUserInputResponse,
   ) => Promise<void> | void;
   onPlanAccept?: () => void;
-  onQuestionReply?: (text: string, delivery?: "async") => Promise<SendMessageResult>;
+  onQuestionReply?: (text: string, delivery?: "async", attachments?: string[]) => Promise<SendMessageResult>;
   onPlanSubmitChanges?: (changes: string) => void;
   onOpenThreadLink?: (threadId: string, workspaceId?: string | null) => void;
   subagentResults?: SubagentResultSummaryData[];
