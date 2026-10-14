@@ -13,6 +13,7 @@ pub(crate) mod execution_binding_core;
 pub(crate) mod execution_router_core;
 pub(crate) mod file_attachment_core;
 pub(crate) mod files_core;
+pub(crate) mod gemini_runtime_core;
 pub(crate) mod git_core;
 pub(crate) mod git_rpc;
 pub(crate) mod git_ui_core;

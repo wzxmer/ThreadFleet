@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from "react";
 import type { Dispatch, MutableRefObject } from "react";
 import type {
   DebugEntry,
+  AgentEngine,
   ThreadListSortKey,
   ThreadSummary,
   TokenEfficiencyMode,
@@ -22,6 +23,9 @@ import {
   verifySessionThreads as verifySessionThreadsService,
 } from "@services/tauri";
 import { LOCAL_CODEX_WORKSPACE_ID } from "@/features/workspaces/domain/localCodexWorkspace";
+import { isGeminiThread } from "@/features/agents/utils/agentEngine";
+import { useI18n } from "@/features/i18n/I18nProvider";
+import { pushErrorToast } from "@services/toasts";
 import { buildItemsFromThread, getThreadTimestamp } from "@utils/threadItems";
 import { extractThreadCodexMetadata } from "@threads/utils/threadCodexMetadata";
 import {
@@ -107,6 +111,8 @@ type UseThreadActionsOptions = {
   preserveSessionLibraryOnProviderSwitch?: boolean;
   getThreadListRuntimeContext?: () => ThreadListRuntimeContext;
   tokenEfficiencyMode: TokenEfficiencyMode;
+  defaultAgentEngine?: AgentEngine;
+  listAdditionalThreads?: (workspace: WorkspaceInfo) => Promise<Record<string, unknown>[]>;
   onDebug?: (entry: DebugEntry) => void;
   getCustomName: (workspaceId: string, threadId: string) => string | undefined;
   isThreadPinned: (workspaceId: string, threadId: string) => boolean;
@@ -160,6 +166,8 @@ export function useThreadActions({
     runtimeGeneration: 0,
   }),
   tokenEfficiencyMode,
+  defaultAgentEngine = "codex",
+  listAdditionalThreads,
   onDebug,
   getCustomName,
   isThreadPinned,
@@ -177,6 +185,7 @@ export function useThreadActions({
   hydrateTurnExecutionSummary = async () => null,
   avoidUnboundedReadOnlyFallback = false,
 }: UseThreadActionsOptions) {
+  const { t } = useI18n();
   const localArchivedCursorByWorkspaceRef = useRef<Record<string, string | null>>({});
   const localArchivedFirstPageCursorByWorkspaceRef = useRef<
     Record<string, string | null>
@@ -216,7 +225,7 @@ export function useThreadActions({
       options?: { notifySubagent?: boolean },
     ) => {
       const codexMetadata = extractThreadCodexMetadata(thread);
-      if (codexMetadata.modelId || codexMetadata.effort) {
+      if (!isGeminiThread(threadId) && (codexMetadata.modelId || codexMetadata.effort)) {
         onThreadCodexMetadataDetected?.(workspaceId, threadId, codexMetadata);
       }
       const sourceParentId = getParentThreadIdFromThread(thread);
@@ -257,7 +266,7 @@ export function useThreadActions({
   );
 
   const startThreadForWorkspace = useCallback(
-    async (workspaceId: string, options?: { activate?: boolean }) => {
+    async (workspaceId: string, options?: { activate?: boolean; engine?: AgentEngine }) => {
       const shouldActivate = options?.activate !== false;
       const requestRuntimeKey = getCurrentThreadRuntimeKey();
       onDebug?.({
@@ -268,7 +277,10 @@ export function useThreadActions({
         payload: { workspaceId, tokenEfficiencyMode },
       });
       try {
-        const response = await startThreadService(workspaceId, tokenEfficiencyMode);
+        const engine = options?.engine ?? defaultAgentEngine;
+        const response = engine === "codex"
+          ? await startThreadService(workspaceId, tokenEfficiencyMode)
+          : await startThreadService(workspaceId, tokenEfficiencyMode, engine);
         onDebug?.({
           id: `${Date.now()}-server-thread-start`,
           timestamp: Date.now(),
@@ -307,6 +319,7 @@ export function useThreadActions({
       loadedThreadsRef,
       onDebug,
       tokenEfficiencyMode,
+      defaultAgentEngine,
     ],
   );
 
@@ -805,6 +818,10 @@ export function useThreadActions({
         label: "thread/fork",
         payload: { workspaceId, threadId },
       });
+      if (isGeminiThread(threadId)) {
+        pushErrorToast({ title: t("agents.engineGemini"), message: t("agents.unsupportedOperation") });
+        return null;
+      }
       try {
         const response = await forkThreadService(workspaceId, threadId);
         onDebug?.({
@@ -848,6 +865,7 @@ export function useThreadActions({
       loadedThreadsRef,
       onDebug,
       resumeThreadForWorkspace,
+      t,
     ],
   );
 
@@ -1181,6 +1199,17 @@ export function useThreadActions({
           knownWorkspaces.find((workspace) => workspace.connected && workspace.id !== LOCAL_CODEX_WORKSPACE_ID) ??
           targets.find((workspace) => workspace.connected) ??
           targets[0];
+        const additionalPages = await Promise.all(targets.map(async (workspace) => {
+          if (!listAdditionalThreads || workspace.id === LOCAL_CODEX_WORKSPACE_ID) return [];
+          try {
+            return await listAdditionalThreads(workspace);
+          } catch (error) {
+            onDebug?.({ id: `${Date.now()}-gemini-list-error`, timestamp: Date.now(), source: "error",
+              label: "gemini/list error", payload: String(error) });
+            return [];
+          }
+        }));
+        let codexListComplete = true;
         let pagesFetched = 0;
         let cursor: string | null = null;
         let archivedCursor: string | null = null;
@@ -1245,13 +1274,21 @@ export function useThreadActions({
         do {
           const pageCursor = cursor;
           pagesFetched += 1;
-          const response =
-            (await listThreadsService(
+          let response: Record<string, unknown>;
+          try {
+            response = (await listThreadsService(
               requestWorkspace.id,
               cursor,
               THREAD_LIST_PAGE_SIZE,
               requestedSortKey,
             )) as Record<string, unknown>;
+          } catch (error) {
+            if (!listAdditionalThreads) throw error;
+            codexListComplete = false;
+            onDebug?.({ id: `${Date.now()}-codex-list-unavailable`, timestamp: Date.now(), source: "error",
+              label: "codex/list unavailable", payload: String(error) });
+            break;
+          }
           onDebug?.({
             id: `${Date.now()}-server-thread-list`,
             timestamp: Date.now(),
@@ -1314,9 +1351,16 @@ export function useThreadActions({
             });
           }
         }
-        const livePaginationComplete = cursor === null;
+        additionalPages.forEach((data, index) => {
+          const workspaceId = targets[index].id;
+          matchingThreadsByWorkspace[workspaceId].push(...data);
+          if (data.length > THREAD_LIST_TARGET_COUNT && resumeCursorByWorkspace[workspaceId] === null) {
+            resumeCursorByWorkspace[workspaceId] = THREAD_LIST_CURSOR_PAGE_START;
+          }
+        });
+        const livePaginationComplete = codexListComplete && cursor === null;
         let archivedPaginationComplete = true;
-        if (includeLocalCodexSessions) {
+        if (includeLocalCodexSessions && codexListComplete) {
           let archivedPagesFetched = 0;
           do {
             const pageCursor = archivedCursor;
@@ -1433,14 +1477,15 @@ export function useThreadActions({
                 cached.sourceId !== sourceId,
             );
             const baseThreads = sourceChanged
-              ? []
+              ? (threadsByWorkspace[workspace.id] ?? []).filter((thread) => isGeminiThread(thread.id))
               : (threadsByWorkspace[workspace.id] ?? []);
             const freshIds = new Set(summaries.map((thread) => thread.id));
             const uncoveredThreads = baseThreads.filter(
               (thread) => !freshIds.has(thread.id),
             );
             let retainedThreads = uncoveredThreads;
-            let staleThreadIds = uncoveredThreads.map((thread) => thread.id);
+            const codexUncoveredThreads = uncoveredThreads.filter((thread) => !isGeminiThread(thread.id));
+            let staleThreadIds = codexUncoveredThreads.map((thread) => thread.id);
             let verifiedSnapshot = sourceChanged
               ? null
               : (cached?.verifiedSnapshot ?? null);
@@ -1448,7 +1493,7 @@ export function useThreadActions({
             if (
               paginationComplete &&
               sourceId &&
-              uncoveredThreads.length > 0
+              codexUncoveredThreads.length > 0
             ) {
               const staleListGeneration =
                 (threadListGenerationRef.current[workspace.id] ?? 0) + 1;
@@ -1478,10 +1523,10 @@ export function useThreadActions({
               try {
                 for (
                   let offset = 0;
-                  offset < uncoveredThreads.length;
+                  offset < codexUncoveredThreads.length;
                   offset += 256
                 ) {
-                  const threadIds = uncoveredThreads
+                  const threadIds = codexUncoveredThreads
                     .slice(offset, offset + 256)
                     .map((thread) => thread.id);
                   const verification = await verifySessionThreadsService({
@@ -1520,12 +1565,12 @@ export function useThreadActions({
                 staleThreadIds = retainedThreads
                   .filter(
                     (thread) =>
-                      presenceByThreadId.get(thread.id) !== "present",
+                      !isGeminiThread(thread.id) && presenceByThreadId.get(thread.id) !== "present",
                   )
                   .map((thread) => thread.id);
               } catch (error) {
                 retainedThreads = uncoveredThreads;
-                staleThreadIds = uncoveredThreads.map((thread) => thread.id);
+                staleThreadIds = codexUncoveredThreads.map((thread) => thread.id);
                 onDebug?.({
                   id: `${Date.now()}-client-thread-list-verification-error`,
                   timestamp: Date.now(),
@@ -1660,6 +1705,7 @@ export function useThreadActions({
       isThreadListRequestCurrent,
       isThreadListLoadingOwner,
       preserveSessionLibraryOnProviderSwitch,
+      listAdditionalThreads,
       resolveThreadListSourceId,
       activeThreadIdByWorkspace,
       threadParentById,
@@ -1802,13 +1848,20 @@ export function useThreadActions({
         do {
           const pageCursor = cursor;
           pagesFetched += 1;
-          const response =
-            (await listThreadsService(
+          let response: Record<string, unknown>;
+          try {
+            response = (await listThreadsService(
               requestWorkspaceId,
               cursor,
               THREAD_LIST_PAGE_SIZE,
               requestedSortKey,
             )) as Record<string, unknown>;
+          } catch (error) {
+            if (!listAdditionalThreads) throw error;
+            onDebug?.({ id: `${Date.now()}-codex-list-older-unavailable`, timestamp: Date.now(), source: "error",
+              label: "codex/list unavailable", payload: String(error) });
+            break;
+          }
           if (
             !isThreadListRequestCurrent(
               workspace.id,
@@ -1978,6 +2031,20 @@ export function useThreadActions({
           }
         }
 
+        if (listAdditionalThreads && workspace.id !== LOCAL_CODEX_WORKSPACE_ID) {
+          try {
+            const additional = await listAdditionalThreads(workspace);
+            matchingThreads.push(...additional);
+            if (additional.filter((thread) => !existingIds.has(String(thread.id))).length > THREAD_LIST_TARGET_COUNT) {
+              liveResumeCursor ??= THREAD_LIST_CURSOR_PAGE_START;
+            }
+          } catch (error) {
+            onDebug?.({ id: `${Date.now()}-gemini-list-older-error`, timestamp: Date.now(), source: "error",
+              label: "gemini/list error", payload: String(error) });
+          }
+          matchingThreads.sort((a, b) => Number(b[requestedSortKey === "created_at" ? "createdAt" : "updatedAt"] ?? 0)
+            - Number(a[requestedSortKey === "created_at" ? "createdAt" : "updatedAt"] ?? 0));
+        }
         const additions: ThreadSummary[] = [];
         matchingThreads.forEach((thread) => {
           if (additions.length >= THREAD_LIST_TARGET_COUNT) {
@@ -2113,6 +2180,7 @@ export function useThreadActions({
       threadListCursorByWorkspace,
       threadsByWorkspace,
       threadSortKey,
+      listAdditionalThreads,
     ],
   );
 

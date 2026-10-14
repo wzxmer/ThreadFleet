@@ -37,6 +37,7 @@ import type {
 } from "../SettingsView";
 import { WindowsUiUpdatePrompt } from "@/features/update/components/WindowsUiUpdatePrompt";
 import { CodexSessionSharingStatus } from "./CodexSessionSharingStatus";
+import { SettingsAgentRuntimeSection } from "@/features/agents/components/SettingsAgentRuntimeSection";
 import { formatCodexUpdateMethod, formatUpdateError } from "@/features/update/utils/updatePresentation";
 
 type SettingsCodexSectionProps = {
@@ -282,7 +283,6 @@ export function SettingsCodexSection({
   defaultModelsError,
   defaultModelsConnectedWorkspaceCount,
   onRefreshDefaultModels,
-  codexPathDraft,
   codexArgsDraft,
   codexHomeDraft,
   codexDirty,
@@ -310,12 +310,10 @@ export function SettingsCodexSection({
   globalConfigRefreshDisabled,
   globalConfigSaveDisabled,
   globalConfigSaveLabel,
-  onSetCodexPathDraft,
   onSetCodexArgsDraft,
   onSetCodexHomeDraft,
   onSetGlobalAgentsContent,
   onSetGlobalConfigContent,
-  onBrowseCodex,
   onBrowseCodexHome,
   onSaveCodexSettings,
   onReconnectCodexHomeWorkspaces,
@@ -895,38 +893,11 @@ export function SettingsCodexSection({
         onRefresh={onRefreshCodexSyncDiagnostics}
       />
 
+      <SettingsAgentRuntimeSection appSettings={appSettings} onUpdateAppSettings={onUpdateAppSettings} />
+
       <div className="settings-divider" />
 
       <div className="settings-field">
-        <label className="settings-field-label" htmlFor="codex-path">
-          {t("settings.codex.defaultPath")}
-        </label>
-        <div className="settings-field-row">
-          <input
-            id="codex-path"
-            className="settings-input"
-            value={codexPathDraft}
-            placeholder="codex"
-            onChange={(event) => onSetCodexPathDraft(event.target.value)}
-          />
-          <button
-            type="button"
-            className="ghost"
-            onClick={() => {
-              void onBrowseCodex();
-            }}
-          >
-            {t("common.browse")}
-          </button>
-          <button
-            type="button"
-            className="ghost"
-            onClick={() => onSetCodexPathDraft("")}
-          >
-            {t("settings.codex.usePath")}
-          </button>
-        </div>
-        <div className="settings-help">{t("settings.codex.pathHelp")}</div>
         <label className="settings-field-label" htmlFor="codex-args">
           {t("settings.codex.defaultArgs")}
         </label>
@@ -1284,6 +1255,7 @@ export function SettingsCodexSection({
             <option value="deepseek">{t("settings.codex.providerKindDeepseek")}</option>
             <option value="openrouter">{t("settings.codex.providerKindOpenrouter")}</option>
             <option value="opencode">{t("settings.codex.providerKindOpencode")}</option>
+            <option value="gemini">{t("agents.geminiProviderKind")}</option>
           </select>
           <select
             className="settings-select"

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
+  AgentEngine,
   ModelOption,
   SendMessageResult,
   ServiceTier,
@@ -32,6 +33,7 @@ export type WorkspaceHomeRun = {
 };
 
 type UseWorkspaceHomeOptions = {
+  agentEngine?: AgentEngine;
   activeWorkspace: WorkspaceInfo | null;
   models: ModelOption[];
   selectedModelId: string | null;
@@ -50,7 +52,7 @@ type UseWorkspaceHomeOptions = {
   addWorktreeAgent: (
     workspace: WorkspaceInfo,
     branch: string,
-    options?: { activate?: boolean },
+    options?: { activate?: boolean; agentEngine?: AgentEngine },
   ) => Promise<WorkspaceInfo | null>;
   connectWorkspace: (workspace: WorkspaceInfo) => Promise<void>;
   startThreadForWorkspace: (
@@ -64,6 +66,7 @@ type UseWorkspaceHomeOptions = {
     images?: string[],
     options?: {
       model?: string | null;
+      geminiModel?: string | null;
       effort?: string | null;
       serviceTier?: ServiceTier | null | undefined;
       collaborationMode?: Record<string, unknown> | null;
@@ -185,6 +188,7 @@ const normalizeWorktreeName = (value: string | null | undefined) => {
 };
 
 export function useWorkspaceHome({
+  agentEngine = "codex",
   activeWorkspace,
   models,
   selectedModelId,
@@ -443,7 +447,7 @@ export function useWorkspaceHome({
     }));
 
     let worktreeBaseName: string | null = null;
-    if (runMode === "local") {
+    if (runMode === "local" && agentEngine === "codex") {
       void generateRunMetadata(activeWorkspace.id, prompt)
         .then((metadata) => {
           if (!metadata?.title) {
@@ -457,15 +461,17 @@ export function useWorkspaceHome({
         .catch(() => {
           // Metadata is best-effort for local runs.
         });
-    } else {
-      try {
-        const metadata = await generateRunMetadata(activeWorkspace.id, prompt);
-        if (metadata?.title && metadata.title.trim() !== fallbackTitle) {
-          updateRunTitle(activeWorkspaceId, runId, metadata.title.trim());
+    } else if (runMode === "worktree") {
+      if (agentEngine === "codex") {
+        try {
+          const metadata = await generateRunMetadata(activeWorkspace.id, prompt);
+          if (metadata?.title && metadata.title.trim() !== fallbackTitle) {
+            updateRunTitle(activeWorkspaceId, runId, metadata.title.trim());
+          }
+          worktreeBaseName = normalizeWorktreeName(metadata?.worktreeName) ?? null;
+        } catch {
+          // Best-effort fallback to local naming.
         }
-        worktreeBaseName = normalizeWorktreeName(metadata?.worktreeName) ?? null;
-      } catch {
-        // Best-effort fallback to local naming.
       }
       if (!worktreeBaseName) {
         worktreeBaseName = buildWorktreeBranch(prompt);
@@ -481,7 +487,7 @@ export function useWorkspaceHome({
     try {
       if (runMode === "local") {
         try {
-          if (!activeWorkspace.connected) {
+          if (agentEngine === "codex" && !activeWorkspace.connected) {
             await connectWorkspace(activeWorkspace);
           }
           const threadId = await startThreadForWorkspace(activeWorkspace.id, {
@@ -490,19 +496,22 @@ export function useWorkspaceHome({
           if (!threadId) {
             throw new Error("Failed to start a local thread.");
           }
-          seedThreadCodexParams?.(activeWorkspace.id, threadId, {
-            modelId: selectedModelId,
-            effort,
-            serviceTier,
-          });
+          if (agentEngine === "codex") {
+            seedThreadCodexParams?.(activeWorkspace.id, threadId, {
+              modelId: selectedModelId,
+              effort,
+              serviceTier,
+            });
+          }
           const localModel = selectedModelId
             ? modelLookup.get(selectedModelId)?.model ?? null
             : null;
           await sendUserMessageToThread(activeWorkspace, threadId, prompt, images, {
             model: localModel,
-            effort,
-            serviceTier,
-            collaborationMode,
+            ...(agentEngine === "gemini" ? { geminiModel: localModel } : {}),
+            effort: agentEngine === "codex" ? effort : null,
+            serviceTier: agentEngine === "codex" ? serviceTier : null,
+            collaborationMode: agentEngine === "codex" ? collaborationMode : null,
           });
           const model =
             selectedModelId ? modelLookup.get(selectedModelId) ?? null : null;
@@ -538,12 +547,12 @@ export function useWorkspaceHome({
               const worktreeWorkspace = await addWorktreeAgent(
                 activeWorkspace,
                 branch,
-                { activate: false },
+                { activate: false, agentEngine },
               );
               if (!worktreeWorkspace) {
                 throw new Error("Failed to create worktree.");
               }
-              if (!worktreeWorkspace.connected) {
+              if (agentEngine === "codex" && !worktreeWorkspace.connected) {
                 await connectWorkspace(worktreeWorkspace);
               }
               try {
@@ -557,11 +566,13 @@ export function useWorkspaceHome({
               if (!threadId) {
                 throw new Error("Failed to start a worktree thread.");
               }
-              seedThreadCodexParams?.(worktreeWorkspace.id, threadId, {
-                modelId: selection.modelId,
-                effort,
-                serviceTier,
-              });
+              if (agentEngine === "codex") {
+                seedThreadCodexParams?.(worktreeWorkspace.id, threadId, {
+                  modelId: selection.modelId,
+                  effort,
+                  serviceTier,
+                });
+              }
               await sendUserMessageToThread(
                 worktreeWorkspace,
                 threadId,
@@ -569,9 +580,12 @@ export function useWorkspaceHome({
                 images,
                 {
                   model: selection.model?.model ?? selection.modelId,
-                  effort,
-                  serviceTier,
-                  collaborationMode,
+                  ...(agentEngine === "gemini"
+                    ? { geminiModel: selection.model?.model ?? selection.modelId }
+                    : {}),
+                  effort: agentEngine === "codex" ? effort : null,
+                  serviceTier: agentEngine === "codex" ? serviceTier : null,
+                  collaborationMode: agentEngine === "codex" ? collaborationMode : null,
                 },
               );
               instances.push({
@@ -621,6 +635,7 @@ export function useWorkspaceHome({
     activeWorkspace,
     activeWorkspaceId,
     addWorktreeAgent,
+    agentEngine,
     collaborationMode,
     connectWorkspace,
     onWorktreeCreated,

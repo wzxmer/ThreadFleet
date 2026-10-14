@@ -14,6 +14,7 @@ export type SendMessageOptions = {
   skipPromptExpansion?: boolean;
   skipRuntimePreflight?: boolean;
   model?: string | null;
+  geminiModel?: string | null;
   effort?: string | null;
   serviceTier?: ServiceTier | null | undefined;
   collaborationMode?: Record<string, unknown> | null;

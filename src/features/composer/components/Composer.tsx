@@ -72,6 +72,9 @@ import {
 import { createComposerSubmission } from "@utils/submissionIds";
 
 type ComposerProps = {
+  agentEngine?: "codex" | "gemini";
+  onSelectAgentEngine?: (engine: "codex" | "gemini") => void;
+  agentEngineLocked?: boolean;
   inputBackgroundColor?: string;
   onSend: (
     text: string,
@@ -215,6 +218,9 @@ const DEFAULT_EDITOR_SETTINGS: ComposerEditorSettings = {
 };
 
 export const Composer = memo(function Composer({
+  agentEngine = "codex",
+  onSelectAgentEngine,
+  agentEngineLocked = false,
   inputBackgroundColor,
   onSend,
   onStop,
@@ -436,6 +442,7 @@ export const Composer = memo(function Composer({
     handleSelectionChange,
     fileTriggerActive,
   } = useComposerAutocompleteState({
+    agentEngine,
     text,
     selectionStart,
     disabled,
@@ -988,6 +995,7 @@ export const Composer = memo(function Composer({
       <ComposerReferences references={references} onToggle={onToggleReference ?? (() => undefined)} onRemove={onRemoveReference ?? (() => undefined)} onMove={onMoveReference ?? (() => undefined)} />
       <div className="composer-surface">
       <ComposerInput
+        agentEngine={agentEngine}
         text={text}
         disabled={disabled}
         sendLabel={effectiveSendLabel}
@@ -1049,6 +1057,9 @@ export const Composer = memo(function Composer({
         contextCompactionInProgress={contextCompactionInProgress}
       />
       <ComposerMetaBar
+        agentEngine={agentEngine}
+        onSelectAgentEngine={onSelectAgentEngine}
+        agentEngineLocked={agentEngineLocked}
         disabled={disabled}
         isProcessing={isProcessing}
         modelActivityState={modelActivityState}

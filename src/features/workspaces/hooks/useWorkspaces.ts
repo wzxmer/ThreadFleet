@@ -58,6 +58,7 @@ export type UseWorkspacesResult = {
       activate?: boolean;
       displayName?: string | null;
       copyAgentsMd?: boolean;
+      agentEngine?: "codex" | "gemini";
     },
   ) => Promise<WorkspaceInfo | null>;
   connectWorkspace: (entry: WorkspaceInfo) => Promise<void>;

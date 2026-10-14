@@ -4,6 +4,37 @@ import { describe, expect, it, vi } from "vitest";
 import { ComposerMetaBar } from "./ComposerMetaBar";
 
 describe("ComposerMetaBar", () => {
+  it("keeps Codex reasoning and Fast indicators out of Gemini sessions", () => {
+    const view = render(
+      <ComposerMetaBar
+        agentEngine="gemini"
+        disabled={false}
+        collaborationModes={[]}
+        selectedCollaborationModeId={null}
+        onSelectCollaborationMode={() => {}}
+        models={[{ id: "gemini-model", model: "gemini-model", displayName: "Gemini" }]}
+        selectedModelId="gemini-model"
+        onSelectModel={() => {}}
+        reasoningOptions={["high"]}
+        selectedEffort="high"
+        onSelectEffort={() => {}}
+        selectedServiceTier="fast"
+        reasoningSupported
+        accessMode="current"
+        onSelectAccessMode={() => {}}
+        composerSendShortcut="enter"
+      />,
+    );
+
+    try {
+      expect(screen.getByRole("button", { name: "模型" }).textContent).toBe("Gemini");
+      expect(screen.queryByRole("button", { name: "思考模式" })).toBeNull();
+      expect(screen.queryByRole("status", { name: "快速模式已启用" })).toBeNull();
+    } finally {
+      view.unmount();
+    }
+  });
+
   it("hides the config suffix from model labels", () => {
     const { unmount } = render(
       <ComposerMetaBar

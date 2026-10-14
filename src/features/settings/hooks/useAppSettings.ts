@@ -74,6 +74,7 @@ const allowedCodexProviderKinds = new Set([
   "deepseek",
   "openrouter",
   "opencode",
+  "gemini",
   "custom",
 ]);
 
@@ -376,6 +377,8 @@ function buildDefaultSettings(): AppSettings {
   };
   return {
     codexBin: null,
+    geminiBin: null,
+    defaultAgentEngine: "codex",
     codexArgs: null,
     codexHome: null,
     sessionSources: [],
@@ -547,6 +550,8 @@ function normalizeAppSettings(settings: AppSettings): AppSettings {
     ...settings,
     ...remoteBackendSettings,
       codexBin: settings.codexBin?.trim() ? settings.codexBin.trim() : null,
+      geminiBin: settings.geminiBin?.trim() ? settings.geminiBin.trim() : null,
+      defaultAgentEngine: settings.defaultAgentEngine === "gemini" ? "gemini" : "codex",
       codexArgs: settings.codexArgs?.trim() ? settings.codexArgs.trim() : null,
       codexHome: settings.codexHome?.trim() ? settings.codexHome.trim() : null,
       sessionSources: Array.isArray(settings.sessionSources)

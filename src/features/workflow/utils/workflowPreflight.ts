@@ -71,6 +71,7 @@ const KNOWN_PROVIDER_CAPABILITIES: Record<
     parallel_tools: "unknown",
     vision: "unknown",
   },
+  gemini: {},
 };
 
 function normalized(value: string) {

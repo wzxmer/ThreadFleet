@@ -253,6 +253,7 @@ pub(crate) async fn add_worktree(
     branch: String,
     name: Option<String>,
     copy_agents_md: Option<bool>,
+    agent_engine: Option<String>,
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<WorkspaceInfo, String> {
@@ -263,6 +264,7 @@ pub(crate) async fn add_worktree(
             branch,
             name,
             copy_agents_md,
+            agent_engine,
         };
         let response = remote_backend::call_remote(
             &*state,
@@ -284,6 +286,7 @@ pub(crate) async fn add_worktree(
         branch,
         name,
         copy_agents_md,
+        agent_engine,
         &data_dir,
         &state.workspaces,
         &state.sessions,
@@ -377,6 +380,17 @@ pub(crate) async fn remove_workspace(
         return Ok(());
     }
 
+    let affected_ids: Vec<String> = state
+        .workspaces
+        .lock()
+        .await
+        .values()
+        .filter(|workspace| workspace.id == id || workspace.parent_id.as_deref() == Some(&id))
+        .map(|workspace| workspace.id.clone())
+        .collect();
+    for workspace_id in affected_ids {
+        state.gemini_runtime.shutdown_workspace(&workspace_id).await;
+    }
     workspaces_core::remove_workspace_core(
         id,
         &state.workspaces,
@@ -416,6 +430,7 @@ pub(crate) async fn remove_worktree(
         return Ok(());
     }
 
+    state.gemini_runtime.shutdown_workspace(&id).await;
     workspaces_core::remove_worktree_core(
         id,
         &state.workspaces,

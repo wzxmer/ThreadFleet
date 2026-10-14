@@ -10,6 +10,7 @@ import type {
   SyntheticEvent,
 } from "react";
 import type { AutocompleteItem } from "../hooks/useComposerAutocomplete";
+import type { AgentEngine } from "@/types";
 import Paperclip from "lucide-react/dist/esm/icons/paperclip";
 import ChevronDown from "lucide-react/dist/esm/icons/chevron-down";
 import ChevronUp from "lucide-react/dist/esm/icons/chevron-up";
@@ -28,6 +29,7 @@ import { useComposerMobileActions } from "../hooks/useComposerMobileActions";
 import type { ReviewPromptState, ReviewPromptStep } from "../../threads/hooks/useReviewPrompt";
 
 type ComposerInputProps = {
+  agentEngine?: AgentEngine;
   text: string;
   disabled: boolean;
   sendLabel: string;
@@ -92,6 +94,7 @@ type ComposerInputProps = {
 };
 
 export function ComposerInput({
+  agentEngine = "codex",
   text,
   disabled,
   sendLabel,
@@ -449,7 +452,7 @@ export function ComposerInput({
             placeholder={
               disabled
                 ? t("composer.reviewPlaceholder")
-                : t("composer.placeholder")
+                : t(agentEngine === "gemini" ? "agents.geminiPlaceholder" : "composer.placeholder")
             }
             className={textareaScrollable ? "is-scrollable" : undefined}
             value={displayedText}

@@ -220,6 +220,47 @@ describe("useThreadActions", () => {
     expect(loadedThreadsRef.current["thread-1"]).toBe(true);
   });
 
+  it("restores Gemini summaries when the Codex runtime is unavailable", async () => {
+    vi.mocked(listThreads).mockRejectedValue(new Error("Codex CLI not found"));
+    const listAdditionalThreads = vi.fn().mockResolvedValue([{ id: "gemini:one", cwd: workspace.path,
+      name: "Gemini conversation", createdAt: 100, updatedAt: 101 }]);
+    const { result, dispatch } = renderActions({ listAdditionalThreads });
+    await act(async () => { await result.current.listThreadsForWorkspaces([{ ...workspace, connected: false }]); });
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "setThreads", workspaceId: workspace.id,
+      threads: expect.arrayContaining([expect.objectContaining({ id: "gemini:one" })]) }));
+  });
+
+  it("keeps Gemini out of Codex source missing-thread verification", async () => {
+    vi.mocked(listThreads).mockResolvedValue({ result: { data: [], nextCursor: null } });
+    vi.mocked(verifySessionThreads).mockResolvedValue({ snapshot: { sourceId: "source-a", complete: true,
+      generation: 1, observedAt: 0 }, threads: [{ threadId: "codex-old", presence: "missing" }] } as never);
+    const { result, dispatch } = renderActions({ preserveSessionLibraryOnProviderSwitch: true,
+      threadsByWorkspace: { [workspace.id]: [
+        { id: "gemini:old", name: "Gemini", updatedAt: 0 },
+        { id: "codex-old", name: "Codex", updatedAt: 0 },
+      ] }, listAdditionalThreads: async () => [] });
+    await act(async () => { await result.current.listThreadsForWorkspaces([workspace]); });
+    expect(verifySessionThreads).toHaveBeenCalledWith({ sourceId: "source-a", threadIds: ["codex-old"] });
+    expect(dispatch).toHaveBeenLastCalledWith(expect.any(Object));
+    const replacements = dispatch.mock.calls.map(([action]) => action).filter((action) => action.type === "setThreads");
+    const replacement = replacements[replacements.length - 1];
+    expect(replacement.threads).toEqual([expect.objectContaining({ id: "gemini:old" })]);
+    expect(replacement.continuity.staleThreadIds).toEqual([]);
+  });
+
+  it("allows paging through Gemini conversations after Codex pagination ends", async () => {
+    vi.mocked(listThreads).mockResolvedValue({ result: { data: [], nextCursor: null } });
+    const { result, dispatch } = renderActions({ threadListCursorByWorkspace: { [workspace.id]: "__codex_monitor_page_start__" },
+      listAdditionalThreads: async () => Array.from({ length: 8 }, (_, index) => ({
+        id: `gemini:${index}`, cwd: workspace.path, name: `Gemini ${index}`, updatedAt: 100 - index,
+      })) });
+    await act(async () => { await result.current.loadOlderThreadsForWorkspace(workspace); });
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "setThreads", threads: expect.arrayContaining([
+      expect.objectContaining({ id: "gemini:0" }), expect.objectContaining({ id: "gemini:5" }),
+    ]) }));
+    expect(dispatch).toHaveBeenCalledWith({ type: "setThreadListCursor", workspaceId: workspace.id, cursor: "__codex_monitor_page_start__" });
+  });
+
   it("forks a thread and activates the fork", async () => {
     vi.mocked(forkThread).mockResolvedValue({
       result: { thread: { id: "thread-fork-1" } },

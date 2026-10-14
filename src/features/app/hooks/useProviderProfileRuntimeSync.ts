@@ -138,6 +138,7 @@ export function useProviderProfileRuntimeSync({
   settingsSnapshotRef.current = settingsSnapshot;
   const lastSuccessfulSettingsRef = useRef(settingsSnapshot);
   const latestRequestIdRef = useRef(0);
+  const usesGeminiProvider = activeProfile?.providerKind === "gemini";
   const activeProfileRuntimeKey = activeProfile
     ? JSON.stringify({
         id: activeProfile.id,
@@ -164,7 +165,15 @@ export function useProviderProfileRuntimeSync({
   }
 
   useEffect(() => {
-    if (settingsLoading || defer || !activeWorkspace?.connected) {
+    if (settingsLoading) {
+      return;
+    }
+    if (usesGeminiProvider) {
+      // Gemini applies its provider settings in its own ACP runtime.
+      lastSuccessfulSettingsRef.current = settingsSnapshotRef.current;
+      return;
+    }
+    if (defer || !activeWorkspace?.connected) {
       return;
     }
     const requestId = latestRequestIdRef.current + 1;
@@ -173,6 +182,12 @@ export function useProviderProfileRuntimeSync({
     const requestedSettings = settingsSnapshotRef.current;
     void syncWorkspaceRuntime(activeWorkspace.id, activeThreadIdRef.current)
       .then(() => {
+        if (
+          latestRequestIdRef.current !== requestId ||
+          desiredTransactionRef.current.revision !== desiredRevision
+        ) {
+          return;
+        }
         lastSuccessfulSettingsRef.current = requestedSettings;
       })
       .catch(async (error) => {
@@ -208,5 +223,6 @@ export function useProviderProfileRuntimeSync({
     settingsLoading,
     syncWorkspaceRuntime,
     transactionKey,
+    usesGeminiProvider,
   ]);
 }

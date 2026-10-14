@@ -21,6 +21,7 @@ const PROVIDER_BASE_URLS: Partial<
   deepseek: "https://api.deepseek.com/v1",
   openrouter: "https://openrouter.ai/api/v1",
   opencode: "https://opencode.ai/zen/go/v1",
+  gemini: "https://generativelanguage.googleapis.com",
 };
 
 const PROVIDER_REASONING_EFFORTS = [

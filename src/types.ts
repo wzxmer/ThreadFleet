@@ -741,6 +741,7 @@ export type CodexProviderKind =
   | "deepseek"
   | "openrouter"
   | "opencode"
+  | "gemini"
   | "custom";
 
 export type ReasoningEffortOption = {
@@ -875,8 +876,21 @@ export type PythonDetectionResult = {
   source: string | null;
 };
 
+export type AgentEngine = "codex" | "gemini";
+
+export type AgentCliCandidate = {
+  engine: AgentEngine;
+  path: string;
+  version: string | null;
+  source: "system" | "managed" | "custom";
+  runnable: boolean;
+  error: string | null;
+};
+
 export type AppSettings = {
   codexBin: string | null;
+  geminiBin?: string | null;
+  defaultAgentEngine?: AgentEngine;
   codexArgs: string | null;
   codexHome: string | null;
   sessionSources: SessionSource[];

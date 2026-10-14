@@ -16,7 +16,7 @@ function workspace(id: string, connected: boolean): WorkspaceInfo {
 }
 
 describe("useThreadListActions", () => {
-  it("refreshes workspaces before reloading connected workspace threads", async () => {
+  it("reloads workspace histories even when the Codex connection fails", async () => {
     const stale = [workspace("stale", true)];
     const fresh = [workspace("one", true), workspace("two", false), workspace("three", true)];
     const refreshWorkspaces = vi.fn(async () => fresh);
@@ -40,12 +40,13 @@ describe("useThreadListActions", () => {
     });
 
     expect(refreshWorkspaces).toHaveBeenCalledTimes(1);
-    expect(resetWorkspaceThreads).toHaveBeenCalledTimes(2);
+    expect(resetWorkspaceThreads).toHaveBeenCalledTimes(3);
     expect(resetWorkspaceThreads).toHaveBeenNthCalledWith(1, "one");
-    expect(resetWorkspaceThreads).toHaveBeenNthCalledWith(2, "three");
+    expect(resetWorkspaceThreads).toHaveBeenNthCalledWith(2, "two");
+    expect(resetWorkspaceThreads).toHaveBeenNthCalledWith(3, "three");
     expect(listThreadsForWorkspaces).toHaveBeenCalledTimes(1);
     expect(listThreadsForWorkspaces).toHaveBeenCalledWith(
-      [fresh[0], fresh[2]],
+      fresh,
       { refreshReason: "manual_refresh" },
     );
   });
@@ -73,11 +74,12 @@ describe("useThreadListActions", () => {
     });
 
     expect(refreshWorkspaces).toHaveBeenCalledTimes(1);
-    expect(resetWorkspaceThreads).toHaveBeenCalledTimes(1);
-    expect(resetWorkspaceThreads).toHaveBeenCalledWith("one");
+    expect(resetWorkspaceThreads).toHaveBeenCalledTimes(2);
+    expect(resetWorkspaceThreads).toHaveBeenNthCalledWith(1, "one");
+    expect(resetWorkspaceThreads).toHaveBeenNthCalledWith(2, "two");
     expect(listThreadsForWorkspaces).toHaveBeenCalledTimes(1);
     expect(listThreadsForWorkspaces).toHaveBeenCalledWith(
-      [current[0]],
+      current,
       { refreshReason: "manual_refresh" },
     );
   });

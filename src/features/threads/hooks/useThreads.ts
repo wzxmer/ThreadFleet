@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
 import * as Sentry from "@sentry/react";
 import type {
+  AgentEngine,
   CollabAgentRef,
   CustomPromptOption,
   DebugEntry,
@@ -41,6 +42,7 @@ import {
   archiveThread as archiveThreadService,
   listSessionSources as listSessionSourcesService,
   listWorkspaces as listWorkspacesService,
+  listGeminiThreads,
   readThread as readThreadService,
   getTurnExecutionSummaries,
   upsertTurnExecutionSummary,
@@ -73,6 +75,7 @@ import {
   listActiveManagedSessionsCached,
 } from "@threads/utils/activeManagedSessions";
 import { LOCAL_CODEX_WORKSPACE_ID } from "@/features/workspaces/domain/localCodexWorkspace";
+import { isGeminiThread } from "@/features/agents/utils/agentEngine";
 import type { ThreadListRuntimeContext } from "@threads/types";
 
 type UseThreadsOptions = {
@@ -85,6 +88,8 @@ type UseThreadsOptions = {
     threadId: string | null,
   ) => Promise<void>;
   model?: string | null;
+  geminiModel?: string | null;
+  defaultAgentEngine?: AgentEngine;
   workflowProviderKind?: CodexProviderKind;
   workflowRuntimeMode?: WorkflowRuntimeMode;
   computerControlRoutingEnabled?: boolean;
@@ -144,6 +149,8 @@ export function useThreads({
   onDebug,
   ensureWorkspaceRuntimeCodexArgs,
   model,
+  geminiModel = null,
+  defaultAgentEngine = "codex",
   workflowProviderKind = "openai",
   workflowRuntimeMode = "shadow",
   computerControlRoutingEnabled = true,
@@ -313,6 +320,7 @@ export function useThreads({
       threadId: string,
       thread: Record<string, unknown>,
     ): Promise<TurnExecutionSummary | null> => {
+      if (isGeminiThread(threadId)) return null;
       try {
         const serverTurnIds = getServerTurnIds(thread);
         if (serverTurnIds.size === 0) {
@@ -980,6 +988,7 @@ export function useThreads({
 
   useAppServerEvents(handlers);
 
+  const listAdditionalThreads = useCallback((workspace: WorkspaceInfo) => listGeminiThreads(workspace.id), []);
   const {
     startThreadForWorkspace: startThreadForWorkspaceInternal,
     forkThreadForWorkspace,
@@ -1009,6 +1018,8 @@ export function useThreads({
     preserveSessionLibraryOnProviderSwitch,
     getThreadListRuntimeContext,
     tokenEfficiencyMode,
+    defaultAgentEngine,
+    listAdditionalThreads,
     onDebug,
     getCustomName,
     isThreadPinned,
@@ -1281,8 +1292,9 @@ export function useThreads({
   );
 
   const startThreadForWorkspace = useCallback(
-    async (workspaceId: string, options?: { activate?: boolean }) => {
-      const runtimeReady = await ensureWorkspaceRuntimeCodexArgsBestEffort(
+    async (workspaceId: string, options?: { activate?: boolean; engine?: AgentEngine }) => {
+      const engine = options?.engine ?? defaultAgentEngine;
+      const runtimeReady = engine === "gemini" || await ensureWorkspaceRuntimeCodexArgsBestEffort(
         workspaceId,
         null,
         "start",
@@ -1300,6 +1312,7 @@ export function useThreads({
       ensureWorkspaceRuntimeCodexArgsBestEffort,
       promoteWorkspaceAutoContinueToThread,
       startThreadForWorkspaceInternal,
+      defaultAgentEngine,
     ],
   );
 
@@ -1421,6 +1434,8 @@ export function useThreads({
     activeThreadId,
     accessMode,
     model,
+    geminiModel,
+    defaultAgentEngine,
     workflowProviderKind,
     workflowRuntimeMode,
     computerControlRoutingEnabled,

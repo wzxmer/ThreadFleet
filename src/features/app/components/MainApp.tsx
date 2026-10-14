@@ -7,6 +7,10 @@ import { usePullRequestComposer } from "@/features/git/hooks/usePullRequestCompo
 import { useAutoExitEmptyDiff } from "@/features/git/hooks/useAutoExitEmptyDiff";
 import { isMissingRepo } from "@/features/git/utils/repoErrors";
 import { useModels } from "@/features/models/hooks/useModels";
+import { useAgentEngineSelection } from "@app/hooks/useAgentEngineSelection";
+import { useGeminiModels } from "@/features/agents/hooks/useGeminiModels";
+import { getThreadEngine } from "@/features/agents/utils/agentEngine";
+import { pushErrorToast } from "@services/toasts";
 import { useCollaborationModes } from "@/features/collaboration/hooks/useCollaborationModes";
 import { useCollaborationModeSelection } from "@/features/collaboration/hooks/useCollaborationModeSelection";
 import { useSkills } from "@/features/skills/hooks/useSkills";
@@ -229,6 +233,8 @@ export default function MainApp() {
     shouldReduceTransparency,
     runtimeThemeAppearance,
   } = useAppBootstrapOrchestration();
+  const { newAgentEngine, setNewAgentEngine, geminiModel, setGeminiModel } =
+    useAgentEngineSelection(appSettings.defaultAgentEngine);
   const appLanguage = resolveAppLanguage(appSettings.appLanguage);
   const t = useCallback(
     (key: I18nKey) => I18N_STRINGS[appLanguage][key] ?? I18N_STRINGS.zh[key],
@@ -310,7 +316,7 @@ export default function MainApp() {
   const updaterEnabled = !isMobileRuntime;
 
   useEffect(() => {
-    if (appSettingsLoading || isMobileRuntime || codexInstallCheckStartedRef.current) return;
+    if (appSettingsLoading || isMobileRuntime || newAgentEngine === "gemini" || codexInstallCheckStartedRef.current) return;
     codexInstallCheckStartedRef.current = true;
     void doctor(appSettings.codexBin, appSettings.codexArgs).catch((error) => {
       const message = error instanceof Error ? error.message : String(error);
@@ -321,7 +327,7 @@ export default function MainApp() {
         setCodexInstallPromptOpen(true);
       }
     });
-  }, [appSettings.backendMode, appSettings.codexArgs, appSettings.codexBin, appSettingsLoading, doctor, isMobileRuntime]);
+  }, [appSettings.backendMode, appSettings.codexArgs, appSettings.codexBin, appSettingsLoading, doctor, isMobileRuntime, newAgentEngine]);
 
   useEffect(() => subscribeReleaseAssetDownloadProgress((progress) => {
     if (progress.id !== codexInstallRequestIdRef.current) return;
@@ -484,11 +490,11 @@ export default function MainApp() {
     [activeExecutionProfileId, appSettings.codexKeyProfiles],
   );
   const effectivePreferredModelId = resolveCodexProviderModel(
-    activeCodexKeyProfile?.model,
+    activeCodexKeyProfile?.providerKind === "gemini" ? null : activeCodexKeyProfile?.model,
     preferredModelId,
   );
   const activeProviderModels = useMemo<ModelOption[]>(
-    () => resolveCodexProviderModelOptions(activeCodexKeyProfile),
+    () => activeCodexKeyProfile?.providerKind === "gemini" ? [] : resolveCodexProviderModelOptions(activeCodexKeyProfile),
     [activeCodexKeyProfile],
   );
   const [isRefreshingProviderModels, setIsRefreshingProviderModels] = useState(false);
@@ -851,6 +857,8 @@ export default function MainApp() {
     onWorkspaceConnected: markWorkspaceConnected,
     onDebug: addDebugEntry,
     model: resolvedModel,
+    geminiModel,
+    defaultAgentEngine: projectActiveWorkspace ? newAgentEngine : "codex",
     workflowProviderKind: activeCodexKeyProfile?.providerKind ?? "openai",
     workflowRuntimeMode: appSettings.workflowRuntimeMode ?? "shadow",
     computerControlRoutingEnabled: appSettings.computerControlRoutingEnabled !== false,
@@ -966,6 +974,37 @@ export default function MainApp() {
           request.params.thread_id === activeThreadId,
       ),
   );
+  const activeAgentEngine = activeThreadId ? getThreadEngine(activeThreadId) : projectActiveWorkspace ? newAgentEngine : "codex";
+  const geminiModels = useGeminiModels(
+    projectActiveWorkspace?.id ?? null,
+    activeThreadId,
+    activeAgentEngine,
+    setGeminiModel,
+    activeCodexKeyProfile?.providerKind === "gemini" ? activeCodexKeyProfile : null,
+    waitForPendingSettingsSaves,
+  );
+  const engineModels = useMemo<ModelOption[]>(
+    () => activeAgentEngine === "gemini"
+      ? geminiModels.models.map((entry) => ({
+          ...entry,
+          description: "",
+          supportedReasoningEfforts: [],
+          defaultReasoningEffort: null,
+          isDefault: entry.id === geminiModel,
+        }))
+      : models,
+    [activeAgentEngine, geminiModel, geminiModels.models, models],
+  );
+  useEffect(() => {
+    if (geminiModels.error) {
+      pushErrorToast({ title: t("agents.modelsFailed"), message: geminiModels.error });
+    }
+  }, [geminiModels.error, t]);
+  const connectComposerWorkspace = useCallback(async (workspace: WorkspaceInfo) => {
+    await waitForPendingSettingsSaves();
+    if (activeAgentEngine === "codex") await connectWorkspace(workspace);
+  }, [activeAgentEngine, connectWorkspace, waitForPendingSettingsSaves]);
+
   const activeThreadCurrentTurnId = activeThreadId
     ? activeTurnIdByThread[activeThreadId] ?? null
     : null;
@@ -1874,6 +1913,7 @@ export default function MainApp() {
     (activePlan && (activePlan.steps.length > 0 || activePlan.explanation)) || activePlanStream
   );
   const composerWorkspaceState = useMainAppComposerWorkspaceState({
+    agentEngine: activeAgentEngine,
     view: {
       activeTab,
       tabletTab,
@@ -1906,8 +1946,8 @@ export default function MainApp() {
         appSettings.pauseQueuedMessagesWhenResponseRequired,
     },
     models: {
-      models,
-      selectedModelId,
+      models: engineModels,
+      selectedModelId: activeAgentEngine === "gemini" ? geminiModel : selectedModelId,
       resolvedEffort,
       selectedServiceTier,
       collaborationModePayload,
@@ -1917,7 +1957,7 @@ export default function MainApp() {
       workspaceHomeTextareaRef,
     },
     actions: {
-      connectWorkspace,
+      connectWorkspace: connectComposerWorkspace,
       startThreadForWorkspace,
       sendUserMessage,
       sendUserMessageToThread,
@@ -2470,6 +2510,7 @@ export default function MainApp() {
     sidebarToggleProps,
     workspaceHomeProps: activeWorkspace
       ? {
+          agentEngine: activeAgentEngine,
           workspace: activeWorkspace,
           showGitInitBanner,
           initGitRepoLoading,
@@ -2482,28 +2523,28 @@ export default function MainApp() {
           onStartRun: startWorkspaceRun,
           runMode: workspaceRunMode,
           onRunModeChange: setWorkspaceRunMode,
-          models,
-          selectedModelId,
-          onSelectModel: setSelectedModelId,
+          models: engineModels,
+          selectedModelId: activeAgentEngine === "gemini" ? geminiModel : selectedModelId,
+          onSelectModel: activeAgentEngine === "gemini" ? setGeminiModel : setSelectedModelId,
           modelSelections: workspaceModelSelections,
           onToggleModel: toggleWorkspaceModelSelection,
           onModelCountChange: setWorkspaceModelCount,
-          collaborationModes,
+          collaborationModes: activeAgentEngine === "gemini" ? [] : collaborationModes,
           selectedCollaborationModeId,
           onSelectCollaborationMode: setSelectedCollaborationModeId,
           reasoningOptions,
           selectedEffort,
           onSelectEffort: setSelectedEffort,
-          reasoningSupported,
+          reasoningSupported: activeAgentEngine === "codex" && reasoningSupported,
           error: workspaceRunError,
           isSubmitting: workspaceRunSubmitting,
           activeWorkspaceId,
           activeThreadId,
           threadStatusById,
           onSelectInstance: handleSelectWorkspaceInstance,
-          skills,
-          appsEnabled: appSettings.experimentalAppsEnabled,
-          apps,
+          skills: activeAgentEngine === "gemini" ? [] : skills,
+          appsEnabled: activeAgentEngine === "codex" && appSettings.experimentalAppsEnabled,
+          apps: activeAgentEngine === "gemini" ? [] : apps,
           prompts,
           files,
           onFileAutocompleteActiveChange: setFileAutocompleteActive,
@@ -2678,32 +2719,35 @@ export default function MainApp() {
     onCloseTerminalPanel: closeTerminalPanel,
     launchScriptState,
     launchScriptsState,
-    models,
-    selectedModelId,
-    onSelectModel: handleSelectModel,
+    agentEngine: activeAgentEngine,
+    onSelectAgentEngine: projectActiveWorkspace ? setNewAgentEngine : undefined,
+    agentEngineLocked: Boolean(activeThreadId),
+    models: activeAgentEngine === "gemini" ? geminiModels.models : models,
+    selectedModelId: activeAgentEngine === "gemini" ? geminiModel : selectedModelId,
+    onSelectModel: activeAgentEngine === "gemini" ? setGeminiModel : handleSelectModel,
     onRefreshModels: () => {
-      void handleRefreshModels();
+      void (activeAgentEngine === "gemini" ? geminiModels.refresh() : handleRefreshModels());
     },
-    isRefreshingModels: isRefreshingModels || isRefreshingProviderModels,
-    collaborationModes,
+    isRefreshingModels: activeAgentEngine === "gemini" ? geminiModels.loading : isRefreshingModels || isRefreshingProviderModels,
+    collaborationModes: activeAgentEngine === "gemini" ? [] : collaborationModes,
     selectedCollaborationModeId,
     onSelectCollaborationMode: handleSelectCollaborationMode,
     reasoningOptions,
     selectedEffort,
     onSelectEffort: handleSelectEffort,
-    reasoningSupported,
+    reasoningSupported: activeAgentEngine === "codex" && reasoningSupported,
     codexArgsOptions,
     selectedCodexArgsOverride,
-    onSelectCodexArgsOverride: handleSelectCodexArgsOverride,
+    onSelectCodexArgsOverride: activeAgentEngine === "codex" ? handleSelectCodexArgsOverride : undefined,
     selectedWorkflowGateId,
     onSelectWorkflowGateId: handleSelectWorkflowGateId,
-    onVerifyWorkflowGate: projectActiveWorkspace
+    onVerifyWorkflowGate: projectActiveWorkspace && activeAgentEngine === "codex"
       ? handleVerifyWorkflowGate
       : undefined,
-    accessMode,
+    accessMode: activeAgentEngine === "gemini" && accessMode === "full-access" ? "current" : accessMode,
     onSelectAccessMode: handleSelectAccessMode,
-    skills,
-    apps,
+    skills: activeAgentEngine === "gemini" ? [] : skills,
+    apps: activeAgentEngine === "gemini" ? [] : apps,
     prompts,
     composerInputRef,
     composerEditorSettings,

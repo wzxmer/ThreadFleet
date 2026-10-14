@@ -36,7 +36,7 @@ export function useThreadListActions({
         return;
       }
       setThreadListSortKey(nextSortKey);
-      const connectedWorkspaces = workspaces.filter((workspace) => workspace.connected);
+      const connectedWorkspaces = workspaces;
       if (connectedWorkspaces.length > 0) {
         void listThreadsForWorkspaces(connectedWorkspaces, {
           sortKey: nextSortKey,
@@ -66,7 +66,7 @@ export function useThreadListActions({
         await connectWorkspace(workspace);
         connectedWorkspaces.push({ ...workspace, connected: true });
       } catch {
-        // The workspace is still unavailable; preserve any current thread state.
+        connectedWorkspaces.push(workspace);
       }
     }
     connectedWorkspaces.forEach((workspace) => {

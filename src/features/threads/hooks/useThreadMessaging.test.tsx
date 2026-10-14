@@ -176,6 +176,66 @@ describe("useThreadMessaging telemetry", () => {
     });
   });
 
+  it.each([
+    { explicitModel: undefined, expectedModel: "gemini-default" },
+    { explicitModel: "gemini-flash", expectedModel: "gemini-flash" },
+    { explicitModel: null, expectedModel: null },
+  ])("keeps Gemini model selection isolated: $expectedModel", async ({ explicitModel, expectedModel }) => {
+    const ensureWorkspaceRuntimeCodexArgs = vi.fn();
+    const { result } = renderHook(() => useThreadMessaging({
+      activeWorkspace: workspace,
+      activeThreadId: "gemini:one",
+      model: "codex-model",
+      geminiModel: "gemini-default",
+      effort: "high",
+      serviceTier: "fast",
+      collaborationMode: { mode: "plan" },
+      accessMode: "current",
+      steerEnabled: true,
+      workflowRuntimeMode: "active",
+      computerControlRoutingEnabled: true,
+      customPrompts: [],
+      threadStatusById: {},
+      activeTurnIdByThread: {},
+      rateLimitsByWorkspace: {},
+      pendingInterruptsRef: { current: new Set<string>() },
+      dispatch: vi.fn(),
+      getCustomName: vi.fn(),
+      markProcessing: vi.fn(),
+      markReviewing: vi.fn(),
+      setActiveTurnId: vi.fn(),
+      recordThreadActivity: vi.fn(),
+      safeMessageActivity: vi.fn(),
+      pushThreadErrorMessage: vi.fn(),
+      ensureThreadForActiveWorkspace: vi.fn().mockResolvedValue("gemini:one"),
+      ensureThreadForWorkspace: vi.fn().mockResolvedValue("gemini:one"),
+      refreshThread: vi.fn().mockResolvedValue(null),
+      forkThreadForWorkspace: vi.fn().mockResolvedValue(null),
+      updateThreadParent: vi.fn(),
+      ensureWorkspaceRuntimeCodexArgs,
+    }));
+    await act(async () => {
+      await result.current.sendUserMessageToThread(workspace, "gemini:one", "hello", [], {
+        model: "codex-background-model",
+        geminiModel: explicitModel,
+        effort: "high",
+        serviceTier: "fast",
+        collaborationMode: { mode: "plan" },
+      });
+    });
+    expect(sendUserMessageService).toHaveBeenCalledWith("ws-1", "gemini:one", "hello",
+      expect.objectContaining({
+        model: expectedModel,
+        effort: null,
+        serviceTier: null,
+        collaborationMode: null,
+      }),
+    );
+    expect(ensureWorkspaceRuntimeCodexArgs).not.toHaveBeenCalled();
+    expect(workflowPreflightPreviewService).not.toHaveBeenCalled();
+    expect(computerControlPreflightService).not.toHaveBeenCalled();
+  });
+
   it("records prompt_sent once for one message send", async () => {
     vi.mocked(computerControlPreflightService).mockResolvedValueOnce({
       schemaVersion: 1,

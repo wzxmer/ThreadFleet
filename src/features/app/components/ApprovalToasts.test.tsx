@@ -97,6 +97,25 @@ describe("ApprovalToasts", () => {
     expect(screen.getByRole("button", { name: "允许（Enter）" })).toBeTruthy();
   });
 
+  it("offers one-time decisions for Gemini without a persistent approval rule", () => {
+    const request: ApprovalRequest = {
+      ...approvals[0], request_id: "gemini:session:approval-1",
+      method: "item/commandExecution/requestApproval",
+    };
+    const onDecision = vi.fn();
+    const onRemember = vi.fn();
+    render(
+      <I18nProvider preference="zh">
+        <ApprovalToasts approvals={[request]} workspaces={workspaces}
+          onDecision={onDecision} onRemember={onRemember} />
+      </I18nProvider>,
+    );
+    expect(screen.queryByRole("button", { name: "始终允许" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "允许（Enter）" }));
+    expect(onDecision).toHaveBeenCalledWith(request, "accept");
+    expect(onRemember).not.toHaveBeenCalled();
+  });
+
   it("keeps approval copy in English when English is selected", () => {
     render(
       <I18nProvider preference="en">

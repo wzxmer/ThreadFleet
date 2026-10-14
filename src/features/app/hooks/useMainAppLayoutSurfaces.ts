@@ -203,6 +203,9 @@ type UseMainAppLayoutSurfacesArgs = {
   };
   launchScriptsState: WorkspaceLaunchScriptsState | undefined;
   models: ComposerProps["models"];
+  agentEngine?: ComposerProps["agentEngine"];
+  onSelectAgentEngine?: ComposerProps["onSelectAgentEngine"];
+  agentEngineLocked?: boolean;
   selectedModelId: ComposerProps["selectedModelId"];
   onSelectModel: ComposerProps["onSelectModel"];
   onRefreshModels: ComposerProps["onRefreshModels"];
@@ -414,6 +417,9 @@ function buildPrimarySurface({
   onCloseTerminalPanel,
   launchScriptState,
   launchScriptsState,
+  agentEngine,
+  onSelectAgentEngine,
+  agentEngineLocked,
   models,
   selectedModelId,
   onSelectModel,
@@ -852,6 +858,9 @@ function buildPrimarySurface({
           onEditQueued: composerWorkspaceState.handleEditQueued,
           onDeleteQueued: composerWorkspaceState.handleDeleteQueued,
           collaborationModes,
+          agentEngine,
+          onSelectAgentEngine,
+          agentEngineLocked,
           selectedCollaborationModeId,
           onSelectCollaborationMode,
           models,
@@ -873,7 +882,7 @@ function buildPrimarySurface({
           accessMode,
           onSelectAccessMode,
           skills,
-          appsEnabled: appSettings.experimentalAppsEnabled,
+          appsEnabled: agentEngine !== "gemini" && appSettings.experimentalAppsEnabled,
           apps,
           prompts,
           files: composerWorkspaceState.files,
@@ -1509,6 +1518,9 @@ export function useMainAppLayoutSurfaces({
   onCloseTerminalPanel,
   launchScriptState,
   launchScriptsState,
+  agentEngine,
+  onSelectAgentEngine,
+  agentEngineLocked,
   models,
   selectedModelId,
   onSelectModel,
@@ -1750,6 +1762,9 @@ export function useMainAppLayoutSurfaces({
     onCloseTerminalPanel,
     launchScriptState,
     launchScriptsState,
+    agentEngine,
+    onSelectAgentEngine,
+    agentEngineLocked,
     models,
     selectedModelId,
     onSelectModel,

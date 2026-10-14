@@ -53,6 +53,28 @@ where
         settings: WorkspaceSettings::default(),
     };
 
+    if app_settings.lock().await.default_agent_engine == "gemini" {
+        let mut workspace_map = workspaces.lock().await;
+        workspace_map.insert(entry.id.clone(), entry.clone());
+        if let Err(error) = write_workspaces(
+            storage_path,
+            &workspace_map.values().cloned().collect::<Vec<_>>(),
+        ) {
+            workspace_map.remove(&entry.id);
+            return Err(error);
+        }
+        return Ok(WorkspaceInfo {
+            id: entry.id,
+            name: entry.name,
+            path: entry.path,
+            connected: false,
+            kind: entry.kind,
+            parent_id: entry.parent_id,
+            worktree: entry.worktree,
+            settings: entry.settings,
+        });
+    }
+
     let _spawn_guard = workspace_session_spawn_lock().lock().await;
     let default_bin = app_settings.lock().await.codex_bin.clone();
     let existing_session = take_live_shared_session(sessions, default_bin.as_deref()).await;
@@ -624,6 +646,40 @@ where
 #[cfg(test)]
 mod tests {
     use super::{default_repo_name_from_url, validate_target_folder_name};
+
+    #[test]
+    fn gemini_default_registers_workspace_without_launching_codex() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let directory = std::env::temp_dir()
+                .join(format!("gemini-workspace-test-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir_all(&directory).unwrap();
+            let workspaces = tokio::sync::Mutex::new(std::collections::HashMap::new());
+            let sessions = tokio::sync::Mutex::new(std::collections::HashMap::new());
+            let settings = tokio::sync::Mutex::new(crate::types::AppSettings {
+                default_agent_engine: "gemini".into(),
+                ..Default::default()
+            });
+            let storage = directory.join("workspaces.json");
+            let result = super::add_workspace_core(
+                directory.to_string_lossy().to_string(),
+                &workspaces,
+                &sessions,
+                &settings,
+                &storage,
+                |_, _, _, _| async { panic!("Gemini registration must not launch Codex") },
+            )
+            .await
+            .unwrap();
+            assert!(!result.connected);
+            assert!(sessions.lock().await.is_empty());
+            assert_eq!(crate::storage::read_workspaces(&storage).unwrap().len(), 1);
+            std::fs::remove_dir_all(&directory).unwrap();
+        });
+    }
 
     #[test]
     fn derives_repo_name_from_https_url() {

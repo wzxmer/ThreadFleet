@@ -232,7 +232,9 @@ pub(crate) fn apply_active_provider_profile(
     if !settings.sync_provider_profile_to_local_config {
         return Ok(ProviderConfigSyncOutcome::Disabled);
     }
-    let Some(profile) = provider_profiles_core::effective_execution_profile(settings) else {
+    let Some(profile) = provider_profiles_core::effective_execution_profile(settings)
+        .filter(|profile| profile.provider_kind != "gemini")
+    else {
         return Ok(ProviderConfigSyncOutcome::NoActiveProfile);
     };
     if profile.key.trim().is_empty() {
@@ -415,8 +417,8 @@ pub(crate) fn sync_active_provider_profile_to_local_config(
     if !settings.sync_provider_profile_to_local_config && existing_state.is_none() {
         return Ok(ProviderConfigSyncOutcome::Disabled);
     }
-    let has_active_profile =
-        provider_profiles_core::effective_execution_profile(settings).is_some();
+    let has_active_profile = provider_profiles_core::effective_execution_profile(settings)
+        .is_some_and(|profile| profile.provider_kind != "gemini");
 
     let snapshot = config_toml_core::load_global_config_snapshot(codex_home)?;
     let current = ProviderOwnedConfig::capture(&snapshot.document)?;
@@ -525,6 +527,19 @@ mod tests {
         settings.codex_key_profiles = vec![profile(use_gateway)];
         settings.active_codex_key_profile_id = Some("company".to_string());
         settings
+    }
+
+    #[test]
+    fn gemini_provider_is_not_written_to_codex_configuration() {
+        let mut settings = enabled_settings(false);
+        settings.codex_key_profiles[0].provider_kind = "gemini".into();
+        let mut document: Document = "model = 'codex-model'\n".parse().unwrap();
+        let original = document.to_string();
+        assert_eq!(
+            apply_active_provider_profile(&mut document, &settings).unwrap(),
+            ProviderConfigSyncOutcome::NoActiveProfile
+        );
+        assert_eq!(document.to_string(), original);
     }
 
     #[test]

@@ -6,6 +6,8 @@ import {
 } from "@tauri-apps/plugin-notification";
 import type {
   AppSettings,
+  AgentEngine,
+  AgentCliCandidate,
   ArchiveManagedSessionsRequest,
   ArchiveManagedSessionsResponse,
   CodexProviderStatus,
@@ -89,6 +91,7 @@ import {
 import type { ThirdPartyKeyUsageSnapshot } from "@app/utils/thirdPartyKeyUsage";
 import { readReasoningEffortMetadata } from "@utils/reasoningEfforts";
 import { consumeDevSendUserMessageThreadNotFound } from "./devRuntimeFaults";
+import { isGeminiThread } from "@/features/agents/utils/agentEngine";
 import type {
   GitFileDiff,
   GitFileStatus,
@@ -670,8 +673,12 @@ export async function addWorktree(
   branch: string,
   name: string | null,
   copyAgentsMd = true,
+  agentEngine?: "codex" | "gemini",
 ): Promise<WorkspaceInfo> {
-  return invoke<WorkspaceInfo>("add_worktree", { parentId, branch, name, copyAgentsMd });
+  return invoke<WorkspaceInfo>("add_worktree", {
+    parentId, branch, name, copyAgentsMd,
+    ...(agentEngine ? { agentEngine } : {}),
+  });
 }
 
 export type WorktreeSetupStatus = {
@@ -764,8 +771,29 @@ export async function setWorkspaceRuntimeCodexArgs(
 export async function startThread(
   workspaceId: string,
   tokenEfficiencyMode: "quality" | "balanced" | "economy" = "quality",
+  engine: AgentEngine = "codex",
 ) {
+  if (engine === "gemini") {
+    return agentRuntimeRequest(workspaceId, "start");
+  }
   return invoke<any>("start_thread", { workspaceId, tokenEfficiencyMode });
+}
+
+export async function agentRuntimeRequest(
+  workspaceId: string,
+  operation: string,
+  params: Record<string, unknown> = {},
+) {
+  return invoke<any>("agent_runtime_request", { workspaceId, operation, params });
+}
+
+export async function discoverAgentClis(engine: AgentEngine): Promise<AgentCliCandidate[]> {
+  return invoke<AgentCliCandidate[]>("discover_agent_clis", { engine });
+}
+
+export async function pickAgentCliPath(): Promise<string | null> {
+  const path = await open({ directory: false, multiple: false });
+  return typeof path === "string" ? path : null;
 }
 
 export async function workflowPreflightPreview(
@@ -889,6 +917,15 @@ export async function sendUserMessage(
   },
 ) {
   const images = await normalizeImagesForRpc(options?.images);
+  if (isGeminiThread(threadId)) {
+    return agentRuntimeRequest(workspaceId, "send", {
+      threadId,
+      text,
+      images,
+      model: options?.model ?? null,
+      accessMode: options?.accessMode ?? null,
+    });
+  }
   const payload: Record<string, unknown> = {
     workspaceId,
     threadId,
@@ -922,6 +959,9 @@ export async function interruptTurn(
   threadId: string,
   turnId: string,
 ) {
+  if (isGeminiThread(threadId)) {
+    return agentRuntimeRequest(workspaceId, "interrupt", { threadId, turnId });
+  }
   return invoke("turn_interrupt", { workspaceId, threadId, turnId });
 }
 
@@ -969,6 +1009,9 @@ export async function respondToServerRequest(
   requestId: number | string,
   decision: "accept" | "decline",
 ) {
+  if (typeof requestId === "string" && requestId.startsWith("gemini:")) {
+    return agentRuntimeRequest(workspaceId, "respond", { requestId, result: { decision } });
+  }
   return invoke("respond_to_server_request", {
     workspaceId,
     requestId,
@@ -981,6 +1024,9 @@ export async function respondToUserInputRequest(
   requestId: number | string,
   answers: Record<string, { answers: string[] }>,
 ) {
+  if (typeof requestId === "string" && requestId.startsWith("gemini:")) {
+    return agentRuntimeRequest(workspaceId, "respond", { requestId, result: { answers } });
+  }
   return invoke("respond_to_server_request", {
     workspaceId,
     requestId,
@@ -1875,6 +1921,12 @@ export async function listThreads(
   });
 }
 
+export async function listGeminiThreads(workspaceId: string) {
+  const response = await agentRuntimeRequest(workspaceId, "list");
+  const result = response?.result ?? response;
+  return Array.isArray(result?.data) ? result.data as Record<string, unknown>[] : [];
+}
+
 export async function listMcpServerStatus(
   workspaceId: string,
   cursor?: string | null,
@@ -1884,6 +1936,9 @@ export async function listMcpServerStatus(
 }
 
 export async function resumeThread(workspaceId: string, threadId: string) {
+  if (isGeminiThread(threadId)) {
+    return agentRuntimeRequest(workspaceId, "resume", { threadId });
+  }
   return invoke<any>("resume_thread", { workspaceId, threadId });
 }
 
@@ -1915,6 +1970,7 @@ export async function getThreadTokenUsage(
   workspaceId: string,
   threadId: string,
 ): Promise<Record<string, unknown> | null> {
+  if (isGeminiThread(threadId)) return null;
   return invoke<Record<string, unknown> | null>("get_thread_token_usage", {
     workspaceId,
     threadId,
@@ -1967,6 +2023,9 @@ export async function prepareManagedSessionDerivation(
 }
 
 export async function readThread(workspaceId: string, threadId: string) {
+  if (isGeminiThread(threadId)) {
+    return agentRuntimeRequest(workspaceId, "read", { threadId });
+  }
   return invoke<any>("read_thread", { workspaceId, threadId });
 }
 
@@ -1991,6 +2050,9 @@ export async function readThreadPage(
   itemLimit?: number | null,
   byteLimit?: number | null,
 ) {
+  if (isGeminiThread(threadId)) {
+    return agentRuntimeRequest(workspaceId, "read", { threadId, cursor, itemLimit, byteLimit });
+  }
   return invoke<any>("read_thread_page", {
     workspaceId,
     threadId,
@@ -2024,14 +2086,19 @@ export async function upsertTurnExecutionSummary(
 }
 
 export async function threadLiveSubscribe(workspaceId: string, threadId: string) {
+  if (isGeminiThread(threadId)) return {};
   return invoke<any>("thread_live_subscribe", { workspaceId, threadId });
 }
 
 export async function threadLiveUnsubscribe(workspaceId: string, threadId: string) {
+  if (isGeminiThread(threadId)) return {};
   return invoke<any>("thread_live_unsubscribe", { workspaceId, threadId });
 }
 
 export async function archiveThread(workspaceId: string, threadId: string) {
+  if (isGeminiThread(threadId)) {
+    return agentRuntimeRequest(workspaceId, "archive", { threadId });
+  }
   return invoke<any>("archive_thread", { workspaceId, threadId });
 }
 
@@ -2040,6 +2107,9 @@ export async function setThreadName(
   threadId: string,
   name: string,
 ) {
+  if (isGeminiThread(threadId)) {
+    return agentRuntimeRequest(workspaceId, "rename", { threadId, name });
+  }
   return invoke<any>("set_thread_name", { workspaceId, threadId, name });
 }
 

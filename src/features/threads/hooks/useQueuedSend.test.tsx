@@ -45,6 +45,24 @@ const makeOptions = (
 });
 
 describe("useQueuedSend", () => {
+  it("sends Gemini without connecting Codex and does not intercept Codex slash commands", async () => {
+    const options = makeOptions({ agentEngine: "gemini", activeThreadId: "gemini:one",
+      activeWorkspace: { ...workspace, connected: false } });
+    const { result } = renderHook(() => useQueuedSend(options));
+    await act(async () => { await result.current.handleSend("/review"); });
+    expect(options.connectWorkspace).not.toHaveBeenCalled();
+    expect(options.startReview).not.toHaveBeenCalled();
+    expect(options.sendUserMessage).toHaveBeenCalledWith("/review", [], undefined, expect.any(Object));
+  });
+
+  it("creates a Gemini conversation from a new draft without a Codex connection", async () => {
+    const options = makeOptions({ agentEngine: "gemini", activeThreadId: null,
+      activeWorkspace: { ...workspace, connected: false } });
+    const { result } = renderHook(() => useQueuedSend(options));
+    await act(async () => { await result.current.handleSend("/new"); });
+    expect(options.connectWorkspace).not.toHaveBeenCalled();
+    expect(options.startThreadForWorkspace).toHaveBeenCalledWith(workspace.id);
+  });
   it("sends queued messages one at a time after processing completes", async () => {
     const options = makeOptions();
     const { result, rerender } = renderHook(

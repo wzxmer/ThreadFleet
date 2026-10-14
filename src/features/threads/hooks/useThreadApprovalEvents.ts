@@ -22,7 +22,8 @@ export function useThreadApprovalEvents({
       const commandInfo = getApprovalCommandInfo(approval.params ?? {});
       const allowlist =
         approvalAllowlistRef.current[approval.workspace_id] ?? [];
-      if (commandInfo && matchesCommandPrefix(commandInfo.tokens, allowlist)) {
+      const isGemini = typeof approval.request_id === "string" && approval.request_id.startsWith("gemini:");
+      if (!isGemini && commandInfo && matchesCommandPrefix(commandInfo.tokens, allowlist)) {
         void respondToServerRequest(
           approval.workspace_id,
           approval.request_id,

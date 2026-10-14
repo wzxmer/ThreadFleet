@@ -172,7 +172,7 @@ export function ApprovalToasts({
               >
                 {t("approval.decline")}
               </button>
-              {commandInfo && onRemember ? (
+              {commandInfo && onRemember && !String(request.request_id).startsWith("gemini:") ? (
                 <button
                   className="ghost approval-toast-remember"
                   onClick={() => onRemember(request, commandInfo.tokens)}

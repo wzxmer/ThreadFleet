@@ -2005,6 +2005,31 @@ describe("SettingsView Codex section", () => {
 });
 
 describe("SettingsView Codex defaults", () => {
+  it("saves a Gemini provider without Codex transport and probe controls", async () => {
+    const onUpdateAppSettings = vi.fn().mockResolvedValue(undefined);
+    renderCodexSection({ initialSection: "providers", onUpdateAppSettings });
+    fireEvent.change(screen.getByLabelText("模型服务商配置名称"), {
+      target: { value: "Gemini relay" },
+    });
+    fireEvent.change(screen.getByLabelText("服务商类型"), {
+      target: { value: "gemini" },
+    });
+    fireEvent.change(screen.getByLabelText("API 密钥"), {
+      target: { value: "test-gemini-key" },
+    });
+    expect(screen.queryByRole("button", { name: "拉取模型" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "验证工具调用" })).toBeNull();
+    expect(screen.getByText(/中转地址需支持 Gemini 原生接口/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(onUpdateAppSettings).toHaveBeenCalled());
+    const calls = onUpdateAppSettings.mock.calls;
+    const next = calls[calls.length - 1]?.[0] as AppSettings;
+    expect(next.codexProviders?.[0].providerKind).toBe("gemini");
+    expect(next.codexProviders?.[0].useGateway).toBe(false);
+    expect(next.codexKeyProfiles[0].providerKind).toBe("gemini");
+    expect(next.codexKeyProfiles[0].key).toBe("test-gemini-key");
+  });
+
   const createModelListResponse = (models: Array<Record<string, unknown>>) => ({
     result: { data: models },
   });

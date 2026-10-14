@@ -23,6 +23,7 @@ import { useI18n } from "@/features/i18n/I18nProvider";
 const RECENT_THREAD_LIMIT = 8;
 
 type UseMainAppComposerWorkspaceStateArgs = {
+  agentEngine?: "codex" | "gemini";
   view: {
     centerMode: "chat" | "diff";
     isCompact: boolean;
@@ -97,6 +98,7 @@ type UseMainAppComposerWorkspaceStateArgs = {
 };
 
 export function useMainAppComposerWorkspaceState({
+  agentEngine,
   view,
   workspace,
   thread,
@@ -191,7 +193,7 @@ export function useMainAppComposerWorkspaceState({
     ? threadStatusById[activeThreadId]?.isReviewing ?? false
     : false;
   const activeTurnId = activeThreadId ? activeTurnIdByThread[activeThreadId] ?? null : null;
-  const steerAvailable = settings.steerEnabled && Boolean(activeTurnId);
+  const steerAvailable = settings.steerEnabled && Boolean(activeTurnId) && !activeThreadId?.startsWith("gemini:");
   const hasUserInputRequestForActiveThread = Boolean(
     activeThreadId &&
       userInputRequests.some(
@@ -256,6 +258,7 @@ export function useMainAppComposerWorkspaceState({
     followUpMessageBehavior: settings.followUpMessageBehavior,
     composerTriggerMode: settings.composerTriggerMode,
     appsEnabled: settings.experimentalAppsEnabled,
+    agentEngine,
     connectWorkspace,
     startThreadForWorkspace,
     sendUserMessage,
@@ -271,6 +274,7 @@ export function useMainAppComposerWorkspaceState({
   });
 
   const workspaceHomeState = useWorkspaceHome({
+    agentEngine,
     activeWorkspace: projectActiveWorkspace,
     models: modelOptions,
     selectedModelId,

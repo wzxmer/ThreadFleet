@@ -6,6 +6,7 @@ use tauri::RunEvent;
 #[cfg(desktop)]
 use tauri::WindowEvent;
 
+mod agents;
 mod autostart;
 mod backend;
 mod codex;
@@ -76,6 +77,10 @@ fn show_main_window(app_handle: &tauri::AppHandle) {
 #[cfg(desktop)]
 async fn stop_managed_daemons_for_exit(app_handle: tauri::AppHandle) {
     let state = app_handle.state::<state::AppState>();
+    state.gemini_runtime.shutdown().await;
+    if keep_daemon_running_after_close(&app_handle) {
+        return;
+    }
     let _ = tailscale::tailscale_daemon_stop(state).await;
 }
 
@@ -214,6 +219,8 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
+            agents::discover_agent_clis,
+            agents::agent_runtime_request,
             settings::get_app_settings,
             settings::update_app_settings,
             session_manager::list_session_sources,
@@ -428,9 +435,7 @@ pub fn run() {
     app.run(|app_handle, event| {
         #[cfg(desktop)]
         if let RunEvent::ExitRequested { api, .. } = event {
-            if !EXIT_CLEANUP_IN_PROGRESS.load(Ordering::SeqCst)
-                && !keep_daemon_running_after_close(app_handle)
-            {
+            if !EXIT_CLEANUP_IN_PROGRESS.load(Ordering::SeqCst) {
                 api.prevent_exit();
                 EXIT_CLEANUP_IN_PROGRESS.store(true, Ordering::SeqCst);
                 let app_handle = app_handle.clone();

@@ -74,6 +74,84 @@ pub(crate) async fn worktree_setup_mark_ran_core(
     Ok(())
 }
 
+#[cfg(test)]
+mod engine_tests {
+    use super::*;
+
+    #[test]
+    fn worktree_creation_respects_explicit_engine_and_default() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            for (default_engine, selected_engine, expects_codex) in [
+                ("gemini", None, false),
+                ("codex", Some("gemini"), false),
+                ("gemini", Some("codex"), true),
+            ] {
+                let directory =
+                    std::env::temp_dir().join(format!("gemini-worktree-test-{}", Uuid::new_v4()));
+                std::fs::create_dir_all(&directory).unwrap();
+                let parent = WorkspaceEntry {
+                    id: "parent".into(),
+                    name: "Project".into(),
+                    path: directory.to_string_lossy().into_owned(),
+                    kind: WorkspaceKind::Main,
+                    parent_id: None,
+                    worktree: None,
+                    settings: WorkspaceSettings::default(),
+                };
+                let workspaces = Mutex::new(HashMap::from([(parent.id.clone(), parent)]));
+                let sessions = Mutex::new(HashMap::new());
+                let settings = Mutex::new(AppSettings {
+                    default_agent_engine: default_engine.into(),
+                    ..Default::default()
+                });
+                let storage = directory.join("workspaces.json");
+                let result =
+                    add_worktree_core(
+                        "parent".into(),
+                        "feat/test".into(),
+                        None,
+                        false,
+                        selected_engine.map(str::to_owned),
+                        &directory,
+                        &workspaces,
+                        &sessions,
+                        &settings,
+                        &storage,
+                        |value| value.replace('/', "-"),
+                        |root, name| Ok(root.join(name)),
+                        |_, _| std::future::ready(Ok(false)),
+                        None::<
+                            fn(
+                                &PathBuf,
+                                &str,
+                            )
+                                -> std::future::Ready<Result<Option<String>, String>>,
+                        >,
+                        |_, _| std::future::ready(Ok(())),
+                        |_, _, _, _| std::future::ready(Err("Codex spawn selected".into())),
+                    )
+                    .await;
+                if expects_codex {
+                    assert_eq!(result.unwrap_err(), "Codex spawn selected");
+                } else {
+                    let workspace = result.unwrap();
+                    assert!(!workspace.connected);
+                    assert_eq!(workspace.parent_id.as_deref(), Some("parent"));
+                    assert!(workspace.kind.is_worktree());
+                    assert!(workspaces.lock().await.contains_key(&workspace.id));
+                    assert_eq!(crate::storage::read_workspaces(&storage).unwrap().len(), 2);
+                }
+                assert!(sessions.lock().await.is_empty());
+                std::fs::remove_dir_all(directory).unwrap();
+            }
+        });
+    }
+}
+
 pub(crate) async fn add_worktree_core<
     FSpawn,
     FutSpawn,
@@ -90,6 +168,7 @@ pub(crate) async fn add_worktree_core<
     branch: String,
     name: Option<String>,
     copy_agents_md: bool,
+    agent_engine: Option<String>,
     data_dir: &PathBuf,
     workspaces: &Mutex<HashMap<String, WorkspaceEntry>>,
     sessions: &Mutex<HashMap<String, Arc<WorkspaceSession>>>,
@@ -114,6 +193,13 @@ where
     FRunGit: Fn(&PathBuf, &[&str]) -> FutRunGit,
     FutRunGit: Future<Output = Result<(), String>>,
 {
+    let engine = match agent_engine {
+        Some(engine) => engine,
+        None => app_settings.lock().await.default_agent_engine.clone(),
+    };
+    if !matches!(engine.as_str(), "codex" | "gemini") {
+        return Err(format!("Unsupported agent engine: {engine}"));
+    }
     let branch = branch.trim().to_string();
     if branch.is_empty() {
         return Err("Branch name is required.".to_string());
@@ -219,6 +305,23 @@ where
             ..WorkspaceSettings::default()
         },
     };
+
+    if engine == "gemini" {
+        let mut workspaces = workspaces.lock().await;
+        workspaces.insert(entry.id.clone(), entry.clone());
+        let list: Vec<_> = workspaces.values().cloned().collect();
+        write_workspaces(storage_path, &list)?;
+        return Ok(WorkspaceInfo {
+            id: entry.id,
+            name: entry.name,
+            path: entry.path,
+            connected: false,
+            kind: entry.kind,
+            parent_id: entry.parent_id,
+            worktree: entry.worktree,
+            settings: entry.settings,
+        });
+    }
 
     let _spawn_guard = workspace_session_spawn_lock().lock().await;
     let (default_bin, codex_args, codex_home) = {

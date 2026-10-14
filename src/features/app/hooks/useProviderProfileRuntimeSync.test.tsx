@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { AppSettings, CodexKeyProfile, CodexProvider, WorkspaceInfo } from "@/types";
 import { providersToLegacyProfiles } from "@/utils/providerCredentials";
@@ -86,7 +86,67 @@ function providerFromProfile(activeProfile: CodexKeyProfile): CodexProvider {
 
 const noopRollbackSettings = async () => undefined;
 
+const geminiProfile: CodexKeyProfile = {
+  ...profile("gemini"),
+  providerKind: "gemini",
+  keyEnvVar: "GEMINI_API_KEY",
+  baseUrlEnvVar: "GOOGLE_GEMINI_BASE_URL",
+  baseUrl: "https://relay.example/gemini",
+  model: "gemini-test",
+  useGateway: false,
+};
+
 describe("useProviderProfileRuntimeSync", () => {
+  it("keeps the Gemini selection without switching a connected Codex workspace", async () => {
+    const syncWorkspaceRuntime = vi.fn(async () => undefined);
+    const rollbackSettings = vi.fn(async () => undefined);
+    const { rerender } = renderHook(({ activeProfile }) => useProviderProfileRuntimeSync({
+      activeProfile, activeWorkspace: workspace, activeThreadId: "thread-1",
+      settingsLoading: false, defer: false, syncLocalConfig: true,
+      settingsSnapshot: runtimeSettings(activeProfile, true),
+      syncWorkspaceRuntime, rollbackSettings,
+    }), { initialProps: { activeProfile: profile("codex") } });
+    await waitFor(() => expect(syncWorkspaceRuntime).toHaveBeenCalledTimes(1));
+    rerender({ activeProfile: geminiProfile });
+    await act(async () => { await Promise.resolve(); });
+    expect(syncWorkspaceRuntime).toHaveBeenCalledTimes(1);
+    expect(rollbackSettings).not.toHaveBeenCalled();
+  });
+
+  it("restores the Gemini selection when a subsequent Codex switch fails", async () => {
+    const syncWorkspaceRuntime = vi.fn(async () => { throw new Error("Codex launch failed"); });
+    const rollbackSettings = vi.fn(async () => undefined);
+    const { rerender } = renderHook(({ activeProfile }) => useProviderProfileRuntimeSync({
+      activeProfile, activeWorkspace: workspace, activeThreadId: "thread-1",
+      settingsLoading: false, defer: false, syncLocalConfig: false,
+      settingsSnapshot: runtimeSettings(activeProfile, false),
+      syncWorkspaceRuntime, rollbackSettings,
+    }), { initialProps: { activeProfile: geminiProfile } });
+    await act(async () => { await Promise.resolve(); });
+    expect(syncWorkspaceRuntime).not.toHaveBeenCalled();
+    rerender({ activeProfile: profile("codex") });
+    await waitFor(() => expect(rollbackSettings).toHaveBeenCalledWith(runtimeSettings(geminiProfile, false)));
+  });
+
+  it("ignores a stale Codex success after Gemini becomes the selected provider", async () => {
+    let finishCodex: () => void = () => {};
+    const pendingCodex = new Promise<void>((resolve) => { finishCodex = resolve; });
+    const syncWorkspaceRuntime = vi.fn<() => Promise<void>>()
+      .mockReturnValueOnce(pendingCodex)
+      .mockRejectedValue(new Error("Codex launch failed"));
+    const rollbackSettings = vi.fn(async () => undefined);
+    const { rerender } = renderHook(({ activeProfile }) => useProviderProfileRuntimeSync({
+      activeProfile, activeWorkspace: workspace, activeThreadId: "thread-1",
+      settingsLoading: false, defer: false, syncLocalConfig: false,
+      settingsSnapshot: runtimeSettings(activeProfile, false),
+      syncWorkspaceRuntime, rollbackSettings,
+    }), { initialProps: { activeProfile: profile("old-codex") } });
+    rerender({ activeProfile: geminiProfile });
+    await act(async () => { finishCodex(); });
+    rerender({ activeProfile: profile("new-codex") });
+    await waitFor(() => expect(rollbackSettings).toHaveBeenCalledWith(runtimeSettings(geminiProfile, false)));
+  });
+
   it("restores the failed execution provider and preserves other provider edits", () => {
     const profileA = profile("profile-a");
     const profileB = profile("profile-b");

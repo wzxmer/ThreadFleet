@@ -1,5 +1,6 @@
 import { useCallback } from "react";
 import type { ModelOption, WorkspaceInfo } from "../../../types";
+import type { AgentEngine } from "@/types";
 import type { WorkspaceRunMode } from "../hooks/useWorkspaceHome";
 import Laptop from "lucide-react/dist/esm/icons/laptop";
 import GitBranch from "lucide-react/dist/esm/icons/git-branch";
@@ -20,6 +21,7 @@ import { useI18n } from "@/features/i18n/I18nProvider";
 import { formatReasoningEffortLabel } from "@/features/models/utils/reasoningEffortLabels";
 
 type WorkspaceHomeRunControlsProps = {
+  agentEngine?: AgentEngine;
   workspaceKind: WorkspaceInfo["kind"];
   runMode: WorkspaceRunMode;
   onRunModeChange: (mode: WorkspaceRunMode) => void;
@@ -40,6 +42,7 @@ type WorkspaceHomeRunControlsProps = {
 };
 
 export function WorkspaceHomeRunControls({
+  agentEngine = "codex",
   workspaceKind,
   runMode,
   onRunModeChange,
@@ -232,7 +235,7 @@ export function WorkspaceHomeRunControls({
           );
         })}
       </SplitActionMenu>
-      {collaborationModes.length > 0 && (
+      {agentEngine === "codex" && collaborationModes.length > 0 && (
         <div className="composer-select-wrap workspace-home-control">
           <div className="open-app-button">
             <span className="composer-icon" aria-hidden>
@@ -261,6 +264,7 @@ export function WorkspaceHomeRunControls({
           </div>
         </div>
       )}
+      {agentEngine === "codex" && (
       <div className="composer-select-wrap workspace-home-control">
         <div className="open-app-button">
           <span className="composer-icon" aria-hidden>
@@ -307,6 +311,7 @@ export function WorkspaceHomeRunControls({
           </select>
         </div>
       </div>
+      )}
     </div>
   );
 }

@@ -46,6 +46,78 @@ const models: ModelOption[] = [
 ];
 
 describe("useWorkspaceHome", () => {
+  it.each(["local", "worktree"] as const)(
+    "uses Gemini models without Codex metadata or parameters for %s runs",
+    async (mode) => {
+      vi.mocked(generateRunMetadata).mockClear();
+      const geminiModels: ModelOption[] = [{
+        ...models[0],
+        id: "gemini-flash",
+        model: "gemini-flash",
+        displayName: "Gemini Flash",
+        supportedReasoningEfforts: [],
+        defaultReasoningEffort: null,
+      }];
+      const disconnectedWorkspace = { ...workspace, connected: false };
+      const disconnectedWorktree = { ...worktreeWorkspace, connected: false };
+      const addWorktreeAgent = vi.fn().mockResolvedValue(disconnectedWorktree);
+      const connectWorkspace = vi.fn();
+      const startThreadForWorkspace = vi.fn().mockResolvedValue("gemini:one");
+      const sendUserMessageToThread = vi.fn().mockResolvedValue(undefined);
+      const seedThreadCodexParams = vi.fn();
+      const { result } = renderHook(() => useWorkspaceHome({
+        agentEngine: "gemini",
+        activeWorkspace: disconnectedWorkspace,
+        models: geminiModels,
+        selectedModelId: "gemini-flash",
+        effort: "high",
+        serviceTier: "fast",
+        collaborationMode: { mode: "plan" },
+        seedThreadCodexParams,
+        addWorktreeAgent,
+        connectWorkspace,
+        startThreadForWorkspace,
+        sendUserMessageToThread,
+      }));
+      act(() => {
+        result.current.setRunMode(mode);
+        result.current.toggleModelSelection("gemini-flash");
+        result.current.setDraft("Gemini run");
+      });
+      await act(async () => {
+        expect(await result.current.startRun()).toBe(true);
+      });
+      expect(generateRunMetadata).not.toHaveBeenCalled();
+      expect(connectWorkspace).not.toHaveBeenCalled();
+      expect(seedThreadCodexParams).not.toHaveBeenCalled();
+      if (mode === "worktree") {
+        expect(addWorktreeAgent).toHaveBeenCalledWith(
+          disconnectedWorkspace,
+          expect.any(String),
+          { activate: false, agentEngine: "gemini" },
+        );
+      }
+      expect(sendUserMessageToThread).toHaveBeenCalledWith(
+        mode === "local" ? disconnectedWorkspace : disconnectedWorktree,
+        "gemini:one",
+        "Gemini run",
+        [],
+        {
+          model: "gemini-flash",
+          geminiModel: "gemini-flash",
+          effort: null,
+          serviceTier: null,
+          collaborationMode: null,
+        },
+      );
+      expect(result.current.runs[0]).toEqual(expect.objectContaining({
+        title: "Gemini run",
+        status: "ready",
+        instances: [expect.objectContaining({ modelId: "gemini-flash" })],
+      }));
+    },
+  );
+
   it("uses provider model name for worktree runs", async () => {
     const addWorktreeAgent = vi.fn().mockResolvedValue(worktreeWorkspace);
     const connectWorkspace = vi.fn().mockResolvedValue(undefined);

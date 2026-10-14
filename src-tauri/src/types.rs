@@ -1105,6 +1105,10 @@ pub(crate) struct AgentCliCandidate {
 pub(crate) struct AppSettings {
     #[serde(default, rename = "codexBin")]
     pub(crate) codex_bin: Option<String>,
+    #[serde(default, rename = "geminiBin")]
+    pub(crate) gemini_bin: Option<String>,
+    #[serde(default = "default_agent_engine", rename = "defaultAgentEngine")]
+    pub(crate) default_agent_engine: String,
     #[serde(default, rename = "codexArgs")]
     pub(crate) codex_args: Option<String>,
     #[serde(default, rename = "codexHome")]
@@ -2165,10 +2169,16 @@ fn default_computer_control_routing_enabled() -> bool {
     true
 }
 
+fn default_agent_engine() -> String {
+    "codex".to_string()
+}
+
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
             codex_bin: None,
+            gemini_bin: None,
+            default_agent_engine: default_agent_engine(),
             codex_args: None,
             codex_home: None,
             session_sources: Vec::new(),
@@ -2317,6 +2327,8 @@ mod tests {
     fn app_settings_defaults_from_empty_json() {
         let settings: AppSettings = serde_json::from_str("{}").expect("settings deserialize");
         assert!(settings.codex_bin.is_none());
+        assert!(settings.gemini_bin.is_none());
+        assert_eq!(settings.default_agent_engine, "codex");
         let expected_backend_mode = if cfg!(target_os = "ios") {
             BackendMode::Remote
         } else {

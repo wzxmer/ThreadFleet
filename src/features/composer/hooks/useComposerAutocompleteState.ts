@@ -20,6 +20,7 @@ import { isComposingEvent } from "../../../utils/keys";
 
 type Skill = { name: string; description?: string };
 type UseComposerAutocompleteStateArgs = {
+  agentEngine?: "codex" | "gemini";
   text: string;
   selectionStart: number | null;
   disabled: boolean;
@@ -66,6 +67,7 @@ function getFileTriggerQuery(
 }
 
 export function useComposerAutocompleteState({
+  agentEngine = "codex",
   text,
   selectionStart,
   disabled,
@@ -217,8 +219,9 @@ export function useComposerAutocompleteState({
         group: "Slash",
       });
     }
-    return commands.sort((a, b) => a.label.localeCompare(b.label));
-  }, [appsEnabled]);
+    return commands.filter((command) => agentEngine === "codex" || command.id === "new")
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [appsEnabled, agentEngine]);
 
   const slashItems = useMemo<AutocompleteItem[]>(
     () => [...slashCommandItems, ...promptItems],

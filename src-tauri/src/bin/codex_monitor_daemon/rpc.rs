@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "rpc/agents.rs"]
+mod agents;
+
 #[path = "rpc/codex.rs"]
 mod codex;
 #[path = "rpc/daemon.rs"]

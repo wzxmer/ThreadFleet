@@ -17,6 +17,7 @@ import {
 } from "../../messages/utils/messageReferences";
 
 export function useComposerController({
+  agentEngine,
   activeThreadId,
   activeTurnId,
   activeWorkspaceId,
@@ -41,6 +42,7 @@ export function useComposerController({
   startFast,
   startStatus,
 }: {
+  agentEngine?: "codex" | "gemini";
   activeThreadId: string | null;
   activeTurnId: string | null;
   activeWorkspaceId: string | null;
@@ -114,6 +116,7 @@ export function useComposerController({
     clearQueuedMessages,
     steerQueuedMessage,
   } = useQueuedSend({
+    agentEngine,
     activeThreadId,
     activeTurnId,
     isProcessing,

@@ -212,6 +212,7 @@ struct DaemonState {
     data_dir: PathBuf,
     workspaces: Mutex<HashMap<String, WorkspaceEntry>>,
     sessions: Mutex<HashMap<String, Arc<WorkspaceSession>>>,
+    gemini_runtime: crate::shared::gemini_runtime_core::GeminiRuntime,
     storage_path: PathBuf,
     settings_path: PathBuf,
     app_settings: Mutex<AppSettings>,
@@ -481,6 +482,7 @@ impl DaemonState {
             data_dir: config.data_dir.clone(),
             workspaces: Mutex::new(workspaces),
             sessions: Mutex::new(HashMap::new()),
+            gemini_runtime: crate::shared::gemini_runtime_core::GeminiRuntime::new(config.data_dir.clone()),
             storage_path,
             settings_path,
             app_settings: Mutex::new(app_settings),
@@ -625,6 +627,7 @@ impl DaemonState {
         branch: String,
         name: Option<String>,
         copy_agents_md: bool,
+        agent_engine: Option<String>,
         client_version: String,
     ) -> Result<WorkspaceInfo, String> {
         let client_version = client_version.clone();
@@ -633,6 +636,7 @@ impl DaemonState {
             branch,
             name,
             copy_agents_md,
+            agent_engine,
             &self.data_dir,
             &self.workspaces,
             &self.sessions,
@@ -687,6 +691,17 @@ impl DaemonState {
     }
 
     async fn remove_workspace(&self, id: String) -> Result<(), String> {
+        let affected_ids: Vec<String> = self
+            .workspaces
+            .lock()
+            .await
+            .values()
+            .filter(|workspace| workspace.id == id || workspace.parent_id.as_deref() == Some(&id))
+            .map(|workspace| workspace.id.clone())
+            .collect();
+        for workspace_id in affected_ids {
+            self.gemini_runtime.shutdown_workspace(&workspace_id).await;
+        }
         workspaces_core::remove_workspace_core(
             id,
             &self.workspaces,
@@ -707,6 +722,7 @@ impl DaemonState {
     }
 
     async fn remove_worktree(&self, id: String) -> Result<(), String> {
+        self.gemini_runtime.shutdown_workspace(&id).await;
         workspaces_core::remove_worktree_core(
             id,
             &self.workspaces,
@@ -2797,6 +2813,7 @@ mod tests {
             data_dir: data_dir.to_path_buf(),
             workspaces: Mutex::new(HashMap::new()),
             sessions: Mutex::new(HashMap::new()),
+            gemini_runtime: crate::shared::gemini_runtime_core::GeminiRuntime::new(data_dir.to_path_buf()),
             storage_path: data_dir.join("workspaces.json"),
             settings_path: data_dir.join("settings.json"),
             app_settings: Mutex::new(AppSettings::default()),
@@ -2833,6 +2850,74 @@ mod tests {
             .lock()
             .await
             .insert(workspace_id.to_string(), entry);
+    }
+
+    #[test]
+    fn rpc_agents_lists_gemini_history_without_starting_a_cli() {
+        run_async_test(async {
+            let tmp = make_temp_dir("rpc-agents-list");
+            let state = test_state(&tmp);
+            state.app_settings.lock().await.gemini_bin =
+                Some(tmp.join("missing-gemini").to_string_lossy().into_owned());
+            insert_workspace(&state, "ws-agent", &tmp.to_string_lossy()).await;
+            let result = rpc::handle_rpc_request(
+                &state,
+                "agent_runtime_request",
+                json!({ "workspaceId": "ws-agent", "operation": "list", "params": { "archived": true } }),
+                "daemon-test".to_string(),
+            )
+            .await
+            .expect("history listing does not need an executable");
+            assert_eq!(result, json!({ "data": [], "nextCursor": null }));
+            assert!(state.sessions.lock().await.is_empty());
+            let _ = std::fs::remove_dir_all(&tmp);
+        });
+    }
+
+    #[test]
+    fn rpc_agents_validates_workspace_and_nested_thread_parameters() {
+        run_async_test(async {
+            let tmp = make_temp_dir("rpc-agents-contract");
+            let state = test_state(&tmp);
+            let error = rpc::handle_rpc_request(
+                &state,
+                "agent_runtime_request",
+                json!({ "workspaceId": "missing", "operation": "list", "params": {} }),
+                "daemon-test".to_string(),
+            )
+            .await
+            .expect_err("unknown workspace is rejected");
+            assert_eq!(error, "Workspace not found");
+            insert_workspace(&state, "ws-agent", &tmp.to_string_lossy()).await;
+            let error = rpc::handle_rpc_request(
+                &state,
+                "agent_runtime_request",
+                json!({ "workspaceId": "ws-agent", "operation": "read", "params": { "threadId": "codex-thread" } }),
+                "daemon-test".to_string(),
+            )
+            .await
+            .expect_err("nested threadId reaches the Gemini namespace validation");
+            assert!(error.contains("Gemini"), "{error}");
+            let _ = std::fs::remove_dir_all(&tmp);
+        });
+    }
+
+    #[test]
+    fn rpc_agents_rejects_unknown_discovery_engine() {
+        run_async_test(async {
+            let tmp = make_temp_dir("rpc-agents-engine");
+            let state = test_state(&tmp);
+            let error = rpc::handle_rpc_request(
+                &state,
+                "discover_agent_clis",
+                json!({ "engine": "unknown" }),
+                "daemon-test".to_string(),
+            )
+            .await
+            .expect_err("unknown engine is rejected");
+            assert_eq!(error, "Unsupported agent engine");
+            let _ = std::fs::remove_dir_all(&tmp);
+        });
     }
 
     fn make_workspace_entry(workspace_id: &str, workspace_path: &str) -> WorkspaceEntry {

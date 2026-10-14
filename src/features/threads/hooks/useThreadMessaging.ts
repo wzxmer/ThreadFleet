@@ -1,4 +1,6 @@
 import { useCallback, useRef, useState } from "react";
+import { isGeminiThread } from "@/features/agents/utils/agentEngine";
+import { pushErrorToast } from "@services/toasts";
 import type { Dispatch, MutableRefObject } from "react";
 import * as Sentry from "@sentry/react";
 import type {
@@ -401,6 +403,8 @@ type UseThreadMessagingOptions = {
   activeThreadId: string | null;
   accessMode?: "read-only" | "current" | "full-access";
   model?: string | null;
+  geminiModel?: string | null;
+  defaultAgentEngine?: "codex" | "gemini";
   workflowProviderKind?: CodexProviderKind;
   workflowRuntimeMode?: WorkflowRuntimeMode;
   computerControlRoutingEnabled?: boolean;
@@ -473,6 +477,8 @@ export function useThreadMessaging({
   activeThreadId,
   accessMode,
   model,
+  geminiModel = null,
+  defaultAgentEngine = "codex",
   workflowProviderKind = "openai",
   workflowRuntimeMode = "shadow",
   computerControlRoutingEnabled = true,
@@ -693,14 +699,16 @@ export function useThreadMessaging({
         shouldSteer,
         requestMode,
       } = resolveSendMessageOptions({
-        options,
+        options: isGeminiThread(threadId) ? { ...options,
+          model: options?.geminiModel !== undefined ? options.geminiModel : geminiModel, effort: null,
+          serviceTier: null, collaborationMode: null, appMentions: [] } : options,
         defaults: {
           accessMode,
-          model,
-          effort,
-          serviceTier,
-          collaborationMode,
-          steerEnabled,
+          model: isGeminiThread(threadId) ? geminiModel : model,
+          effort: isGeminiThread(threadId) ? null : effort,
+          serviceTier: isGeminiThread(threadId) ? null : serviceTier,
+          collaborationMode: isGeminiThread(threadId) ? null : collaborationMode,
+          steerEnabled: steerEnabled && !isGeminiThread(threadId),
           isProcessing,
           activeTurnId,
         },
@@ -722,6 +730,7 @@ export function useThreadMessaging({
       if (
         !shouldSteer &&
         !options?.skipRuntimePreflight &&
+        !isGeminiThread(threadId) &&
         ensureWorkspaceRuntimeCodexArgs
       ) {
         try {
@@ -878,7 +887,7 @@ export function useThreadMessaging({
       const computerControlPreviewPromise: Promise<{
         decision: ComputerControlRouteDecision | null;
         error: unknown;
-      }> = computerControlRoutingEnabled
+      }> = computerControlRoutingEnabled && !isGeminiThread(threadId)
         ? computerControlPreflightWithTimeout(
           computerControlPreflightService(
             workspace.id,
@@ -890,7 +899,7 @@ export function useThreadMessaging({
           (error: unknown) => ({ decision: null, error }),
         )
         : Promise.resolve({ decision: null, error: null });
-      const workflowEnabled = workflowRuntimeMode !== "off";
+      const workflowEnabled = workflowRuntimeMode !== "off" && !isGeminiThread(threadId);
       const workflowPreview = workflowEnabled
         ? buildWorkflowPreflightPreview({
           task: finalText,
@@ -1344,6 +1353,7 @@ export function useThreadMessaging({
       insertOptimisticUserMessage,
       markProcessing,
       model,
+      geminiModel,
       workflowProviderKind,
       workflowRuntimeMode,
       workflowSkills,
@@ -1413,6 +1423,7 @@ export function useThreadMessaging({
       let runtimePreflightComplete = false;
       if (
         activeThreadId &&
+        !isGeminiThread(activeThreadId) &&
         !threadStatusById[activeThreadId]?.isProcessing &&
         ensureWorkspaceRuntimeCodexArgs
       ) {
@@ -1517,6 +1528,10 @@ export function useThreadMessaging({
       if (!activeWorkspace || !activeThreadId) {
         return { status: "blocked" };
       }
+      if (isGeminiThread(activeThreadId)) {
+        pushThreadErrorMessage(activeThreadId, t("agents.unsupportedOperation"));
+        return { status: "blocked" };
+      }
       try {
         await rollbackThreadService(activeWorkspace.id, activeThreadId, 1);
         const refreshedThreadId = await refreshThread(activeWorkspace.id, activeThreadId);
@@ -1547,6 +1562,7 @@ export function useThreadMessaging({
       refreshThread,
       safeMessageActivity,
       sendMessageToThread,
+      t,
     ],
   );
 
@@ -1661,6 +1677,10 @@ export function useThreadMessaging({
       if (!workspaceId) {
         return false;
       }
+      if ((activeThreadId && isGeminiThread(activeThreadId)) || (!activeThreadId && defaultAgentEngine === "gemini")) {
+        pushErrorToast({ title: t("agents.engineGemini"), message: t("agents.unsupportedOperation") });
+        return false;
+      }
       const threadId = workspaceIdOverride
         ? await ensureThreadForWorkspace(workspaceId)
         : await ensureThreadForActiveWorkspace();
@@ -1747,6 +1767,9 @@ export function useThreadMessaging({
       ensureThreadForActiveWorkspace,
       ensureThreadForWorkspace,
       getCustomName,
+      activeThreadId,
+      defaultAgentEngine,
+      t,
       markProcessing,
       markReviewing,
       onDebug,
@@ -2077,6 +2100,10 @@ export function useThreadMessaging({
         return;
       }
       try {
+        if (isGeminiThread(threadId)) {
+          pushThreadErrorMessage(threadId, t("agents.unsupportedOperation"));
+          return;
+        }
         await compactThreadService(activeWorkspace.id, threadId);
       } catch (error) {
         pushThreadErrorMessage(
@@ -2095,6 +2122,7 @@ export function useThreadMessaging({
       ensureThreadForActiveWorkspace,
       pushThreadErrorMessage,
       safeMessageActivity,
+      t,
     ],
   );
 

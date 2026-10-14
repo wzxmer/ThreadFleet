@@ -1553,6 +1553,9 @@ pub(crate) async fn active_codex_key_runtime(
             gateway_shutdown: None,
         });
     };
+    if profile.provider_kind == "gemini" {
+        return Err("当前启用的是 Gemini 服务商，请切换到 Gemini 引擎；使用 Codex 时请选择支持 Codex 的服务商。".into());
+    }
     let key = profile.key.trim();
     if key.is_empty() {
         return Ok(CodexKeyRuntime {
@@ -1628,8 +1631,8 @@ pub(crate) fn active_profile_codex_args(
     settings: &AppSettings,
     codex_args: Option<String>,
 ) -> Result<Option<String>, String> {
-    let Some(profile) =
-        effective_execution_profile(settings).filter(|profile| !profile.key.trim().is_empty())
+    let Some(profile) = effective_execution_profile(settings)
+        .filter(|profile| profile.provider_kind != "gemini" && !profile.key.trim().is_empty())
     else {
         return Ok(codex_args);
     };
@@ -1653,6 +1656,7 @@ pub(crate) fn resolve_profile_base_url(profile: &crate::types::CodexKeyProfile) 
                 "deepseek" => Some("https://api.deepseek.com/v1".to_string()),
                 "openrouter" => Some("https://openrouter.ai/api/v1".to_string()),
                 "opencode" => Some("https://opencode.ai/zen/go/v1".to_string()),
+                "gemini" => Some("https://generativelanguage.googleapis.com".to_string()),
                 _ => None,
             },
         )

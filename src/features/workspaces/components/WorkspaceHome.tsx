@@ -20,6 +20,7 @@ import { ComposerInput } from "../../composer/components/ComposerInput";
 import { useComposerImages } from "../../composer/hooks/useComposerImages";
 import { useComposerPasteUndo } from "../../composer/hooks/useComposerPasteUndo";
 import { useComposerAutocompleteState } from "../../composer/hooks/useComposerAutocompleteState";
+import type { AgentEngine } from "@/types";
 import { usePromptHistory } from "../../composer/hooks/usePromptHistory";
 import type {
   WorkspaceHomeRun,
@@ -37,6 +38,7 @@ import { useWorkspaceHomeSuggestionsStyle } from "../hooks/useWorkspaceHomeSugge
 import type { ThreadStatusById } from "../../../utils/threadStatus";
 
 type WorkspaceHomeProps = {
+  agentEngine?: AgentEngine;
   workspace: WorkspaceInfo;
   showGitInitBanner: boolean;
   initGitRepoLoading: boolean;
@@ -100,6 +102,7 @@ type WorkspaceHomeProps = {
 };
 
 export function WorkspaceHome({
+  agentEngine = "codex",
   workspace,
   showGitInitBanner,
   initGitRepoLoading,
@@ -192,6 +195,7 @@ export function WorkspaceHome({
     handleSelectionChange,
     fileTriggerActive,
   } = useComposerAutocompleteState({
+    agentEngine,
     text: prompt,
     selectionStart,
     disabled: isSubmitting,
@@ -415,6 +419,7 @@ export function WorkspaceHome({
       <div className="workspace-home-composer">
         <div className="composer">
           <ComposerInput
+            agentEngine={agentEngine}
             text={prompt}
             disabled={isSubmitting}
             sendLabel="发送"
@@ -462,6 +467,7 @@ export function WorkspaceHome({
       </div>
 
       <WorkspaceHomeRunControls
+        agentEngine={agentEngine}
         workspaceKind={workspace.kind}
         runMode={runMode}
         onRunModeChange={onRunModeChange}

@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import * as Sentry from "@sentry/react";
-import type { DebugEntry, WorkspaceInfo } from "../../../types";
+import type { AgentEngine, DebugEntry, WorkspaceInfo } from "@/types";
 import {
   addClone as addCloneService,
   addWorktree as addWorktreeService,
@@ -33,6 +33,7 @@ export function useWorktreeOps({
         activate?: boolean;
         displayName?: string | null;
         copyAgentsMd?: boolean;
+        agentEngine?: AgentEngine;
       },
     ) => {
       const trimmed = branch.trim();
@@ -51,15 +52,14 @@ export function useWorktreeOps({
           branch: trimmed,
           name: trimmedName,
           copyAgentsMd,
+          agentEngine: options?.agentEngine,
         },
       });
       try {
-        const workspace = await addWorktreeService(
-          parent.id,
-          trimmed,
-          trimmedName,
-          copyAgentsMd,
-        );
+        const args = [parent.id, trimmed, trimmedName, copyAgentsMd] as const;
+        const workspace = await (options?.agentEngine
+          ? addWorktreeService(...args, options.agentEngine)
+          : addWorktreeService(...args));
         setWorkspaces((prev) => [...prev, workspace]);
         if (options?.activate !== false) {
           setActiveWorkspaceId(workspace.id);

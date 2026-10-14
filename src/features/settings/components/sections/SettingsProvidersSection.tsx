@@ -887,9 +887,9 @@ export function SettingsProvidersSection({
                         providerKind,
                         baseUrl:
                           draft.baseUrl || resolveCodexProviderBaseUrl(providerKind, null) || null,
-                        useGateway: providerKind === "opencode" ? true : draft.useGateway,
+                        useGateway: providerKind === "gemini" ? false : providerKind === "opencode" ? true : draft.useGateway,
                         transportMode:
-                          providerKind === "opencode"
+                          providerKind === "gemini" ? "auto" : providerKind === "opencode"
                             ? "chat-completions-gateway"
                             : providerTransportMode(draft),
                       });
@@ -900,6 +900,7 @@ export function SettingsProvidersSection({
                     <option value="deepseek">{t("settings.codex.providerKindDeepseek")}</option>
                     <option value="openrouter">{t("settings.codex.providerKindOpenrouter")}</option>
                     <option value="opencode">{t("settings.codex.providerKindOpencode")}</option>
+                    <option value="gemini">{t("agents.geminiProviderKind")}</option>
                   </select>
                 </label>
                 <label className="settings-provider-form-wide">
@@ -930,7 +931,7 @@ export function SettingsProvidersSection({
                     <option value="disabled">{t("settings.codex.usageProtocolDisabled")}</option>
                   </select>
                 </label>
-                <label>
+                {draft.providerKind !== "gemini" && <label>
                   <span>{t("settings.codex.transportModeAria")}</span>
                   <select
                     className="settings-select"
@@ -952,7 +953,10 @@ export function SettingsProvidersSection({
                       {t("settings.codex.transportModeChatCompletionsGateway")}
                     </option>
                   </select>
-                </label>
+                </label>}
+                {draft.providerKind === "gemini" && (
+                  <div className="settings-help settings-provider-form-wide">{t("agents.geminiProviderHelp")}</div>
+                )}
               </div>
             </section>
 
@@ -1109,7 +1113,7 @@ export function SettingsProvidersSection({
                               ) : null}
                             </div>
                           ) : null}
-                          <div className="settings-provider-tool-capability" aria-live="polite">
+                          {draft.providerKind !== "gemini" && <div className="settings-provider-tool-capability" aria-live="polite">
                             <div className="settings-provider-tool-capability-copy">
                               <span>{t("settings.codex.functionToolCapability")}</span>
                               <strong className={`is-${capabilityState}`}>{capabilityLabel}</strong>
@@ -1132,7 +1136,7 @@ export function SettingsProvidersSection({
                                 ? t("common.loading")
                                 : t("settings.codex.verifyFunctionTool")}
                             </button>
-                          </div>
+                          </div>}
                         </div>
                       ) : null}
                     </div>
@@ -1167,7 +1171,7 @@ export function SettingsProvidersSection({
                         onChange={(event) => setDraft({ ...draft, model: event.target.value || null })}
                       />
                     )}
-                    <button
+                    {draft.providerKind !== "gemini" && <button
                       type="button"
                       className="ghost settings-button-compact"
                       disabled={modelFetchState.status === "loading"}
@@ -1176,7 +1180,7 @@ export function SettingsProvidersSection({
                       {modelFetchState.status === "loading"
                         ? t("common.loading")
                         : t("settings.codex.fetchProviderModels")}
-                    </button>
+                    </button>}
                   </div>
                 </label>
                 <label className="settings-provider-number-field">

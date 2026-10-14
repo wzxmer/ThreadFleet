@@ -24,6 +24,9 @@ import type { WorkflowGateAdapterStatus } from "@/types";
 import { WorkflowGateBindingPrompt } from "./WorkflowGateBindingPrompt";
 
 type ComposerMetaBarProps = {
+  agentEngine?: "codex" | "gemini";
+  onSelectAgentEngine?: (engine: "codex" | "gemini") => void;
+  agentEngineLocked?: boolean;
   disabled: boolean;
   isProcessing?: boolean;
   modelActivityState?: ModelActivityState;
@@ -89,6 +92,9 @@ const getSelectedLabel = <T extends string>(
 ) => options.find((option) => option.value === value)?.label ?? "";
 
 export function ComposerMetaBar({
+  agentEngine = "codex",
+  onSelectAgentEngine,
+  agentEngineLocked = false,
   disabled,
   isProcessing = false,
   modelActivityState,
@@ -166,7 +172,7 @@ export function ComposerMetaBar({
   const accessModeOptions: Array<{ value: AccessMode; label: string }> = [
     { value: "read-only", label: t("composer.access.readOnly") },
     { value: "current", label: t("composer.access.current") },
-    { value: "full-access", label: t("composer.access.fullAccess") },
+    ...(agentEngine === "codex" ? [{ value: "full-access" as const, label: t("composer.access.fullAccess") }] : []),
   ];
   const sendShortcutOptions: Array<{
     value: ComposerSendShortcut;
@@ -355,6 +361,21 @@ export function ComposerMetaBar({
         : null}
       <div className="composer-meta">
         <div className="composer-meta-primary">
+        {onSelectAgentEngine && (
+          <div className="composer-select-wrap" title={t("agents.engineHelp")}>
+            <RoundedSelect
+              className="composer-select composer-select--model"
+              ariaLabel={t("agents.engine")}
+              value={agentEngine}
+              options={[
+                { value: "codex", label: t("agents.engineCodex") },
+                { value: "gemini", label: t("agents.engineGemini") },
+              ]}
+              onChange={(engine) => onSelectAgentEngine(engine === "gemini" ? "gemini" : "codex")}
+              disabled={disabled || agentEngineLocked}
+            />
+          </div>
+        )}
         {collaborationModes.length > 0 && (
           canUsePlanToggle ? (
             <div className="composer-select-wrap composer-plan-toggle-wrap">
@@ -451,7 +472,7 @@ export function ComposerMetaBar({
               />
             </button>
           )}
-          {selectedServiceTier === "fast" && (
+          {agentEngine === "codex" && selectedServiceTier === "fast" && (
             <span
               className="composer-fast-indicator"
               role="status"
@@ -462,7 +483,7 @@ export function ComposerMetaBar({
             </span>
           )}
         </div>
-        <div
+        {agentEngine === "codex" && <div
           className="composer-select-wrap composer-select-wrap--effort"
           style={getControlWidthStyle(
             getSelectedLabel(reasoningSelectOptions, selectedEffort ?? ""),
@@ -482,7 +503,7 @@ export function ComposerMetaBar({
             onChange={onSelectEffort}
             disabled={disabled || !reasoningSupported}
           />
-        </div>
+        </div>}
         {codexArgsOptions.length > 1 && onSelectCodexArgsOverride && (
           <div
             className="composer-select-wrap composer-select-wrap--args"

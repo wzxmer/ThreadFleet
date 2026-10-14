@@ -17,6 +17,7 @@ import {
 } from "@utils/submissionIds";
 
 type UseQueuedSendOptions = {
+  agentEngine?: "codex" | "gemini";
   activeThreadId: string | null;
   activeTurnId: string | null;
   isProcessing: boolean;
@@ -124,8 +125,10 @@ function parseSlashCommand(
   text: string,
   appsEnabled: boolean,
   composerTriggerMode: ComposerTriggerMode = "default",
+  engine: "codex" | "gemini" = "codex",
 ): SlashCommandKind | null {
   const trigger = composerTriggerMode === "swap-slash-at" ? "@" : "/";
+  if (engine === "gemini") return buildCommandRegex(trigger, "new").test(text) ? "new" : null;
   if (appsEnabled && buildCommandRegex(trigger, "apps").test(text)) {
     return "apps";
   }
@@ -157,6 +160,7 @@ function parseSlashCommand(
 }
 
 export function useQueuedSend({
+  agentEngine = "codex",
   activeThreadId,
   activeTurnId,
   isProcessing,
@@ -375,7 +379,7 @@ export function useQueuedSend({
       submission?: ComposerSubmission,
     ) => {
       const trimmed = text.trim();
-      const command = parseSlashCommand(trimmed, appsEnabled, composerTriggerMode);
+      const command = parseSlashCommand(trimmed, appsEnabled, composerTriggerMode, activeThreadId?.startsWith("gemini:") ? "gemini" : agentEngine);
       const nextImages = command ? [] : images;
       const nextMentions = command ? [] : appMentions;
       const canSteerCurrentTurn =
@@ -411,7 +415,7 @@ export function useQueuedSend({
         return;
       }
       if (command) {
-        if (activeWorkspace && !activeWorkspace.connected) {
+        if (activeWorkspace && !activeWorkspace.connected && agentEngine !== "gemini" && !activeThreadId?.startsWith("gemini:")) {
           await connectWorkspace(activeWorkspace);
         }
         await runSlashCommand(command, trimmed);
@@ -426,7 +430,7 @@ export function useQueuedSend({
         : (clearActiveImages(), null);
       let sendResult: SendMessageResult;
       try {
-        if (activeWorkspace && !activeWorkspace.connected) {
+        if (activeWorkspace && !activeWorkspace.connected && agentEngine !== "gemini" && !activeThreadId?.startsWith("gemini:")) {
           await connectWorkspace(activeWorkspace);
         }
         const sendOptions = {
@@ -472,6 +476,7 @@ export function useQueuedSend({
     },
     [
       activeThreadId,
+      agentEngine,
       appsEnabled,
       composerTriggerMode,
       activeWorkspace,
@@ -501,7 +506,7 @@ export function useQueuedSend({
       references: ComposerReference[] = [],
     ) => {
       const trimmed = text.trim();
-      const command = parseSlashCommand(trimmed, appsEnabled, composerTriggerMode);
+      const command = parseSlashCommand(trimmed, appsEnabled, composerTriggerMode, activeThreadId?.startsWith("gemini:") ? "gemini" : agentEngine);
       const nextImages = command ? [] : images;
       const nextMentions = command ? [] : appMentions;
       if (!trimmed && nextImages.length === 0) {
@@ -519,6 +524,7 @@ export function useQueuedSend({
     },
     [
       activeThreadId,
+      agentEngine,
       appsEnabled,
       composerTriggerMode,
       clearActiveImages,
@@ -657,6 +663,7 @@ export function useQueuedSend({
           trimmed,
           appsEnabled,
           composerTriggerMode,
+          activeThreadId?.startsWith("gemini:") ? "gemini" : agentEngine,
         );
         if (command) {
           await runSlashCommand(command, trimmed);
@@ -718,6 +725,7 @@ export function useQueuedSend({
     })();
   }, [
     activeThreadId,
+    agentEngine,
     appsEnabled,
     composerTriggerMode,
     inFlightByThread,

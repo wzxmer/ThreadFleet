@@ -53,6 +53,10 @@ export function useThreadApprovals({ dispatch, onDebug }: UseThreadApprovalsOpti
 
   const handleApprovalRemember = useCallback(
     async (request: ApprovalRequest, command: string[]) => {
+      if (String(request.request_id).startsWith("gemini:")) {
+        await handleApprovalDecision(request, "accept");
+        return;
+      }
       try {
         await rememberApprovalRule(request.workspace_id, command);
       } catch (error) {
@@ -78,7 +82,7 @@ export function useThreadApprovals({ dispatch, onDebug }: UseThreadApprovalsOpti
         workspaceId: request.workspace_id,
       });
     },
-    [dispatch, onDebug, rememberApprovalPrefix],
+    [dispatch, onDebug, rememberApprovalPrefix, handleApprovalDecision],
   );
 
   return {

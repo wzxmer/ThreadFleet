@@ -52,6 +52,8 @@ pub(crate) struct AddWorktreeRequest {
     pub(crate) branch: String,
     pub(crate) name: Option<String>,
     pub(crate) copy_agents_md: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) agent_engine: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -107,4 +109,26 @@ pub(crate) struct OpenWorkspaceInRequest {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct GetOpenAppIconRequest {
     pub(crate) app_name: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AddWorktreeRequest;
+    use serde_json::json;
+
+    #[test]
+    fn worktree_request_keeps_existing_payload_and_carries_explicit_engine() {
+        let legacy = json!({
+            "parentId": "parent", "branch": "feat/test", "name": null,
+            "copyAgentsMd": true
+        });
+        let mut request: AddWorktreeRequest = serde_json::from_value(legacy.clone()).unwrap();
+        assert!(request.agent_engine.is_none());
+        assert_eq!(serde_json::to_value(&request).unwrap(), legacy);
+        request.agent_engine = Some("gemini".into());
+        assert_eq!(
+            serde_json::to_value(&request).unwrap()["agentEngine"],
+            "gemini"
+        );
+    }
 }

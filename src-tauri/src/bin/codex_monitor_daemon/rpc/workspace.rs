@@ -103,6 +103,7 @@ pub(super) async fn try_handle(
                     request.branch,
                     request.name,
                     request.copy_agents_md,
+                    request.agent_engine,
                     client_version.to_string(),
                 ))
                 .await,

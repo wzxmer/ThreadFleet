@@ -47,7 +47,8 @@ async function connectPendingWorkspaces(
           connected: true,
         };
       } catch {
-        // Silent: connection errors show in debug panel.
+        // Gemini history is available independently of a Codex connection.
+        connectedTargetsByIndex[index] = workspace;
       }
     }
   }

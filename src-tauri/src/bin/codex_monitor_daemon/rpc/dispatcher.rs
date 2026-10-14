@@ -6,6 +6,9 @@ pub(super) async fn dispatch_rpc_request(
     params: &Value,
     client_version: &str,
 ) -> Result<Value, String> {
+    if let Some(result) = agents::try_handle(state, method, params).await {
+        return result;
+    }
     if let Some(result) = daemon::try_handle(state, method, params).await {
         return result;
     }
