@@ -110,6 +110,7 @@ const REMOTE_CLIENT_OUTBOUND_QUEUE_CAPACITY: usize = 2048;
 const DAEMON_NAME: &str = "codex-monitor-daemon";
 
 fn spawn_with_client(
+    managed_root: PathBuf,
     event_sink: DaemonEventSink,
     client_version: String,
     app_settings: &Mutex<AppSettings>,
@@ -121,6 +122,7 @@ fn spawn_with_client(
     async move {
         let settings = app_settings.lock().await.clone();
         spawn_with_client_settings(
+            managed_root,
             event_sink,
             client_version,
             entry,
@@ -134,6 +136,7 @@ fn spawn_with_client(
 }
 
 fn spawn_with_client_settings(
+    managed_root: PathBuf,
     event_sink: DaemonEventSink,
     client_version: String,
     entry: WorkspaceEntry,
@@ -145,6 +148,16 @@ fn spawn_with_client_settings(
     async move {
         let runtime_env =
             provider_profiles_core::active_codex_key_runtime(&settings, codex_args).await?;
+        let default_bin = Some(
+            shared::cli_discovery_core::resolve_cli_path(
+                "codex",
+                default_bin.as_deref(),
+                std::env::var_os("PATH").as_deref(),
+                Some(&managed_root),
+            )?
+            .to_string_lossy()
+            .to_string(),
+        );
         spawn_workspace_session(
             entry,
             default_bin,
@@ -266,6 +279,7 @@ impl DaemonState {
                 default_codex_bin.clone(),
                 move |codex_home| {
                     spawn_with_client(
+                        self.data_dir.join("managed-codex"),
                         self.event_sink.clone(),
                         client_version,
                         &self.app_settings,
@@ -294,6 +308,16 @@ impl DaemonState {
         self.session_source_runtimes.close_idle().await;
         let workspace_context = entry.path.clone();
         let event_sink = self.event_sink.clone();
+        let default_codex_bin = Some(
+            shared::cli_discovery_core::resolve_cli_path(
+                "codex",
+                default_codex_bin.as_deref(),
+                std::env::var_os("PATH").as_deref(),
+                Some(&self.data_dir.join("managed-codex")),
+            )?
+            .to_string_lossy()
+            .to_string(),
+        );
         self.session_source_runtimes
             .get_or_spawn_workspace_session_for_source_purpose(
                 &source,
@@ -397,6 +421,7 @@ impl DaemonState {
                 default_codex_bin.clone(),
                 move |codex_home| {
                     spawn_with_client(
+                        self.data_dir.join("managed-codex"),
                         event_sink,
                         client_version,
                         app_settings,
@@ -548,6 +573,7 @@ impl DaemonState {
             &self.storage_path,
             move |entry, default_bin, codex_args, codex_home| {
                 spawn_with_client(
+                    self.data_dir.join("managed-codex"),
                     self.event_sink.clone(),
                     client_version.clone(),
                     &self.app_settings,
@@ -579,6 +605,7 @@ impl DaemonState {
             &self.storage_path,
             move |entry, default_bin, codex_args, codex_home| {
                 spawn_with_client(
+                    self.data_dir.join("managed-codex"),
                     self.event_sink.clone(),
                     client_version.clone(),
                     &self.app_settings,
@@ -628,6 +655,7 @@ impl DaemonState {
             },
             move |entry, default_bin, codex_args, codex_home| {
                 spawn_with_client(
+                    self.data_dir.join("managed-codex"),
                     self.event_sink.clone(),
                     client_version.clone(),
                     &self.app_settings,
@@ -730,6 +758,7 @@ impl DaemonState {
             },
             move |entry, default_bin, codex_args, codex_home| {
                 spawn_with_client(
+                    self.data_dir.join("managed-codex"),
                     self.event_sink.clone(),
                     client_version.clone(),
                     &self.app_settings,
@@ -804,6 +833,7 @@ impl DaemonState {
             },
             move |entry, default_bin, codex_args, codex_home| {
                 spawn_with_client(
+                    self.data_dir.join("managed-codex"),
                     self.event_sink.clone(),
                     client_version.clone(),
                     &self.app_settings,
@@ -826,6 +856,7 @@ impl DaemonState {
             &self.app_settings,
             move |entry, default_bin, codex_args, codex_home| {
                 spawn_with_client(
+                    self.data_dir.join("managed-codex"),
                     self.event_sink.clone(),
                     client_version.clone(),
                     &self.app_settings,
@@ -854,6 +885,7 @@ impl DaemonState {
             &self.session_source_runtimes,
             move |entry, default_bin, next_args, codex_home, settings| {
                 spawn_with_client_settings(
+                    self.data_dir.join("managed-codex"),
                     self.event_sink.clone(),
                     client_version.clone(),
                     entry,
@@ -2129,6 +2161,7 @@ impl DaemonState {
             &self.storage_path,
             |entry, default_bin, codex_args, codex_home| {
                 spawn_with_client(
+                    self.data_dir.join("managed-codex"),
                     self.event_sink.clone(),
                     client_version.clone(),
                     &self.app_settings,
@@ -2425,7 +2458,13 @@ impl DaemonState {
         codex_bin: Option<String>,
         codex_args: Option<String>,
     ) -> Result<Value, String> {
-        codex_aux_core::codex_doctor_core(&self.app_settings, codex_bin, codex_args).await
+        codex_aux_core::codex_doctor_core(
+            &self.app_settings,
+            codex_bin,
+            codex_args,
+            Some(&self.data_dir.join("managed-codex")),
+        )
+        .await
     }
 
     async fn check_codex_cli_update(&self, codex_bin: Option<String>) -> Result<Value, String> {

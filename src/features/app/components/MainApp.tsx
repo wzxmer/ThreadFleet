@@ -2072,7 +2072,7 @@ export default function MainApp() {
     try {
       const platform = await getManagedCodexPlatform();
       const packageInfo = await fetchManagedCodexPackage(platform);
-      const installed = await installManagedCodex(
+      await installManagedCodex(
         packageInfo.urls,
         packageInfo.fileName,
         requestId,
@@ -2080,8 +2080,8 @@ export default function MainApp() {
         packageInfo.size,
         packageInfo.sha256,
       );
-      await queueSaveSettings({ ...appSettings, codexBin: installed.path });
-      setAppSettings((current) => ({ ...current, codexBin: installed.path }));
+      await queueSaveSettings({ ...appSettings, codexBin: null });
+      setAppSettings((current) => ({ ...current, codexBin: null }));
       setCodexInstallPromptOpen(false);
       setCodexInstallStage("ready");
     } catch (error) {

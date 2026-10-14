@@ -15,7 +15,8 @@ export function useManagedCodexActivation(
     if (current.backendMode !== "local" || current.codexBin !== previousCodexBin) {
       throw new Error(t("codexUpdate.settingsChanged"));
     }
-    await queueSaveSettings({ ...current, codexBin: installed.path });
-    setAppSettings((settings) => ({ ...settings, codexBin: installed.path }));
+    const codexBin = previousCodexBin === null ? null : installed.path;
+    await queueSaveSettings({ ...current, codexBin });
+    setAppSettings((settings) => ({ ...settings, codexBin }));
   }, [queueSaveSettings, setAppSettings, t]);
 }

@@ -2,14 +2,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::io::ErrorKind;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, Mutex};
 use tokio::time::timeout;
 
 use crate::backend::app_server::{
-    build_codex_command_with_bin, build_codex_path_env, check_codex_installation,
-    resolve_codex_command_path, WorkspaceSession,
+    build_codex_command_with_bin, build_codex_path_env, check_codex_installation, WorkspaceSession,
 };
 use crate::shared::process_core::tokio_command;
 use crate::types::{AppSettings, WorkspaceEntry};
@@ -293,6 +293,7 @@ pub(crate) async fn codex_doctor_core(
     app_settings: &Mutex<AppSettings>,
     codex_bin: Option<String>,
     codex_args: Option<String>,
+    managed_root: Option<&Path>,
 ) -> Result<Value, String> {
     let (default_bin, default_args) = {
         let settings = app_settings.lock().await;
@@ -307,7 +308,18 @@ pub(crate) async fn codex_doctor_core(
         .filter(|value| !value.trim().is_empty())
         .or(default_args);
     let path_env = build_codex_path_env(resolved.as_deref());
-    let resolved_bin_path = resolve_codex_command_path(resolved.as_deref());
+    let selected_path = crate::shared::cli_discovery_core::resolve_cli_path(
+        "codex",
+        resolved.as_deref(),
+        path_env.as_deref().map(std::ffi::OsStr::new),
+        managed_root,
+    )?;
+    let resolved_bin_path = selected_path.to_string_lossy().to_string();
+    let path_env = crate::shared::cli_discovery_core::build_cli_path_env(
+        Some(&selected_path),
+        path_env.as_deref().map(std::ffi::OsStr::new),
+    );
+    let resolved = Some(resolved_bin_path.clone());
     let version = check_codex_installation(resolved.clone()).await?;
     let mut command = build_codex_command_with_bin(
         resolved.clone(),
@@ -383,7 +395,9 @@ pub(crate) async fn codex_doctor_core(
     } else {
         Some("Failed to run `codex app-server --help`.".to_string())
     };
-    let npm_global_codex_version = resolve_global_codex_npm_version(path_env.as_deref()).await;
+    let npm_global_codex_version =
+        resolve_global_codex_npm_version(path_env.as_deref().and_then(|value| value.to_str()))
+            .await;
     Ok(json!({
         "ok": version.is_some() && app_server_ok,
         "codexBin": resolved,

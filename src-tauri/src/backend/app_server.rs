@@ -1014,19 +1014,31 @@ pub(crate) fn build_codex_command_with_bin(
     codex_args: Option<&str>,
     args: Vec<String>,
 ) -> Result<Command, String> {
-    let bin = codex_bin
-        .clone()
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| "codex".into());
-
     let path_env = build_codex_path_env(codex_bin.as_deref());
+    let configured = codex_bin
+        .as_deref()
+        .filter(|value| !value.trim().is_empty());
+    let selected_path = crate::shared::cli_discovery_core::resolve_cli_path(
+        "codex",
+        configured,
+        path_env.as_deref().map(std::ffi::OsStr::new),
+        None,
+    )?;
+    let path_env = crate::shared::cli_discovery_core::build_cli_path_env(
+        Some(&selected_path),
+        path_env.as_deref().map(std::ffi::OsStr::new),
+    );
+    let bin = selected_path.to_string_lossy().to_string();
     let mut command_args = parse_codex_args(codex_args)?;
     command_args.extend(args);
 
     #[cfg(target_os = "windows")]
     let mut command = {
         let bin_trimmed = bin.trim();
-        let resolved = resolve_windows_executable(bin_trimmed, path_env.as_deref());
+        let resolved = resolve_windows_executable(
+            bin_trimmed,
+            path_env.as_deref().and_then(|value| value.to_str()),
+        );
         let resolved_path = resolved
             .as_deref()
             .unwrap_or_else(|| Path::new(bin_trimmed));
@@ -1074,6 +1086,17 @@ fn computer_control_app_server_args() -> Vec<String> {
 }
 
 pub(crate) fn resolve_codex_command_path(codex_bin: Option<&str>) -> String {
+    {
+        let path_env = build_codex_path_env(codex_bin);
+        if let Ok(path) = crate::shared::cli_discovery_core::resolve_cli_path(
+            "codex",
+            codex_bin.filter(|value| !value.trim().is_empty()),
+            path_env.as_deref().map(std::ffi::OsStr::new),
+            None,
+        ) {
+            return path.to_string_lossy().to_string();
+        }
+    }
     let bin = codex_bin
         .filter(|value| !value.trim().is_empty())
         .unwrap_or("codex")
@@ -1690,12 +1713,23 @@ mod tests {
 
     #[test]
     fn mandatory_computer_use_override_follows_user_args_and_precedes_subcommand() {
+        let test_dir =
+            std::env::temp_dir().join(format!("codex-command-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&test_dir).expect("test directory");
+        let binary = test_dir.join("codex.exe");
+        std::fs::write(&binary, b"test fixture").expect("binary fixture");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
         let command = build_codex_command_with_bin(
-            Some("codex.exe".to_string()),
+            Some(binary.to_string_lossy().to_string()),
             Some("-c model=custom -c plugins.computer-use@openai-bundled.enabled=true"),
             computer_control_app_server_args(),
         )
         .expect("command");
+        std::fs::remove_dir_all(&test_dir).expect("remove test directory");
         let args = command
             .as_std()
             .get_args()

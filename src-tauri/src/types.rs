@@ -1091,6 +1091,17 @@ pub(crate) struct CodexProviderModel {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AgentCliCandidate {
+    pub(crate) engine: String,
+    pub(crate) path: String,
+    pub(crate) version: Option<String>,
+    pub(crate) source: String,
+    pub(crate) runnable: bool,
+    pub(crate) error: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub(crate) struct AppSettings {
     #[serde(default, rename = "codexBin")]
     pub(crate) codex_bin: Option<String>,

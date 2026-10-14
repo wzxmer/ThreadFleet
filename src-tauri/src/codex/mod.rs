@@ -159,8 +159,17 @@ pub(crate) async fn codex_doctor(
         )
         .await;
     }
-    crate::shared::codex_aux_core::codex_doctor_core(&state.app_settings, codex_bin, codex_args)
-        .await
+    let managed_root = state
+        .settings_path
+        .parent()
+        .map(|directory| directory.join("managed-codex"));
+    crate::shared::codex_aux_core::codex_doctor_core(
+        &state.app_settings,
+        codex_bin,
+        codex_args,
+        managed_root.as_deref(),
+    )
+    .await
 }
 
 #[tauri::command]
