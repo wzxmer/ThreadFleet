@@ -31,6 +31,7 @@ macOS 版本当前采用完整 ad-hoc 签名，但尚未使用 Apple Developer I
 ## 主要增强
 
 - 中文界面：侧边栏、设置、消息、提示、按钮和常用状态文案中文化。
+- CLI 复用与引擎切换：在“设置 > Codex > CLI 与引擎”自动检测本机 Codex/Gemini CLI，选择检测到的版本，或浏览、手动输入可执行文件路径。自动模式优先本机 Codex，找不到时使用 TF 已安装的最新托管版本；已有明确路径继续固定，选择“自动检测”才恢复自动模式。新会话输入区可手动选择 Codex 或 Gemini，也可设置默认引擎；已有会话保留原引擎。Gemini 需自行安装并支持 `--acp`；可沿用终端原生登录，或在服务商设置中选择“Gemini（原生接口）”，填写支持 Gemini 原生接口的中转地址、API 密钥及可选默认模型，保存并启用。TF 将配置传入 Gemini 子进程，保留原生登录配置；模型列表在会话输入区刷新。Gemini 思考设置沿用 CLI 的官方默认值及原生用户、项目 settings；当前 ACP 接口没有会话内思考等级选择，模型列表获取成功也不会出现 Codex 的思考等级控件。TF 支持流式输出、工具审批、停止、历史恢复、重命名和归档，暂不支持 Gemini 分叉、回滚、审查或手动压缩。TF 创建的 Gemini 会话保存在项目会话列表中，原生 Gemini 历史文件的导入仍未开放。
 - 视觉统一：设置页、侧栏、消息区和弹层控件改为更一致的桌面软件风格。
 - 对话显示：统一使用原生阅读样式；默认亮色，可切换暗色，暗色模式使用统一原生暗色外观。
 - 字体体验：默认使用 `PingFang SC` / 内置 `Noto Sans SC Variable` / `Microsoft YaHei UI` 字体链，中文显示更圆润饱满；支持 UI、会话、过程状态、代码四类字号独立调整，UI 字号同步覆盖侧栏、设置、工具栏、弹层和输入区。
@@ -332,5 +333,7 @@ The macOS build is fully ad-hoc signed but not notarized with Apple Developer ID
 - **Shadow Router**: returns only `direct`, `delegate`, `review`, or `decision-gate` advice with reason codes. It never dispatches work or changes model/effort, stays within the active Provider's verified capabilities, reuses coordination ownership/claim/lease/conflict gates, and fails closed when bounded execution limits or capability checks are exhausted.
 
 ## More Details
+
+Local CLI reuse and engine selection are available in **Settings > Codex > CLI and engines**. Detect installed Codex/Gemini versions, select a detected executable, browse for one, or enter its path. Automatic Codex selection prefers a local installation and falls back to the newest TF managed installation; an existing explicit path stays pinned until you choose automatic detection. Select Codex or Gemini in a new conversation, or set the default engine in settings. Existing conversations keep their engine. Gemini must be installed and support `--acp`. Use native terminal sign-in, or select **Gemini (native API)** in provider settings, enter a relay URL that supports the native Gemini API, an API key and an optional default model, then save and enable it. TF passes that configuration to Gemini child processes and preserves native sign-in settings. Refresh models in the conversation composer. Gemini thinking uses CLI defaults and native user or project settings. Its current ACP interface does not offer a session thinking-level selector, so loading models does not enable Codex reasoning controls. TF supports streaming, tool approvals, cancellation, history resume, rename and archive. Gemini fork, rollback, review, manual compaction and importing native Gemini history files are not available.
 
 For build instructions, project structure, data configuration, and remote backend setup, see the [Chinese section](#threadfleet) above — the technical details apply regardless of language.
