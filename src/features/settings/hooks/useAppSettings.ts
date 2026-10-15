@@ -419,6 +419,7 @@ function buildDefaultSettings(): AppSettings {
     lastComposerModelId: null,
     lastComposerReasoningEffort: null,
     tokenEfficiencyMode: "quality",
+    artifactRoot: null,
     toolOutputTokenLimit: null,
     workflowRuntimeMode: "shadow",
     computerControlRoutingEnabled: true,
@@ -575,6 +576,9 @@ function normalizeAppSettings(settings: AppSettings): AppSettings {
     )
       ? settings.tokenEfficiencyMode
       : "quality",
+    artifactRoot: typeof settings.artifactRoot === "string"
+      ? settings.artifactRoot.trim() || null
+      : null,
     toolOutputTokenLimit:
       typeof settings.toolOutputTokenLimit === "number" &&
       Number.isFinite(settings.toolOutputTokenLimit) &&

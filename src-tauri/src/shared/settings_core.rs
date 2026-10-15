@@ -100,6 +100,11 @@ pub(crate) async fn update_app_settings_core(
     app_settings: &Mutex<AppSettings>,
     settings_path: &PathBuf,
 ) -> Result<AppSettings, String> {
+    settings.artifact_root = if matches!(settings.backend_mode, crate::types::BackendMode::Remote) {
+        crate::shared::artifact_storage_core::normalize_artifact_setting(settings.artifact_root)?
+    } else {
+        crate::shared::artifact_storage_core::normalize_artifact_root(settings.artifact_root)?
+    };
     settings.global_worktrees_folder = settings
         .global_worktrees_folder
         .map(|path| normalize_windows_namespace_path(&path));

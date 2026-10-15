@@ -62,9 +62,11 @@ pub(crate) async fn agent_runtime_request(
         .get(&workspace_id)
         .cloned()
         .ok_or_else(|| "Workspace not found".to_string())?;
-    let launch = crate::shared::gemini_runtime_core::LaunchConfig::from_settings(
-        &*state.app_settings.lock().await,
-    );
+    let settings = state.app_settings.lock().await.clone();
+    let launch = crate::shared::gemini_runtime_core::LaunchConfig::from_settings(&settings);
+    let params = crate::shared::artifact_storage_core::prepare_gemini_artifacts(
+        &settings, &state.settings_path, &state.workspaces, &workspace_id, &operation, params,
+    ).await?;
     state
         .gemini_runtime
         .request(

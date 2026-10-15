@@ -931,6 +931,7 @@ export type AppSettings = {
   lastComposerModelId: string | null;
   lastComposerReasoningEffort: string | null;
   tokenEfficiencyMode?: TokenEfficiencyMode;
+  artifactRoot?: string | null;
   toolOutputTokenLimit?: number | null;
   workflowRuntimeMode?: WorkflowRuntimeMode;
   computerControlRoutingEnabled?: boolean;

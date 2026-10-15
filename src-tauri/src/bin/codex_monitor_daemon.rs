@@ -919,7 +919,8 @@ impl DaemonState {
         settings_core::get_app_settings_core(&self.app_settings, &self.settings_path).await
     }
 
-    async fn update_app_settings(&self, settings: AppSettings) -> Result<AppSettings, String> {
+    async fn update_app_settings(&self, mut settings: AppSettings) -> Result<AppSettings, String> {
+        settings.artifact_root = shared::artifact_storage_core::normalize_artifact_root(settings.artifact_root)?;
         let updated = settings_core::update_app_settings_core(
             settings,
             &self.app_settings,
@@ -1863,6 +1864,12 @@ impl DaemonState {
         collaboration_mode: Option<Value>,
         additional_context: Option<Value>,
     ) -> Result<Value, String> {
+        let settings = self.app_settings.lock().await.clone();
+        let artifacts = crate::shared::artifact_storage_core::prepare_artifact_turn(
+            &settings, &self.settings_path, &self.workspaces, &workspace_id, &thread_id,
+            access_mode.as_deref() == Some("read-only"), additional_context,
+        ).await?;
+        let additional_context = artifacts.additional_context;
         let _runtime_switch_guard = workspaces_core::provider_runtime_switch_gate().read().await;
         if let Some(session) = self
             .source_runtime_for_bound_thread(&workspace_id, &thread_id)
@@ -1882,6 +1889,7 @@ impl DaemonState {
                 app_mentions,
                 collaboration_mode,
                 additional_context,
+                artifacts.directory,
             )
             .await;
         }
@@ -1899,6 +1907,7 @@ impl DaemonState {
             app_mentions,
             collaboration_mode,
             additional_context,
+            artifacts.directory,
         )
         .await
     }

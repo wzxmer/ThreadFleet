@@ -627,6 +627,21 @@ fn gemini_workspace_ownership_and_archiving_do_not_touch_native_history() {
 }
 
 #[test]
+fn gemini_artifact_context_reaches_prompt_without_changing_user_history() {
+    run(async {
+        let (prompt, user, text) = build_prompt(
+            &json!({"text":"hello", "artifactContext":"Store artifacts in /task-output"}),
+            "/workspace", &json!({}),
+        ).await.unwrap();
+        assert_eq!(prompt[0]["text"], "Store artifacts in /task-output");
+        assert_eq!(prompt[1]["text"], "hello");
+        assert_eq!(user, vec![json!({"type":"text", "text":"hello"})]);
+        assert_eq!(text, "hello");
+        assert!(build_prompt(&json!({"artifactContext":"output policy"}), "/workspace", &json!({})).await.is_err());
+    });
+}
+
+#[test]
 fn gemini_prompt_capabilities_and_read_only_mode_fail_before_prompt_execution() {
     run(async {
         let fixture = Fixture::new("no-plan");

@@ -1,6 +1,7 @@
 pub(crate) mod account;
 pub(crate) mod agents_config_core;
 pub(crate) mod attachment_storage_core;
+pub(crate) mod artifact_storage_core;
 pub(crate) mod cli_discovery_core;
 pub(crate) mod codex_aux_core;
 pub(crate) mod codex_cli_update_core;

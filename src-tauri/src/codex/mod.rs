@@ -998,6 +998,12 @@ pub(crate) async fn send_user_message(
         .await;
     }
 
+    let settings = state.app_settings.lock().await.clone();
+    let artifacts = crate::shared::artifact_storage_core::prepare_artifact_turn(
+        &settings, &state.settings_path, &state.workspaces, &workspace_id, &thread_id,
+        access_mode.as_deref() == Some("read-only"), additional_context,
+    ).await?;
+    let additional_context = artifacts.additional_context;
     let _runtime_switch_guard = crate::shared::workspaces_core::provider_runtime_switch_gate()
         .read()
         .await;
@@ -1023,6 +1029,7 @@ pub(crate) async fn send_user_message(
             app_mentions,
             collaboration_mode,
             additional_context,
+            artifacts.directory,
         )
         .await;
     }
@@ -1040,6 +1047,7 @@ pub(crate) async fn send_user_message(
         app_mentions,
         collaboration_mode,
         additional_context,
+        artifacts.directory,
     )
     .await
 }

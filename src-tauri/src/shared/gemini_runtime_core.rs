@@ -666,6 +666,9 @@ async fn build_prompt(
         .to_string();
     let mut prompt = Vec::new();
     let mut user = Vec::new();
+    if let Some(context) = params.get("artifactContext").and_then(Value::as_str) {
+        prompt.push(json!({"type":"text","text":context}));
+    }
     if !text.is_empty() {
         prompt.push(json!({"type":"text","text":text}));
         user.push(json!({"type":"text","text":text}));
@@ -751,7 +754,7 @@ async fn build_prompt(
         prompt.push(json!({"type":"resource_link","uri":format!("file://{}",path.to_string_lossy()),"name":name}));
         user.push(json!({"type":"text","text":format!("@{}",path.to_string_lossy())}));
     }
-    if prompt.is_empty() {
+    if user.is_empty() {
         return Err("Gemini prompt is empty".to_string());
     }
     Ok((prompt, user, text))

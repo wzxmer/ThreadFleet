@@ -2,6 +2,13 @@ import type { ResolvedAppLanguage } from "./appLanguage";
 
 export const I18N_STRINGS = {
   zh: {
+    "settings.artifacts.title": "任务产物目录",
+    "settings.artifacts.help": "统一存放报告、截图、诊断、临时构建和备份，按项目与会话分目录。留空使用 ThreadFleet 数据目录下的 artifacts。",
+    "settings.artifacts.defaultPath": "默认：ThreadFleet 数据目录/artifacts",
+    "settings.artifacts.browseTitle": "选择任务产物根目录",
+    "settings.artifacts.useDefault": "使用默认目录",
+    "settings.artifacts.limitations": "保存后从下一轮任务生效。通过指令约定 Agent 输出位置；用户指定路径优先，源码与知识库仍留在原位置。旧产物不迁移，删除会话不清理这些文件。",
+    "settings.artifacts.remoteHelp": "远程模式请手动填写执行主机上的绝对路径；留空使用远端数据目录。",
     "agents.runtimeTitle": "CLI 与引擎",
     "agents.runtimeHelp": "自动复用本机安装；可锁定检测到的版本，或输入可执行文件路径。自动模式仅在未找到本机 Codex 时使用托管版。",
     "agents.defaultEngine": "新会话默认引擎",
@@ -1902,6 +1909,13 @@ export const I18N_STRINGS = {
     "messages.retryHistory": "重新加载",
   },
   en: {
+    "settings.artifacts.title": "Task artifact directory",
+    "settings.artifacts.help": "Store reports, screenshots, diagnostics, temporary builds and backups by project and session. Leave empty to use artifacts in the ThreadFleet data directory.",
+    "settings.artifacts.defaultPath": "Default: ThreadFleet data directory/artifacts",
+    "settings.artifacts.browseTitle": "Choose task artifact root",
+    "settings.artifacts.useDefault": "Use default directory",
+    "settings.artifacts.limitations": "Changes apply on the next turn. Agent instructions request this output location; explicit user paths take priority. Source and knowledge stay in their owning locations. Existing artifacts are not moved or deleted with sessions.",
+    "settings.artifacts.remoteHelp": "In remote mode, enter an absolute path on the execution host. Leave empty to use the remote data directory.",
     "agents.runtimeTitle": "CLI and engines",
     "agents.runtimeHelp": "Reuse local installations automatically, pin a detected version, or enter an executable path. Automatic mode uses managed Codex when no local Codex installation is found.",
     "agents.defaultEngine": "Default engine for new conversations",

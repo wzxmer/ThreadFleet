@@ -1997,6 +1997,7 @@ pub(crate) async fn send_user_message_core(
     app_mentions: Option<Vec<Value>>,
     collaboration_mode: Option<Value>,
     additional_context: Option<Value>,
+    artifact_directory: std::path::PathBuf,
 ) -> Result<Value, String> {
     let session = get_session_clone(sessions, &workspace_id).await?;
     send_user_message_with_session_core(
@@ -2013,6 +2014,7 @@ pub(crate) async fn send_user_message_core(
         app_mentions,
         collaboration_mode,
         additional_context,
+        artifact_directory,
     )
     .await
 }
@@ -2031,18 +2033,11 @@ pub(crate) async fn send_user_message_with_session_core(
     app_mentions: Option<Vec<Value>>,
     collaboration_mode: Option<Value>,
     additional_context: Option<Value>,
+    artifact_directory: std::path::PathBuf,
 ) -> Result<Value, String> {
     let workspace_path = resolve_workspace_path_core(workspaces, &workspace_id).await?;
     let access_mode = access_mode.unwrap_or_else(|| "current".to_string());
-    let sandbox_policy = match access_mode.as_str() {
-        "full-access" => json!({ "type": "dangerFullAccess" }),
-        "read-only" => json!({ "type": "readOnly" }),
-        _ => json!({
-            "type": "workspaceWrite",
-            "writableRoots": [workspace_path.clone()],
-            "networkAccess": true
-        }),
-    };
+    let sandbox_policy = artifact_sandbox_policy(&workspace_path, &artifact_directory, &access_mode);
 
     let approval_policy = if access_mode == "full-access" {
         "never"
@@ -2070,6 +2065,18 @@ pub(crate) async fn send_user_message_with_session_core(
     session
         .send_request_for_workspace(&workspace_id, "turn/start", Value::Object(params))
         .await
+}
+
+fn artifact_sandbox_policy(workspace_path: &str, artifact_directory: &Path, access_mode: &str) -> Value {
+    match access_mode {
+        "full-access" => json!({ "type": "dangerFullAccess" }),
+        "read-only" => json!({ "type": "readOnly" }),
+        _ => json!({
+            "type": "workspaceWrite",
+            "writableRoots": [workspace_path, artifact_directory],
+            "networkAccess": true
+        }),
+    }
 }
 
 pub(crate) async fn turn_steer_core(
@@ -3745,6 +3752,15 @@ base_url = "{base_url}"
             rollout_apply_patch_line_stats(Some(&input)),
             json!({ "additions": 2, "deletions": 1 })
         );
+    }
+
+    #[test]
+    fn artifact_sandbox_grants_only_session_directory_and_keeps_read_only() {
+        let directory = Path::new("/artifacts/project/session");
+        let policy = artifact_sandbox_policy("/workspace", directory, "current");
+        assert_eq!(policy["writableRoots"], json!(["/workspace", directory]));
+        assert_eq!(artifact_sandbox_policy("/workspace", directory, "read-only"), json!({"type":"readOnly"}));
+        assert_eq!(artifact_sandbox_policy("/workspace", directory, "full-access"), json!({"type":"dangerFullAccess"}));
     }
 
     #[test]

@@ -41,6 +41,7 @@ describe("useAppSettings", () => {
         codeFontFamily: "  ",
         codeFontSize: 25,
         toolOutputTokenLimit: 8000.9,
+        artifactRoot: "  D:\\AgentArtifacts  ",
       } as unknown) as AppSettings,
     );
 
@@ -58,6 +59,7 @@ describe("useAppSettings", () => {
     expect(result.current.settings.remoteBackendHost).toBe("example:1234");
     expect(result.current.settings.sessionSources).toEqual([]);
     expect(result.current.settings.toolOutputTokenLimit).toBe(8000);
+    expect(result.current.settings.artifactRoot).toBe("D:\\AgentArtifacts");
   });
 
   it("preserves persisted session sources", async () => {

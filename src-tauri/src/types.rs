@@ -1241,6 +1241,8 @@ pub(crate) struct AppSettings {
         rename = "tokenEfficiencyMode"
     )]
     pub(crate) token_efficiency_mode: String,
+    #[serde(default, rename = "artifactRoot")]
+    pub(crate) artifact_root: Option<String>,
     #[serde(default, rename = "toolOutputTokenLimit")]
     pub(crate) tool_output_token_limit: Option<u64>,
     #[serde(
@@ -2219,6 +2221,7 @@ impl Default for AppSettings {
             last_composer_model_id: None,
             last_composer_reasoning_effort: None,
             token_efficiency_mode: default_token_efficiency_mode(),
+            artifact_root: None,
             tool_output_token_limit: None,
             workflow_runtime_mode: default_workflow_runtime_mode(),
             computer_control_routing_enabled: default_computer_control_routing_enabled(),

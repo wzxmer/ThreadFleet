@@ -40,9 +40,12 @@ async fn request(state: &DaemonState, params: &Value) -> Result<Value, String> {
         .get(&workspace_id)
         .cloned()
         .ok_or_else(|| "Workspace not found".to_string())?;
-    let launch = crate::shared::gemini_runtime_core::LaunchConfig::from_settings(
-        &*state.app_settings.lock().await,
-    );
+    let settings = state.app_settings.lock().await.clone();
+    let launch = crate::shared::gemini_runtime_core::LaunchConfig::from_settings(&settings);
+    let runtime_params = crate::shared::artifact_storage_core::prepare_gemini_artifacts(
+        &settings, &state.settings_path, &state.workspaces, &workspace_id, &operation,
+        params.get("params").cloned().unwrap_or_else(|| json!({})),
+    ).await?;
     state
         .gemini_runtime
         .request(
@@ -50,7 +53,7 @@ async fn request(state: &DaemonState, params: &Value) -> Result<Value, String> {
             &workspace.path,
             launch,
             &operation,
-            params.get("params").cloned().unwrap_or_else(|| json!({})),
+            runtime_params,
             state.event_sink.clone(),
         )
         .await
