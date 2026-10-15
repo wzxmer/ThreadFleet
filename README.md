@@ -90,6 +90,7 @@ macOS 版本当前采用完整 ad-hoc 签名，但尚未使用 Apple Developer I
 
 - 设置分区覆盖显示、输入、会话、项目、Codex、工作流、Git、功能、快捷键、更新和环境。
 - 会话设置支持按空闲天数自动归档，并始终跳过当前、运行中和置顶会话；还可按 30/60/90/180 天管理归档会话永久清理，功能默认关闭，开启和立即清理都需明确二次确认，自动检查最多每 24 小时一次，并保护当前、运行中和置顶会话。
+- “设置 > 会话 > 任务产物目录”可为后续任务选择统一根目录；留空使用 ThreadFleet 数据目录下的 `artifacts`，按项目和会话分目录。保存后从下一轮任务向 Codex 和 Gemini 传入输出约定，用户指定路径优先，源码与知识库保持各自归属；这不是强制文件重定向。远程模式填写执行主机路径，留空使用远端默认目录。已有产物不自动迁移，删除会话不会删除这些文件。
 - UI 缩放、字体、字号、字重、透明效果、消息文件路径、工具折叠、Diff 预加载等可配置。
 - 侧栏、右侧面板、计划面板、终端和调试面板尺寸持久化。
 - 通知声音、长任务完成系统通知（窗口聚焦或后台均显示）、更新提示、调试日志复制和清空。
@@ -308,6 +309,7 @@ The macOS build is fully ad-hoc signed but not notarized with Apple Developer ID
 
 ## Chinese-First Enhancements
 
+- **Task artifact location**: Settings > Sessions lets you choose an artifact root, defaulting to `artifacts` inside the ThreadFleet data directory. Each project and session gets its own directory. Codex and Gemini receive the output convention on the next turn; explicit user paths take priority. This does not force file redirection, migrate existing artifacts, or delete project artifacts when sessions are removed. In remote mode, paths and the default directory belong to the execution host.
 - **Localized UI**: sidebar, settings, messages, prompts, buttons, and common status text in Chinese.
 - **Visual consistency**: settings, sidebar, message area, and overlay controls share a unified desktop software style.
 - **Conversation display**: uses one native reading style globally. Light mode is the default, with a manual dark-mode toggle that uses the shared native dark appearance.
