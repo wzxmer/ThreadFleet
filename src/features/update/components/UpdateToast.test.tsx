@@ -11,6 +11,7 @@ import {
   rollbackWindowsInstallerRepair,
 } from "@services/tauri";
 import { UpdateToast } from "./UpdateToast";
+import { CodexCliUpdateToast } from "./CodexCliUpdateToast";
 
 vi.mock("@tauri-apps/plugin-opener", () => ({
   openUrl: vi.fn(),
@@ -32,6 +33,30 @@ function renderUpdateToast(element: ReactElement) {
 }
 
 describe("UpdateToast", () => {
+  it("stacks CLI progress with the app update in one nonmodal viewport", () => {
+    const onDetails = vi.fn();
+    const onDismissCli = vi.fn();
+    renderUpdateToast(<UpdateToast state={{ stage: "available", version: "1.2.3" }} onUpdate={vi.fn()} onDismiss={vi.fn()}
+      additionalToast={<CodexCliUpdateToast state={{ stage: "installing", progress: { downloadedBytes: 50, totalBytes: 100, phase: "downloading", route: "system-proxy" } }}
+        onDetails={onDetails} onDismiss={onDismissCli} onRetry={vi.fn()} />} />);
+    expect(screen.getAllByRole("region")).toHaveLength(1);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe("50");
+    expect(screen.getByText(/System proxy/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "View details" }));
+    expect(onDetails).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(onDismissCli).toHaveBeenCalledOnce();
+  });
+
+  it("shows a CLI result even when the app has no update", () => {
+    renderUpdateToast(<UpdateToast state={{ stage: "idle" }} onUpdate={vi.fn()} onDismiss={vi.fn()}
+      additionalToast={<CodexCliUpdateToast state={{ stage: "updated", installedVersion: "0.163.0" }}
+        onDetails={vi.fn()} onDismiss={vi.fn()} onRetry={vi.fn()} />} />);
+    expect(screen.getByText("Codex CLI update")).toBeTruthy();
+    expect(screen.getByText("0.163.0")).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     previewRepairMock.mockResolvedValue({

@@ -3,13 +3,17 @@ import { useI18n } from "@/features/i18n/I18nProvider";
 import type { CodexCliUpdateCheckResult } from "@/types";
 import type { CodexCliUpdaterStage } from "../hooks/useCodexCliUpdater";
 import { formatUpdateError } from "../utils/updatePresentation";
+import { CodexCliUpdateProgress } from "./CodexCliUpdateProgress";
+import type { CodexCliUpdaterState } from "../hooks/useCodexCliUpdater";
 
 type CodexCliUpdatePromptProps = {
   open: boolean;
   check: CodexCliUpdateCheckResult | null;
   stage?: CodexCliUpdaterStage;
   installedVersion?: string;
-  progress?: { downloadedBytes: number; totalBytes?: number };
+  progress?: CodexCliUpdaterState["progress"];
+  startedAt?: number;
+  finishedAt?: number;
   installEnabled: boolean;
   busy: boolean;
   error?: string;
@@ -24,6 +28,8 @@ export function CodexCliUpdatePrompt({
   stage = check?.status ?? "error",
   installedVersion,
   progress,
+  startedAt,
+  finishedAt,
   installEnabled,
   busy,
   error,
@@ -59,7 +65,7 @@ export function CodexCliUpdatePrompt({
       ariaLabelledBy="codex-cli-update-title"
       ariaDescribedBy="codex-cli-update-description"
       cardClassName="windows-ui-update-confirm"
-      onBackdropClick={busy ? undefined : onCancel}
+      onBackdropClick={onCancel}
     >
       <div className="ds-modal-title" id="codex-cli-update-title">
         {canInstall ? t("codexUpdate.title") : t("codexUpdate.resultTitle")}
@@ -77,17 +83,11 @@ export function CodexCliUpdatePrompt({
           <dd><code>{check?.latestVersion ?? "-"}</code></dd>
         </div>
       </dl>
-      {progress && (
-        <div className="settings-help" role="status">
-          {t("codexUpdate.downloadProgress")}: {progress.totalBytes
-            ? `${Math.min(100, Math.round(progress.downloadedBytes / progress.totalBytes * 100))}%`
-            : `${(progress.downloadedBytes / 1024 / 1024).toFixed(1)} MB`}
-        </div>
-      )}
+      {busy && <CodexCliUpdateProgress state={{ stage: "installing", progress, startedAt, finishedAt }} />}
       {error && <div className="ds-modal-error">{formatUpdateError(error, t)}</div>}
       <div className="ds-modal-actions">
-        <button type="button" className="ghost ds-modal-button" onClick={onCancel} disabled={busy}>
-          {canInstall ? t("codexUpdate.later") : t("common.close")}
+        <button type="button" className="ghost ds-modal-button" onClick={onCancel}>
+          {busy ? t("codexUpdate.background") : canInstall ? t("codexUpdate.later") : t("common.close")}
         </button>
         {installEnabled && canInstall && (
           <button type="button" className="primary ds-modal-button" onClick={onConfirm} disabled={busy}>

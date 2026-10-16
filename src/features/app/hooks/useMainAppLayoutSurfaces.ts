@@ -1,4 +1,4 @@
-import { useMemo, type RefObject } from "react";
+import { useMemo, type RefObject, type ReactNode } from "react";
 import type {
   AccountSnapshot,
   AppSettings,
@@ -299,6 +299,7 @@ type UseMainAppLayoutSurfacesArgs = {
   onCloseSettings: () => void;
   appModalsAboutOpen: boolean;
   updaterState: LayoutNodesOptions["primary"]["updateToastProps"]["state"];
+  cliUpdateToast?: ReactNode;
   startUpdate: LayoutNodesOptions["primary"]["updateToastProps"]["onUpdate"];
   dismissUpdate: LayoutNodesOptions["primary"]["updateToastProps"]["onDismiss"];
   postUpdateNotice: LayoutNodesOptions["primary"]["updateToastProps"]["postUpdateNotice"];
@@ -496,6 +497,7 @@ function buildPrimarySurface({
   onCloseSettings,
   appModalsAboutOpen,
   updaterState,
+  cliUpdateToast,
   startUpdate,
   dismissUpdate,
   postUpdateNotice,
@@ -934,6 +936,7 @@ function buildPrimarySurface({
       onRemember,
     },
     updateToastProps: {
+      additionalToast: cliUpdateToast,
       state: appModalsAboutOpen ? { stage: "idle" as const } : updaterState,
       onUpdate: startUpdate,
       onDismiss: dismissUpdate,
@@ -1611,6 +1614,7 @@ export function useMainAppLayoutSurfaces({
   onCloseSettings,
   appModalsAboutOpen,
   updaterState,
+  cliUpdateToast,
   startUpdate,
   dismissUpdate,
   postUpdateNotice,
@@ -1855,6 +1859,7 @@ export function useMainAppLayoutSurfaces({
     onCloseSettings,
     appModalsAboutOpen,
     updaterState,
+    cliUpdateToast,
     startUpdate,
     dismissUpdate,
     postUpdateNotice,

@@ -3,6 +3,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkCodexCliUpdate, installManagedCodex, runCodexUpdate } from "@services/tauri";
 import { useCodexCliUpdater } from "./useCodexCliUpdater";
+import { subscribeReleaseAssetDownloadProgress } from "@services/events";
 
 vi.mock("@tauri-apps/api/core", () => ({
   isTauri: vi.fn(() => true),
@@ -109,7 +110,7 @@ describe("useCodexCliUpdater", () => {
     expect(result.current.state.stage).toBe("updated");
   });
 
-  it("reopens the prompt while the in-place update is running", async () => {
+  it("keeps an update running after hiding its details and never reopens them on completion", async () => {
     let resolveInstall:
       | ((value: {
           ok: boolean;
@@ -145,7 +146,13 @@ describe("useCodexCliUpdater", () => {
       void result.current.startInstall();
     });
     await waitFor(() => expect(result.current.state.stage).toBe("installing"));
+    expect(result.current.promptOpen).toBe(false);
+    act(() => result.current.showDetails());
     expect(result.current.promptOpen).toBe(true);
+    act(() => result.current.dismissPrompt());
+    expect(result.current.promptOpen).toBe(false);
+    await act(async () => { await result.current.startInstall(); });
+    expect(updateMock).toHaveBeenCalledTimes(1);
 
     act(() => {
       resolveInstall?.({
@@ -160,6 +167,8 @@ describe("useCodexCliUpdater", () => {
       });
     });
     await waitFor(() => expect(result.current.state.stage).toBe("updated"));
+    expect(result.current.promptOpen).toBe(false);
+    expect(result.current.noticeVisible).toBe(true);
   });
 
   it("updates the TF-managed CLI and activates its path before reporting success", async () => {
@@ -181,7 +190,7 @@ describe("useCodexCliUpdater", () => {
     expect(updateMock).not.toHaveBeenCalled();
     expect(result.current.state.stage).toBe("updated");
     expect(result.current.state.installedVersion).toBe("0.160.1");
-    expect(result.current.promptOpen).toBe(true);
+    expect(result.current.promptOpen).toBe(false);
   });
 
   it("updates a supported local CLI from a single check action", async () => {
@@ -190,7 +199,32 @@ describe("useCodexCliUpdater", () => {
     expect(checkMock).toHaveBeenCalledTimes(1);
     expect(updateMock).toHaveBeenCalledTimes(1);
     expect(result.current.state.stage).toBe("updated");
-    expect(result.current.promptOpen).toBe(true);
+    expect(result.current.promptOpen).toBe(false);
+  });
+
+  it("retains the selected proxy through extraction and ignores other downloads", async () => {
+    checkMock.mockResolvedValue({ ...availableCheck, source: "managed", package: {
+      version: "0.147.0", fileName: "codex.tar.gz", urls: ["https://example.com/codex.tar.gz"], size: 100, sha256: "a".repeat(64),
+    } });
+    let finish!: (value: { path: string; version: string }) => void;
+    installMock.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    const { result } = renderHook(() => useCodexCliUpdater({ autoCheckOnMount: false, codexBin: null, onInstalled: vi.fn() }));
+    await act(async () => { await result.current.checkForUpdates(); });
+    act(() => { void result.current.startInstall(); });
+    const id = installMock.mock.calls[0][2];
+    const subscriptions = vi.mocked(subscribeReleaseAssetDownloadProgress).mock.calls;
+    const onProgress = subscriptions[subscriptions.length - 1][0];
+    act(() => onProgress({ id: "other-task", downloadedBytes: 10, route: "direct" }));
+    expect(result.current.state.progress).toBeUndefined();
+    act(() => onProgress({ id, downloadedBytes: 50, totalBytes: 100, phase: "downloading", route: "system-proxy" }));
+    act(() => onProgress({ id, downloadedBytes: 100, totalBytes: 100, phase: "extracting", route: null }));
+    expect(result.current.state.progress).toMatchObject({ phase: "extracting", route: "system-proxy" });
+    act(() => result.current.hideNotice());
+    act(() => result.current.dismissPrompt());
+    await act(async () => { finish({ path: "C:/new/codex.exe", version: "0.147.0" }); });
+    expect(result.current.promptOpen).toBe(false);
+    expect(result.current.noticeVisible).toBe(false);
+    expect(result.current.state.stage).toBe("updated");
   });
 
   it("does not claim success if the new CLI path cannot be saved", async () => {

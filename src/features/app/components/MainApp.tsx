@@ -132,6 +132,7 @@ import { fetchManagedCodexPackage } from "@/features/codex/utils/managedCodex";
 import { useManagedCodexActivation } from "@app/hooks/useManagedCodexActivation";
 import { CodexInstallPrompt } from "@/features/codex/components/CodexInstallPrompt";
 import { CodexCliUpdatePrompt } from "@/features/update/components/CodexCliUpdatePrompt";
+import { CodexCliUpdateToast } from "@/features/update/components/CodexCliUpdateToast";
 import { useCodexCliUpdater } from "@/features/update/hooks/useCodexCliUpdater";
 import type { ManagedSession, ManagedSessionDerivationPreview } from "@/types";
 import { SessionDerivationPrompt } from "@/features/sessions/components/SessionDerivationPrompt";
@@ -2815,6 +2816,10 @@ export default function MainApp() {
     showMobilePollingFetchStatus,
     appModalsSettingsOpen: appModalsProps.settingsOpen,
     onCloseSettings: appModalsProps.onCloseSettings,
+    cliUpdateToast: codexCliUpdater.noticeVisible && !codexCliUpdater.promptOpen ? (
+      <CodexCliUpdateToast state={codexCliUpdater.state} onDetails={codexCliUpdater.showDetails}
+        onDismiss={codexCliUpdater.hideNotice} onRetry={() => void codexCliUpdater.checkAndUpdate()} />
+    ) : null,
     appModalsAboutOpen:
       appModalsProps.settingsOpen && appModalsProps.settingsSection === 'about',
     updaterState,
@@ -2994,6 +2999,8 @@ export default function MainApp() {
           stage={codexCliUpdater.state.stage}
           installedVersion={codexCliUpdater.state.installedVersion}
           progress={codexCliUpdater.state.progress}
+          startedAt={codexCliUpdater.state.startedAt}
+          finishedAt={codexCliUpdater.state.finishedAt}
           installEnabled={appSettings.backendMode === "local"}
           busy={
             codexCliUpdater.state.stage === "installing"

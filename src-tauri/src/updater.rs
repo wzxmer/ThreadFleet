@@ -287,6 +287,8 @@ struct ReleaseAssetDownloadProgress {
     id: String,
     downloaded_bytes: u64,
     total_bytes: Option<u64>,
+    phase: &'static str,
+    route: Option<&'static str>,
 }
 
 #[tauri::command]
@@ -536,6 +538,7 @@ pub async fn install_managed_codex(
         .map_err(|error| format!("Failed to finalize Codex CLI package: {error}"))?;
 
     let install_root = root.clone();
+    emit_download_progress(&app_handle, &request_id, expected_size, Some(expected_size), "extracting", None);
     let archive_for_extract = archive_path.clone();
     let executable_path = tokio::task::spawn_blocking(move || {
         extract_managed_codex_archive(&archive_for_extract, &install_root)
@@ -544,6 +547,7 @@ pub async fn install_managed_codex(
     .map_err(|error| format!("Codex CLI extraction task failed: {error}"))??;
     let _ = tokio::fs::remove_file(&archive_path).await;
 
+    emit_download_progress(&app_handle, &request_id, expected_size, Some(expected_size), "verifying", None);
     let detected_version = crate::backend::app_server::check_codex_installation(Some(
         executable_path.to_string_lossy().into_owned(),
     ))
@@ -1155,6 +1159,8 @@ fn emit_download_progress(
     request_id: &str,
     downloaded_bytes: u64,
     total_bytes: Option<u64>,
+    phase: &'static str,
+    route: Option<&'static str>,
 ) {
     let _ = app_handle.emit(
         "release-asset-download-progress",
@@ -1162,6 +1168,8 @@ fn emit_download_progress(
             id: request_id.to_string(),
             downloaded_bytes,
             total_bytes,
+            phase,
+            route,
         },
     );
 }
@@ -1235,8 +1243,17 @@ fn build_update_client(
     proxy_url: Option<&str>,
     use_environment_proxy: bool,
 ) -> Result<reqwest::Client, String> {
+    build_update_client_with_read_timeout(proxy_url, use_environment_proxy, std::time::Duration::from_secs(DOWNLOAD_STALL_TIMEOUT_SECS))
+}
+
+fn build_update_client_with_read_timeout(
+    proxy_url: Option<&str>,
+    use_environment_proxy: bool,
+    read_timeout: std::time::Duration,
+) -> Result<reqwest::Client, String> {
     let mut builder = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(10))
+        .read_timeout(read_timeout)
         .timeout(std::time::Duration::from_secs(30 * 60))
         .user_agent("ThreadFleet updater");
     if let Some(proxy_url) = proxy_url {
@@ -1259,7 +1276,9 @@ async fn download_to_path_with_client(
     target_path: &Path,
     expected_size: Option<u64>,
     expected_sha256: Option<&str>,
+    route: &'static str,
 ) -> Result<(), String> {
+    emit_download_progress(app_handle, request_id, 0, expected_size, "connecting", Some(route));
     let response = client
         .get(url)
         .header(reqwest::header::ACCEPT, "application/octet-stream")
@@ -1281,7 +1300,7 @@ async fn download_to_path_with_client(
         }
     }
     let total_bytes = expected_size.or(response_size);
-    emit_download_progress(app_handle, request_id, 0, total_bytes);
+    emit_download_progress(app_handle, request_id, 0, total_bytes, "downloading", Some(route));
 
     let mut file = tokio::fs::File::create(target_path)
         .await
@@ -1305,7 +1324,7 @@ async fn download_to_path_with_client(
             .await
             .map_err(|error| format!("Failed to write installer file: {error}"))?;
         downloaded_bytes = next_downloaded_bytes;
-        emit_download_progress(app_handle, request_id, downloaded_bytes, total_bytes);
+        emit_download_progress(app_handle, request_id, downloaded_bytes, total_bytes, "downloading", Some(route));
     }
     file.flush()
         .await
@@ -1328,6 +1347,8 @@ async fn download_to_path_with_client(
         request_id,
         downloaded_bytes,
         Some(downloaded_bytes),
+        "downloading",
+        Some(route),
     );
     Ok(())
 }
@@ -1370,6 +1391,7 @@ async fn download_to_path(
             target_path,
             expected_size,
             expected_sha256,
+            route.name,
         )
         .await
         {
@@ -1436,6 +1458,54 @@ mod tests {
         classify_windows_installer_registration, select_windows_installer_kind,
     };
     use std::io::Write;
+
+    #[test]
+    fn update_client_bounds_waiting_for_response_headers() {
+        tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
+        use tokio::io::AsyncReadExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buffer = [0; 1024];
+            socket.read(&mut buffer).await.unwrap();
+            std::future::pending::<()>().await;
+        });
+        let client = super::build_update_client_with_read_timeout(
+            None, false, std::time::Duration::from_millis(100),
+        ).unwrap();
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(2), client.get(format!("http://{address}")).send(),
+        ).await.expect("response headers must have a bounded wait");
+        assert!(result.unwrap_err().is_timeout());
+        server.abort();
+        });
+    }
+
+    #[test]
+    fn update_client_allows_long_downloads_while_data_keeps_arriving() {
+        tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buffer = [0; 1024];
+            socket.read(&mut buffer).await.unwrap();
+            socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 6\r\n\r\n").await.unwrap();
+            for _ in 0..6 {
+                tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+                socket.write_all(b"x").await.unwrap();
+            }
+        });
+        let client = super::build_update_client_with_read_timeout(
+            None, false, std::time::Duration::from_millis(200),
+        ).unwrap();
+        let body = client.get(format!("http://{address}")).send().await.unwrap().bytes().await.unwrap();
+        assert_eq!(&body[..], b"xxxxxx");
+        server.await.unwrap();
+        });
+    }
 
     #[test]
     fn tries_system_proxy_then_environment_proxy_then_direct() {

@@ -48,6 +48,7 @@ export type SettingsCodexCliUpdaterControls = {
   checkForUpdates: () => void;
   startInstall: () => void;
   dismiss: () => void;
+  showDetails?: () => void;
 };
 
 export type SettingsViewProps = {

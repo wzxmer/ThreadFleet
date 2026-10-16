@@ -5,6 +5,7 @@ import type {
   CodexUpdateResult,
   DebugEntry,
   InstalledManagedCodex,
+  ReleaseAssetDownloadProgress,
 } from "@/types";
 import { checkCodexCliUpdate, installManagedCodex, runCodexUpdate } from "@services/tauri";
 import { subscribeReleaseAssetDownloadProgress } from "@services/events";
@@ -27,7 +28,9 @@ export type CodexCliUpdaterState = {
   installedVersion?: string;
   update?: CodexUpdateResult;
   error?: string;
-  progress?: { downloadedBytes: number; totalBytes?: number };
+  progress?: Omit<ReleaseAssetDownloadProgress, "id">;
+  startedAt?: number;
+  finishedAt?: number;
 };
 
 type UseCodexCliUpdaterOptions = {
@@ -78,6 +81,7 @@ export function useCodexCliUpdater({
   const { t } = useI18n();
   const [state, setState] = useState<CodexCliUpdaterState>({ stage: "idle" });
   const [promptOpen, setPromptOpen] = useState(false);
+  const [noticeVisible, setNoticeVisible] = useState(false);
   const checkRef = useRef<CodexCliUpdateCheckResult | null>(null);
   const activeUpdateIdRef = useRef<string | null>(null);
   const hasAttemptedAutoCheckRef = useRef(false);
@@ -125,7 +129,7 @@ export function useCodexCliUpdater({
   }, [performCheck]);
 
   const startInstall = useCallback(
-    async ({ openPrompt = true, codexArgs = null }: StartInstallOptions = {}) => {
+    async ({ openPrompt = false, codexArgs = null }: StartInstallOptions = {}) => {
       if (
         !enabled ||
         !installEnabled ||
@@ -141,9 +145,12 @@ export function useCodexCliUpdater({
       const requestId = `codex-cli-${Date.now()}-${Math.random().toString(36).slice(2)}`;
       activeUpdateIdRef.current = requestId;
       setPromptOpen(openPrompt);
+      setNoticeVisible(true);
+      const startedAt = Date.now();
       setState({
         stage: "installing",
         check,
+        startedAt,
       });
       try {
         let update: CodexUpdateResult;
@@ -173,12 +180,13 @@ export function useCodexCliUpdater({
           await onUpdated?.(updatedVersion);
         }
         activeUpdateIdRef.current = null;
-        setPromptOpen(openPrompt);
         setState({
           stage: update.upgraded ? "updated" : "upToDate",
           check,
           installedVersion: updatedVersion || undefined,
           update,
+          startedAt,
+          finishedAt: Date.now(),
         });
         return update;
       } catch (error) {
@@ -191,7 +199,7 @@ export function useCodexCliUpdater({
           label: "codex-cli-updater/install-error",
           payload: message,
         });
-        setState({ stage: "error", check, error: message });
+        setState({ stage: "error", check, error: message, startedAt, finishedAt: Date.now() });
         return undefined;
       }
     },
@@ -199,11 +207,11 @@ export function useCodexCliUpdater({
   );
 
   const checkAndUpdate = useCallback(async () => {
+    setNoticeVisible(true);
+    if (activeUpdateIdRef.current) return undefined;
     const result = await checkForUpdates({ openPrompt: false });
     if (result?.status === "available" && installEnabled) {
-      await startInstall({ openPrompt: true });
-    } else {
-      setPromptOpen(true);
+      await startInstall();
     }
     return result;
   }, [checkForUpdates, installEnabled, startInstall]);
@@ -217,11 +225,11 @@ export function useCodexCliUpdater({
     }
     const check = await checkForUpdates({ openPrompt: false });
     if (check?.status === "available") {
-      const updated = await startInstall({ openPrompt: true, codexArgs });
+      const updated = await startInstall({ codexArgs });
       if (updated) return updated;
       throw new Error(t("settings.codex.codexCliUpdateFailed"));
     }
-    setPromptOpen(true);
+    setNoticeVisible(true);
     if (check?.status === "upToDate") {
       return {
         ok: true,
@@ -240,19 +248,27 @@ export function useCodexCliUpdater({
   }, [checkForUpdates, codexBin, installEnabled, startInstall, t]);
 
   const dismissPrompt = useCallback(() => {
-    if (!activeUpdateIdRef.current) {
-      setPromptOpen(false);
-    }
+    setPromptOpen(false);
   }, []);
+
+  const showDetails = useCallback(() => setPromptOpen(true), []);
+  const hideNotice = useCallback(() => setNoticeVisible(false), []);
 
   const dismiss = useCallback(() => {
     if (activeUpdateIdRef.current) {
       return;
     }
     checkRef.current = null;
+    setNoticeVisible(false);
     setPromptOpen(false);
     setState({ stage: "idle" });
   }, []);
+
+  useEffect(() => {
+    if (!noticeVisible || (state.stage !== "updated" && state.stage !== "upToDate")) return;
+    const timer = window.setTimeout(() => setNoticeVisible(false), 6000);
+    return () => window.clearTimeout(timer);
+  }, [noticeVisible, state.stage]);
 
   useEffect(() => {
     if (!enabled || !isTauri()) return;
@@ -260,7 +276,12 @@ export function useCodexCliUpdater({
       if (progress.id !== activeUpdateIdRef.current) return;
       setState((current) => current.stage !== "installing" ? current : ({
         ...current,
-        progress: { downloadedBytes: progress.downloadedBytes, totalBytes: progress.totalBytes ?? undefined },
+        progress: {
+          downloadedBytes: progress.downloadedBytes,
+          totalBytes: progress.totalBytes ?? undefined,
+          phase: progress.phase ?? "downloading",
+          route: progress.route ?? current.progress?.route,
+        },
       }));
     });
   }, [enabled]);
@@ -279,10 +300,9 @@ export function useCodexCliUpdater({
         openPrompt: !shouldAutoInstall,
       });
       if (result?.status === "available" && shouldAutoInstall) {
-        const update = await startInstall({ openPrompt: false });
-        if (!update) {
-          setPromptOpen(true);
-        }
+        await startInstall();
+      } else if (!result && shouldAutoInstall) {
+        setNoticeVisible(true);
       }
     })();
   }, [
@@ -297,6 +317,9 @@ export function useCodexCliUpdater({
   return {
     state,
     promptOpen,
+    noticeVisible,
+    showDetails,
+    hideNotice,
     checkForUpdates,
     startInstall,
     checkAndUpdate,

@@ -1,5 +1,5 @@
 import ReactMarkdown from "react-markdown";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import remarkGfm from "remark-gfm";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { PostUpdateNoticeState, UpdateState } from "../hooks/useUpdater";
@@ -23,6 +23,7 @@ type UpdateToastProps = {
   onDismiss: () => void;
   postUpdateNotice?: PostUpdateNoticeState;
   onDismissPostUpdateNotice?: () => void;
+  additionalToast?: ReactNode;
 };
 
 function formatBytes(value: number) {
@@ -45,12 +46,14 @@ export function UpdateToast({
   onDismiss,
   postUpdateNotice = null,
   onDismissPostUpdateNotice,
+  additionalToast,
 }: UpdateToastProps) {
   const { t } = useI18n();
   const [repairOpen, setRepairOpen] = useState(false);
   if (postUpdateNotice) {
     return (
       <ToastViewport className="update-toasts" role="region" ariaLive="polite">
+        {additionalToast}
         <ToastCard className="update-toast" role="status">
           <ToastHeader className="update-toast-header">
             <ToastTitle className="update-toast-title">{t("update.whatsNew")}</ToastTitle>
@@ -124,7 +127,7 @@ export function UpdateToast({
   }
 
   if (state.stage === "idle" || state.stage === "upToDate") {
-    return null;
+    return additionalToast ? <ToastViewport className="update-toasts" role="region" ariaLive="polite">{additionalToast}</ToastViewport> : null;
   }
 
   const totalBytes = state.progress?.totalBytes;
@@ -137,6 +140,7 @@ export function UpdateToast({
   return (
     <>
     <ToastViewport className="update-toasts" role="region" ariaLive="polite">
+      {additionalToast}
       <ToastCard className="update-toast" role="status">
         <ToastHeader className="update-toast-header">
           <ToastTitle className="update-toast-title">{t("update.title")}</ToastTitle>

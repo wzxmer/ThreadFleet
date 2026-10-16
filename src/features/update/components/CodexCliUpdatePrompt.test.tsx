@@ -55,6 +55,7 @@ describe("CodexCliUpdatePrompt", () => {
   });
 
   it("disables confirmation while the in-place update is busy", () => {
+    const onBackground = vi.fn();
     render(
       <I18nProvider preference="zh">
         <CodexCliUpdatePrompt
@@ -62,7 +63,7 @@ describe("CodexCliUpdatePrompt", () => {
           check={check}
           installEnabled
           busy
-          onCancel={vi.fn()}
+          onCancel={onBackground}
           onConfirm={vi.fn()}
         />
       </I18nProvider>,
@@ -72,6 +73,10 @@ describe("CodexCliUpdatePrompt", () => {
       (screen.getByRole("button", { name: "正在更新…" }) as HTMLButtonElement)
         .disabled,
     ).toBe(true);
+    const background = screen.getByRole("button", { name: "后台更新" }) as HTMLButtonElement;
+    expect(background.disabled).toBe(false);
+    fireEvent.click(background);
+    expect(onBackground).toHaveBeenCalledOnce();
   });
 
   it("shows a failed check and offers another check instead of installing", () => {

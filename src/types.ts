@@ -89,6 +89,8 @@ export type ReleaseAssetDownloadProgress = {
   id: string;
   downloadedBytes: number;
   totalBytes?: number | null;
+  phase?: "connecting" | "downloading" | "extracting" | "verifying";
+  route?: "system-proxy" | "environment-proxy" | "direct" | null;
 };
 
 export type WindowsControlProvider = "sbroenne" | "cursortouch" | "custom";

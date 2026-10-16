@@ -39,6 +39,7 @@ import type {
 import { WindowsUiUpdatePrompt } from "@/features/update/components/WindowsUiUpdatePrompt";
 import { CodexSessionSharingStatus } from "./CodexSessionSharingStatus";
 import { SettingsWindowsControlMcp } from "./SettingsWindowsControlMcp";
+import { CodexCliUpdateProgress } from "@/features/update/components/CodexCliUpdateProgress";
 import { SettingsAgentRuntimeSection } from "@/features/agents/components/SettingsAgentRuntimeSection";
 import { formatCodexUpdateMethod, formatUpdateError } from "@/features/update/utils/updatePresentation";
 
@@ -1950,6 +1951,11 @@ export function SettingsCodexSection({
                 </div>
               </div>
               <div className="settings-windows-ui-update-actions">
+                {codexCliUpdater.state.stage === "installing" && codexCliUpdater.showDetails && (
+                  <button type="button" className="ghost settings-button-compact" onClick={codexCliUpdater.showDetails}>
+                    {t("codexUpdate.details")}
+                  </button>
+                )}
                 {codexCliUpdater.state.stage === "available" && codexCliUpdater.installEnabled ? (
                   <button
                     type="button"
@@ -1977,6 +1983,7 @@ export function SettingsCodexSection({
                 )}
               </div>
             </div>
+            {codexCliUpdater.state.stage === "installing" && <CodexCliUpdateProgress state={codexCliUpdater.state} />}
           </div>
           {windowsControlProvider === "sbroenne" && <div className="settings-windows-ui-update">
             <SettingsToggleRow
