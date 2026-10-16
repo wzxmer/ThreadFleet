@@ -21,6 +21,8 @@ import type {
   CodexDoctorResult,
   InstalledManagedCodex,
   InstalledWindowsUi,
+  WindowsControlMcpConfig,
+  SetWindowsControlMcpRequest,
   DictationModelStatus,
   DictationSessionState,
   LocalUsageSnapshot,
@@ -1950,6 +1952,14 @@ export async function getComputerControlStatus(
     workspaceId,
     forceRefresh,
   });
+}
+
+export async function getWindowsControlMcp(): Promise<WindowsControlMcpConfig> {
+  return invoke<WindowsControlMcpConfig>("get_windows_control_mcp");
+}
+
+export async function setWindowsControlMcp(input: SetWindowsControlMcpRequest): Promise<WindowsControlMcpConfig> {
+  return invoke<WindowsControlMcpConfig>("set_windows_control_mcp", { input });
 }
 
 export async function computerControlPreflight(

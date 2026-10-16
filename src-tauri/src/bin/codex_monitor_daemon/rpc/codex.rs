@@ -16,6 +16,32 @@ pub(super) async fn try_handle(
     params: &Value,
 ) -> Option<Result<Value, String>> {
     match method {
+        "get_windows_control_mcp" | "set_windows_control_mcp" => {
+            let settings = state.app_settings.lock().await;
+            let Some(codex_home) = crate::codex::home::resolve_settings_codex_home(&settings)
+            else {
+                return Some(Err("Unable to resolve CODEX_HOME".into()));
+            };
+            let result = if method == "get_windows_control_mcp" {
+                crate::shared::windows_control_mcp_core::get_windows_control_mcp(&codex_home)
+            } else {
+                let input = match parse_input::<
+                    crate::shared::windows_control_mcp_core::SetWindowsControlMcpRequest,
+                >(params)
+                {
+                    Ok(input) => input,
+                    Err(err) => return Some(Err(err)),
+                };
+                crate::shared::windows_control_mcp_core::set_windows_control_mcp(
+                    &codex_home,
+                    &input,
+                )
+            };
+            Some(
+                result
+                    .and_then(|config| serde_json::to_value(config).map_err(|err| err.to_string())),
+            )
+        }
         "execution_binding_register" => {
             let input = match parse_input::<
                 crate::shared::execution_binding_core::ExecutionBindingRegisterRequest,

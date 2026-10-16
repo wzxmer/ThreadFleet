@@ -35,6 +35,8 @@ import {
   listThreads,
   listSessionSources,
   listMcpServerStatus,
+  getWindowsControlMcp,
+  setWindowsControlMcp,
   readThread,
   readThreadPage,
   getTurnExecutionSummaries,
@@ -110,6 +112,18 @@ import {
   writeAgentMd,
 } from "./tauri";
 import type { TurnExecutionSummary } from "@/types";
+
+describe("Windows control MCP configuration contract", () => {
+  it("uses the same typed request for app and remote provider switching", async () => {
+    const input = { provider: "cursortouch" as const, command: "D:/Tools/windows-mcp.exe", args: ["serve"], revision: "config-v1" };
+    const response = { supported: true, provider: "cursortouch", enabled: true, revision: "config-v2", profiles: {} };
+    vi.mocked(invoke).mockResolvedValue(response);
+    expect(await getWindowsControlMcp()).toBe(response);
+    expect(invoke).toHaveBeenLastCalledWith("get_windows_control_mcp");
+    expect(await setWindowsControlMcp(input)).toBe(response);
+    expect(invoke).toHaveBeenLastCalledWith("set_windows_control_mcp", { input });
+  });
+});
 import {
   armDevSendUserMessageThreadNotFoundOnce,
   clearDevRuntimeFaults,

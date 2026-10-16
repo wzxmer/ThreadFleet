@@ -233,6 +233,7 @@ fn can_retry_after_disconnect(method: &str) -> bool {
             | "apps_list"
             | "collaboration_mode_list"
             | "computer_control_status"
+            | "get_windows_control_mcp"
             | "computer_control_preflight"
             | "check_codex_cli_update"
             | "codex_doctor"

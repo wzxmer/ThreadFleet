@@ -91,6 +91,20 @@ export type ReleaseAssetDownloadProgress = {
   totalBytes?: number | null;
 };
 
+export type WindowsControlProvider = "sbroenne" | "cursortouch" | "custom";
+export type WindowsControlLaunch = { command: string; args: string[] };
+export type WindowsControlMcpConfig = {
+  supported: boolean;
+  provider: WindowsControlProvider;
+  enabled: boolean;
+  revision: string;
+  profiles: Partial<Record<WindowsControlProvider, WindowsControlLaunch>>;
+};
+export type SetWindowsControlMcpRequest = WindowsControlLaunch & {
+  provider: WindowsControlProvider;
+  revision: string;
+};
+
 export type WindowsUiUpdateStatus =
   | "unsupported"
   | "unmanaged"

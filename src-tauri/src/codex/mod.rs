@@ -798,6 +798,45 @@ pub(crate) async fn computer_control_status(
 }
 
 #[tauri::command]
+pub(crate) async fn get_windows_control_mcp(
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<Value, String> {
+    if remote_backend::is_remote_mode(&*state).await {
+        return remote_backend::call_remote(&*state, app, "get_windows_control_mcp", json!({}))
+            .await;
+    }
+    let settings = state.app_settings.lock().await;
+    let codex_home =
+        home::resolve_settings_codex_home(&settings).ok_or("Unable to resolve CODEX_HOME")?;
+    let config = crate::shared::windows_control_mcp_core::get_windows_control_mcp(&codex_home)?;
+    serde_json::to_value(config).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub(crate) async fn set_windows_control_mcp(
+    input: crate::shared::windows_control_mcp_core::SetWindowsControlMcpRequest,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<Value, String> {
+    if remote_backend::is_remote_mode(&*state).await {
+        return remote_backend::call_remote(
+            &*state,
+            app,
+            "set_windows_control_mcp",
+            json!({ "input": input }),
+        )
+        .await;
+    }
+    let settings = state.app_settings.lock().await;
+    let codex_home =
+        home::resolve_settings_codex_home(&settings).ok_or("Unable to resolve CODEX_HOME")?;
+    let config =
+        crate::shared::windows_control_mcp_core::set_windows_control_mcp(&codex_home, &input)?;
+    serde_json::to_value(config).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
 pub(crate) async fn computer_control_preflight(
     workspace_id: String,
     task: String,

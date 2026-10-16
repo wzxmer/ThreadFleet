@@ -16,6 +16,7 @@ import type {
   ComputerControlAvailability,
   ComputerControlCapabilitySnapshot,
   ModelOption,
+  WindowsControlProvider,
 } from "@/types";
 import {
   SettingsSection,
@@ -37,6 +38,7 @@ import type {
 } from "../SettingsView";
 import { WindowsUiUpdatePrompt } from "@/features/update/components/WindowsUiUpdatePrompt";
 import { CodexSessionSharingStatus } from "./CodexSessionSharingStatus";
+import { SettingsWindowsControlMcp } from "./SettingsWindowsControlMcp";
 import { SettingsAgentRuntimeSection } from "@/features/agents/components/SettingsAgentRuntimeSection";
 import { formatCodexUpdateMethod, formatUpdateError } from "@/features/update/utils/updatePresentation";
 
@@ -430,6 +432,7 @@ export function SettingsCodexSection({
   const [providerSettingError, setProviderSettingError] = useState<string | null>(null);
   const [editingKeyProfileId, setEditingKeyProfileId] = useState<string | null>(null);
   const [windowsUiUpdateConfirmOpen, setWindowsUiUpdateConfirmOpen] = useState(false);
+  const [windowsControlProvider, setWindowsControlProvider] = useState<WindowsControlProvider>("sbroenne");
   const keyProfiles = appSettings.codexKeyProfiles ?? [];
   const selectedExecutionProfileId =
     profileIdFromSelection(appSettings.executionCredentialSelection) ??
@@ -1784,6 +1787,17 @@ export function SettingsCodexSection({
           <code>codex mcp login &lt;server&gt;</code>.
         </div>
         <div className="settings-computer-control">
+          <SettingsWindowsControlMcp
+            sourceKey={JSON.stringify([appSettings.codexHome, appSettings.backendMode, appSettings.activeRemoteBackendId, appSettings.remoteBackendHost])}
+            configEditorBusy={globalConfigRefreshDisabled || !globalConfigSaveDisabled}
+            onProvider={setWindowsControlProvider}
+            onSaved={() => {
+              onRefreshGlobalConfig();
+              onRefreshComputerControlStatus();
+              onRefreshMcpStatus();
+              void windowsUiUpdater.checkForUpdates();
+            }}
+          />
           <div className="settings-computer-control-header">
             <div className="settings-computer-control-heading">
               <div className="settings-field-label">
@@ -1964,7 +1978,7 @@ export function SettingsCodexSection({
               </div>
             </div>
           </div>
-          <div className="settings-windows-ui-update">
+          {windowsControlProvider === "sbroenne" && <div className="settings-windows-ui-update">
             <SettingsToggleRow
               className="settings-computer-control-toggle"
               title={t("settings.codex.windowsUiAutoCheck")}
@@ -2070,7 +2084,7 @@ export function SettingsCodexSection({
                 )}
               </div>
             </div>
-          </div>
+          </div>}
         </div>
         <div className="settings-field-actions">
           <button

@@ -314,6 +314,8 @@ pub fn run() {
             codex::list_threads,
             codex::list_mcp_server_status,
             codex::computer_control_status,
+            codex::get_windows_control_mcp,
+            codex::set_windows_control_mcp,
             codex::computer_control_preflight,
             codex::archive_thread,
             codex::compact_thread,

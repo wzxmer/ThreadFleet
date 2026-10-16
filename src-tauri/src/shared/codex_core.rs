@@ -1756,11 +1756,13 @@ pub(crate) async fn computer_control_status_core(
         .as_ref()
         .and_then(|value| serde_json::from_value(value.clone()).ok());
 
+    let windows_identity =
+        crate::shared::windows_control_mcp_core::expected_runtime_identity(config_result.as_ref(), mcp.as_ref());
     let windows_ui = normalize_mcp_server_capability_with_identity(
         mcp.as_ref(),
         mcp_result.is_none(),
         WINDOWS_UI_SERVER_NAME,
-        Some("sbroenne.windows-mcp"),
+        windows_identity,
     );
     let node_repl = normalize_mcp_server_capability_with_identity(
         mcp.as_ref(),

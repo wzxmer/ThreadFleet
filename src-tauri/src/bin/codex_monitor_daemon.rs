@@ -2970,6 +2970,44 @@ mod tests {
     }
 
     #[test]
+    fn rpc_windows_control_uses_execution_host_config_and_rejects_stale_input() {
+        run_async_test(async {
+            let tmp = make_temp_dir("rpc-windows-control");
+            let home = tmp.join("codex-home");
+            std::fs::create_dir_all(&home).unwrap();
+            std::fs::write(home.join("config.toml"), "model='keep'\n").unwrap();
+            let state = test_state(&tmp);
+            state.app_settings.lock().await.codex_home = Some(home.to_string_lossy().into_owned());
+            let config = rpc::handle_rpc_request(
+                &state, "get_windows_control_mcp", json!({}), "daemon-test".into(),
+            ).await.unwrap();
+            assert_eq!(config["supported"], cfg!(target_os = "windows"));
+            let params = json!({"input": {
+                "provider": "cursortouch", "command": "windows-mcp.exe",
+                "args": ["serve"], "revision": config["revision"]
+            }});
+            let saved = rpc::handle_rpc_request(
+                &state, "set_windows_control_mcp", params.clone(), "daemon-test".into(),
+            ).await;
+            if cfg!(target_os = "windows") {
+                assert_eq!(saved.unwrap()["provider"], "cursortouch");
+                let error = rpc::handle_rpc_request(
+                    &state, "set_windows_control_mcp", params, "daemon-test".into(),
+                ).await.unwrap_err();
+                assert!(error.contains("changed"));
+                assert!(std::fs::read_to_string(home.join("config.toml")).unwrap().contains("model='keep'"));
+            } else {
+                assert!(saved.unwrap_err().contains("Windows execution host"));
+            }
+            let error = rpc::handle_rpc_request(
+                &state, "set_windows_control_mcp", json!({}), "daemon-test".into(),
+            ).await.unwrap_err();
+            assert!(error.contains("input"));
+            let _ = std::fs::remove_dir_all(tmp);
+        });
+    }
+
+    #[test]
     fn rpc_add_clone_uses_workspace_core_validation() {
         run_async_test(async {
             let tmp = make_temp_dir("rpc-add-clone");
