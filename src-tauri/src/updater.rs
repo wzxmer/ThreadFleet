@@ -18,8 +18,9 @@ use crate::shared::windows_ui_update_core::{
     configure_windows_ui, inspect_windows_ui_installation, load_windows_ui_installation_snapshot,
     normalize_windows_ui_version, parse_windows_ui_version_output, resolve_windows_ui_release,
     validate_windows_ui_mcp_probe, validate_windows_ui_release_confirmation,
-    windows_ui_executable_path, windows_ui_install_dir, windows_ui_install_root, GithubRelease,
-    InstalledWindowsUi, ResolvedWindowsUiRelease, WindowsUiInstallationKind, WindowsUiReleaseInfo,
+    windows_ui_executable_path, windows_ui_install_dir, windows_ui_install_root,
+    windows_ui_update_check_result, GithubRelease,
+    InstalledWindowsUi, ResolvedWindowsUiRelease, WindowsUiInstallationKind,
     WindowsUiUpdateCheckResult, WindowsUiUpdateStatus, WINDOWS_UI_EXECUTABLE_NAME,
     WINDOWS_UI_MAX_ARCHIVE_ENTRIES, WINDOWS_UI_MAX_EXTRACTED_BYTES,
     WINDOWS_UI_MCP_PROTOCOL_VERSION, WINDOWS_UI_RELEASE_API, WINDOWS_UI_RELEASE_TAG_API_PREFIX,
@@ -74,7 +75,9 @@ pub async fn check_windows_ui_update(
     let codex_home = crate::codex::home::resolve_settings_codex_home(&settings)
         .ok_or_else(|| "Unable to resolve CODEX_HOME for windows-ui updates.".to_string())?;
     let installation = inspect_windows_ui_installation(&codex_home)?;
-    if installation.kind == WindowsUiInstallationKind::Unmanaged {
+    if installation.kind == WindowsUiInstallationKind::Unmanaged
+        || (installation.kind == WindowsUiInstallationKind::Patched && !installation.executable_exists)
+    {
         return Ok(WindowsUiUpdateCheckResult {
             status: WindowsUiUpdateStatus::Unmanaged,
             installed: installation.executable_exists,
@@ -103,29 +106,11 @@ pub async fn check_windows_ui_update(
         None
     };
     let latest = fetch_windows_ui_release(WINDOWS_UI_RELEASE_API).await?;
-    let update_available = verified_version
-        .as_ref()
-        .map(|current| latest.version > *current)
-        .unwrap_or(true);
-
-    Ok(WindowsUiUpdateCheckResult {
-        status: if update_available {
-            WindowsUiUpdateStatus::Available
-        } else {
-            WindowsUiUpdateStatus::UpToDate
-        },
-        installed: verified_version.is_some(),
-        managed: true,
-        current_version: verified_version.map(|version| version.to_string()),
-        release: Some(WindowsUiReleaseInfo::from(&latest)),
-        reason_code: if installation.kind == WindowsUiInstallationKind::Managed
-            && !installation.executable_exists
-        {
-            Some("missingExecutable".to_string())
-        } else {
-            None
-        },
-    })
+    Ok(windows_ui_update_check_result(
+        &installation,
+        verified_version,
+        &latest,
+    ))
 }
 
 #[tauri::command]
@@ -150,7 +135,10 @@ pub async fn install_windows_ui_update(
     let codex_home = crate::codex::home::resolve_settings_codex_home(&settings)
         .ok_or_else(|| "Unable to resolve CODEX_HOME for windows-ui updates.".to_string())?;
     let (config_snapshot, installation) = load_windows_ui_installation_snapshot(&codex_home)?;
-    if installation.kind == WindowsUiInstallationKind::Unmanaged {
+    if matches!(
+        installation.kind,
+        WindowsUiInstallationKind::Unmanaged | WindowsUiInstallationKind::Patched
+    ) {
         return Err(
             "Existing windows-ui MCP configuration is not managed by ThreadFleet; refusing to overwrite it."
                 .to_string(),

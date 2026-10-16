@@ -126,7 +126,7 @@ export function UpdateToast({
     );
   }
 
-  if (state.stage === "idle" || state.stage === "upToDate") {
+  if (state.stage === "idle" || state.stage === "checking" || state.stage === "upToDate") {
     return additionalToast ? <ToastViewport className="update-toasts" role="region" ariaLive="polite">{additionalToast}</ToastViewport> : null;
   }
 
@@ -148,9 +148,6 @@ export function UpdateToast({
             <div className="update-toast-version">v{state.version}</div>
           ) : null}
         </ToastHeader>
-        {state.stage === "checking" && (
-          <ToastBody className="update-toast-body">{t("update.checking")}</ToastBody>
-        )}
         {state.stage === "available" && (
           <>
             <ToastBody className="update-toast-body">

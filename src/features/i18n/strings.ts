@@ -1234,6 +1234,8 @@ export const I18N_STRINGS = {
     "settings.codex.windowsUiAutoCheckHelp":
       "启动时仅检查新版本；下载和安装前仍需你的确认。",
     "settings.codex.windowsUiUpdateTitle": "windows-ui MCP",
+    "windowsUiUpdate.toastTitle": "电脑操控 MCP 更新",
+    "settings.codex.windowsUiUpdatePatched": "当前使用本地修补版。更新前需核对并保留输入修复，请先查看新版。",
     "settings.codex.windowsUiUpdateIdle": "尚未检查更新。",
     "settings.codex.windowsUiUpdateChecking": "正在检查...",
     "settings.codex.windowsUiUpdateRemoteUnsupported":
@@ -3181,6 +3183,8 @@ export const I18N_STRINGS = {
     "settings.codex.windowsUiAutoCheckHelp":
       "Only checks at startup. Downloading and installation still require your confirmation.",
     "settings.codex.windowsUiUpdateTitle": "windows-ui MCP",
+    "windowsUiUpdate.toastTitle": "Computer control MCP update",
+    "settings.codex.windowsUiUpdatePatched": "A local patched version is installed. Review the new release and preserve the input fixes before upgrading.",
     "settings.codex.windowsUiUpdateIdle": "Updates have not been checked yet.",
     "settings.codex.windowsUiUpdateChecking": "Checking...",
     "settings.codex.windowsUiUpdateRemoteUnsupported":

@@ -89,6 +89,23 @@ describe("useCodexCliUpdater", () => {
     expect(updateMock).not.toHaveBeenCalled();
   });
 
+  it("keeps startup checks nonmodal when automatic installation is unavailable", async () => {
+    vi.stubEnv("DEV", false);
+    const { result } = renderHook(() => useCodexCliUpdater({ codexBin: null, installEnabled: false }));
+    await waitFor(() => expect(result.current.state.stage).toBe("available"));
+    expect(result.current.noticeVisible).toBe(true);
+    expect(result.current.promptOpen).toBe(false);
+    expect(updateMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps a latest CLI check silent", async () => {
+    checkMock.mockResolvedValue({ ...availableCheck, status: "upToDate" });
+    const { result } = renderHook(() => useCodexCliUpdater({ autoCheckOnMount: false, codexBin: "codex" }));
+    await act(async () => { await result.current.checkAndUpdate(); });
+    expect(result.current.noticeVisible).toBe(false);
+    expect(result.current.promptOpen).toBe(false);
+  });
+
   it("updates the current npm installation in place", async () => {
     const onUpdated = vi.fn();
     const { result } = renderHook(() =>

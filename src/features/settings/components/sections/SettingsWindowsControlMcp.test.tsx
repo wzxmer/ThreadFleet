@@ -39,7 +39,7 @@ describe("SettingsWindowsControlMcp", () => {
     fireEvent.click(screen.getByRole("button", { name: "应用 MCP 选择" }));
     await waitFor(() => expect(onSaved).toHaveBeenCalledOnce());
     expect(setWindowsControlMcp).toHaveBeenCalledWith({ provider: "cursortouch", command: config.profiles.cursortouch!.command, args: ["serve"], revision: "v1" });
-    expect(onProvider).toHaveBeenLastCalledWith("cursortouch");
+    await waitFor(() => expect(onProvider).toHaveBeenLastCalledWith("cursortouch"));
     expect(screen.getByRole("status").textContent).toContain("重新连接");
   });
 

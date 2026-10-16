@@ -2062,8 +2062,11 @@ export function SettingsCodexSection({
                                       }`}
                 </div>
               </div>
+              {windowsUiUpdater.state.check?.reasonCode === "localPatchRequiresReview" ? (
+                <div className="settings-help">{t("settings.codex.windowsUiUpdatePatched")}</div>
+              ) : null}
               <div className="settings-windows-ui-update-actions">
-                {windowsUiUpdater.state.stage === "available" ? (
+                {windowsUiUpdater.state.stage === "available" && windowsUiUpdater.state.check?.managed ? (
                   <button
                     type="button"
                     className="primary settings-button-compact"

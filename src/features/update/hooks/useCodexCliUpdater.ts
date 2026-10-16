@@ -98,7 +98,8 @@ export function useCodexCliUpdater({
         checkRef.current = result;
         const stage = stageForCheck(result);
         setState({ stage, check: result });
-        setPromptOpen(openPrompt);
+        setNoticeVisible(stage === "available");
+        setPromptOpen(openPrompt && stage !== "upToDate");
         return result;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -110,6 +111,7 @@ export function useCodexCliUpdater({
           payload: message,
         });
         checkRef.current = null;
+        setNoticeVisible(false);
         setState({
           stage: "error",
           error: message,
@@ -207,7 +209,6 @@ export function useCodexCliUpdater({
   );
 
   const checkAndUpdate = useCallback(async () => {
-    setNoticeVisible(true);
     if (activeUpdateIdRef.current) return undefined;
     const result = await checkForUpdates({ openPrompt: false });
     if (result?.status === "available" && installEnabled) {
@@ -229,7 +230,6 @@ export function useCodexCliUpdater({
       if (updated) return updated;
       throw new Error(t("settings.codex.codexCliUpdateFailed"));
     }
-    setNoticeVisible(true);
     if (check?.status === "upToDate") {
       return {
         ok: true,
@@ -265,7 +265,7 @@ export function useCodexCliUpdater({
   }, []);
 
   useEffect(() => {
-    if (!noticeVisible || (state.stage !== "updated" && state.stage !== "upToDate")) return;
+    if (!noticeVisible || state.stage !== "updated") return;
     const timer = window.setTimeout(() => setNoticeVisible(false), 6000);
     return () => window.clearTimeout(timer);
   }, [noticeVisible, state.stage]);
@@ -297,12 +297,10 @@ export function useCodexCliUpdater({
     const shouldAutoInstall = autoInstallOnMount && installEnabled;
     void (async () => {
       const result = await checkForUpdates({
-        openPrompt: !shouldAutoInstall,
+        openPrompt: false,
       });
       if (result?.status === "available" && shouldAutoInstall) {
         await startInstall();
-      } else if (!result && shouldAutoInstall) {
-        setNoticeVisible(true);
       }
     })();
   }, [
@@ -317,7 +315,7 @@ export function useCodexCliUpdater({
   return {
     state,
     promptOpen,
-    noticeVisible,
+    noticeVisible: noticeVisible && ["available", "installing", "updated", "error"].includes(state.stage),
     showDetails,
     hideNotice,
     checkForUpdates,

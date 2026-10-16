@@ -124,6 +124,7 @@ pub(crate) struct InstalledWindowsUi {
 pub(crate) enum WindowsUiInstallationKind {
     Missing,
     Managed,
+    Patched,
     Unmanaged,
 }
 
@@ -153,6 +154,51 @@ pub(crate) fn normalize_windows_ui_version(raw: &str) -> Result<Version, String>
         return Err("windows-ui updater accepts stable SemVer releases only.".to_string());
     }
     Ok(version)
+}
+
+fn installed_windows_ui_version(raw: &str) -> Result<Version, String> {
+    let version = Version::parse(raw)
+        .map_err(|error| format!("Invalid installed windows-ui version: {error}"))?;
+    let known_patch = version
+        .pre
+        .as_str()
+        .strip_prefix("tf-focusfix.")
+        .is_some_and(|revision| revision.parse::<u64>().is_ok_and(|value| value > 0));
+    if !version.build.is_empty() || (!version.pre.is_empty() && !known_patch) {
+        return Err("Unsupported installed windows-ui version.".to_string());
+    }
+    Ok(version)
+}
+
+pub(crate) fn windows_ui_update_check_result(
+    installation: &WindowsUiInstallation,
+    current: Option<Version>,
+    latest: &ResolvedWindowsUiRelease,
+) -> WindowsUiUpdateCheckResult {
+    let update_available = current.as_ref().is_none_or(|version| {
+        latest.version > Version::new(version.major, version.minor, version.patch)
+    });
+    let patched = installation.kind == WindowsUiInstallationKind::Patched;
+    WindowsUiUpdateCheckResult {
+        status: if update_available {
+            WindowsUiUpdateStatus::Available
+        } else {
+            WindowsUiUpdateStatus::UpToDate
+        },
+        installed: current.is_some(),
+        managed: !patched,
+        current_version: current.map(|version| version.to_string()),
+        release: Some(WindowsUiReleaseInfo::from(latest)),
+        reason_code: if patched {
+            Some("localPatchRequiresReview".to_string())
+        } else if installation.kind == WindowsUiInstallationKind::Managed
+            && !installation.executable_exists
+        {
+            Some("missingExecutable".to_string())
+        } else {
+            None
+        },
+    }
 }
 
 pub(crate) fn expected_windows_ui_asset_name(version: &Version, arch: &str) -> String {
@@ -339,12 +385,16 @@ fn inspect_windows_ui_installation_document(
         return Ok(unmanaged_installation(None));
     };
     let executable_path = PathBuf::from(command);
-    let Some(version) = managed_version_from_command(codex_home, &executable_path) else {
+    let Some(version) = known_version_from_command(codex_home, &executable_path) else {
         return Ok(unmanaged_installation(Some(executable_path)));
     };
     let executable_exists = executable_path.is_file();
     Ok(WindowsUiInstallation {
-        kind: WindowsUiInstallationKind::Managed,
+        kind: if version.pre.is_empty() {
+            WindowsUiInstallationKind::Managed
+        } else {
+            WindowsUiInstallationKind::Patched
+        },
         version: Some(version),
         executable_path: Some(executable_path),
         executable_exists,
@@ -370,7 +420,7 @@ fn unmanaged_installation(executable_path: Option<PathBuf>) -> WindowsUiInstalla
     }
 }
 
-fn managed_version_from_command(codex_home: &Path, command: &Path) -> Option<Version> {
+fn known_version_from_command(codex_home: &Path, command: &Path) -> Option<Version> {
     if !command.is_absolute() {
         return None;
     }
@@ -386,7 +436,7 @@ fn managed_version_from_command(codex_home: &Path, command: &Path) -> Option<Ver
     if executable_name != WINDOWS_UI_EXECUTABLE_NAME {
         return None;
     }
-    let version = normalize_windows_ui_version(version_raw).ok()?;
+    let version = installed_windows_ui_version(version_raw).ok()?;
     if version.to_string() != version_raw {
         return None;
     }
@@ -405,7 +455,10 @@ pub(crate) fn configure_windows_ui(
     }
 
     let existing = inspect_windows_ui_installation_document(codex_home, &snapshot.document)?;
-    if existing.kind == WindowsUiInstallationKind::Unmanaged {
+    if matches!(
+        existing.kind,
+        WindowsUiInstallationKind::Unmanaged | WindowsUiInstallationKind::Patched
+    ) {
         return Err(
             "Existing windows-ui MCP configuration is not managed by ThreadFleet; refusing to overwrite it."
                 .to_string(),
@@ -440,7 +493,7 @@ pub(crate) fn parse_windows_ui_version_output(output: &str) -> Result<Version, S
         .lines()
         .find_map(|line| line.trim().strip_prefix(&prefix))
         .ok_or_else(|| "windows-ui --version output has an unexpected identity.".to_string())?;
-    normalize_windows_ui_version(raw)
+    installed_windows_ui_version(raw)
 }
 
 pub(crate) fn validate_windows_ui_mcp_probe(
@@ -471,7 +524,7 @@ pub(crate) fn validate_windows_ui_mcp_probe(
         .get("version")
         .and_then(Value::as_str)
         .ok_or_else(|| "windows-ui MCP server version is missing.".to_string())?;
-    if normalize_windows_ui_version(reported_version)? != *expected_version {
+    if installed_windows_ui_version(reported_version)? != *expected_version {
         return Err("windows-ui MCP server version does not match the release.".to_string());
     }
     let missing_tools = WINDOWS_UI_ENABLED_TOOLS
@@ -525,6 +578,63 @@ mod tests {
         let root = std::env::temp_dir().join(format!("threadfleet-{prefix}-{nonce}"));
         fs::create_dir_all(&root).expect("create temp CODEX_HOME");
         root
+    }
+
+    #[test]
+    fn patched_installation_checks_official_versions_without_allowing_overwrite() {
+        let codex_home = temp_codex_home("windows-ui-patched");
+        let patched = Version::parse("1.3.28-tf-focusfix.1").unwrap();
+        let executable = windows_ui_executable_path(&codex_home, &patched);
+        fs::create_dir_all(executable.parent().unwrap()).unwrap();
+        fs::write(&executable, b"test").unwrap();
+        let config = format!("[mcp_servers.windows-ui]\ncommand = {:?}\n", executable.to_string_lossy());
+        fs::write(codex_home.join("config.toml"), &config).unwrap();
+        let (snapshot, installation) = load_windows_ui_installation_snapshot(&codex_home).unwrap();
+        assert_eq!(installation.kind, WindowsUiInstallationKind::Patched);
+        let digest = format!("sha256:{}", "a".repeat(64));
+        for (latest, expected) in [("1.3.28", WindowsUiUpdateStatus::UpToDate), ("1.3.29", WindowsUiUpdateStatus::Available)] {
+            let release = resolve_windows_ui_release(release(latest, "x64", Some(&digest)), "x86_64").unwrap();
+            let result = windows_ui_update_check_result(&installation, Some(patched.clone()), &release);
+            assert_eq!(result.status, expected);
+            assert!(!result.managed);
+            assert_eq!(result.current_version.as_deref(), Some("1.3.28-tf-focusfix.1"));
+            assert_eq!(result.reason_code.as_deref(), Some("localPatchRequiresReview"));
+        }
+        let stable = Version::parse("1.3.29").unwrap();
+        let target = windows_ui_executable_path(&codex_home, &stable);
+        fs::create_dir_all(target.parent().unwrap()).unwrap();
+        fs::write(&target, b"test").unwrap();
+        assert!(configure_windows_ui(&codex_home, &target, &stable, &snapshot).unwrap_err().contains("refusing to overwrite"));
+        assert_eq!(fs::read_to_string(codex_home.join("config.toml")).unwrap(), config);
+        fs::remove_dir_all(codex_home).unwrap();
+    }
+
+    #[test]
+    fn only_known_local_patch_versions_are_recognized() {
+        let codex_home = temp_codex_home("windows-ui-version-paths");
+        for raw in ["1.3.28-tf-focusfix.1", "1.3.28"] {
+            let version = Version::parse(raw).unwrap();
+            assert_eq!(known_version_from_command(&codex_home, &windows_ui_executable_path(&codex_home, &version)), Some(version));
+        }
+        for raw in ["1.3.28-tf-focusfix.0", "1.3.28-tf-focusfix.1.extra", "1.3.28-rc.1", "1.3.28+local"] {
+            let path = windows_ui_install_root(&codex_home).join(raw).join(WINDOWS_UI_EXECUTABLE_NAME);
+            assert!(known_version_from_command(&codex_home, &path).is_none(), "{raw}");
+        }
+        assert!(known_version_from_command(&codex_home, &codex_home.join("external/1.3.28-tf-focusfix.1").join(WINDOWS_UI_EXECUTABLE_NAME)).is_none());
+        assert!(normalize_windows_ui_version("1.3.28-tf-focusfix.1").is_err());
+        fs::remove_dir_all(codex_home).unwrap();
+    }
+
+    #[test]
+    fn patched_mcp_identity_must_match_the_installed_version() {
+        let version = parse_windows_ui_version_output("sbroenne.windows-mcp version 1.3.28-tf-focusfix.1\n").unwrap();
+        let tools = WINDOWS_UI_ENABLED_TOOLS.iter().map(|tool| tool.to_string()).collect();
+        let response = json!({"result": {
+            "protocolVersion": WINDOWS_UI_MCP_PROTOCOL_VERSION,
+            "serverInfo": {"name": WINDOWS_UI_SERVER_INFO_NAME, "version": "1.3.28-tf-focusfix.1"}
+        }});
+        validate_windows_ui_mcp_probe(&response, &tools, &version).unwrap();
+        assert!(validate_windows_ui_mcp_probe(&response, &tools, &Version::parse("1.3.28").unwrap()).is_err());
     }
 
     #[test]

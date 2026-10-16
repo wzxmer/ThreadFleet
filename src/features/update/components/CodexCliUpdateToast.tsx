@@ -8,12 +8,11 @@ type Props = { state: CodexCliUpdaterState; onDetails: () => void; onDismiss: ()
 
 export function CodexCliUpdateToast({ state, onDetails, onDismiss, onRetry }: Props) {
   const { t } = useI18n();
-  if (state.stage === "idle") return null;
+  if (["idle", "checking", "upToDate", "unsupported", "notInstalled"].includes(state.stage)) return null;
   const message = state.stage === "installing" ? t("codexUpdate.backgroundDescription")
     : state.stage === "checking" ? t("settings.codex.codexCliUpdateChecking")
     : state.stage === "error" ? formatUpdateError(state.error ?? "", t)
     : state.stage === "updated" ? t("codexUpdate.backgroundUpdated")
-    : state.stage === "upToDate" ? t("settings.codex.codexCliUpdateLatest")
     : state.stage === "unsupported" ? t("settings.codex.codexCliUpdateUnsupported")
     : state.stage === "notInstalled" ? t("settings.codex.missing") : t("codexUpdate.title");
   return (

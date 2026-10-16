@@ -204,8 +204,6 @@
   .update-toasts {
     top: auto;
     bottom: 96px;
-    left: 50%;
-    transform: translateX(-50%);
   }
 
   .update-dialog-card {

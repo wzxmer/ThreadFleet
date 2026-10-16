@@ -1578,6 +1578,16 @@ describe("SettingsView Codex section", () => {
     expect(screen.queryByRole("dialog", { name: "安装 windows-ui 更新？" })).toBeNull();
   });
 
+  it("explains patched MCP review without offering to overwrite it", () => {
+    renderCodexSection({ windowsUiUpdater: { state: { stage: "available", check: {
+      status: "available", installed: true, managed: false, currentVersion: "1.3.28-tf-focusfix.1",
+      release: { version: "1.3.29", releaseUrl: "https://github.com/sbroenne/mcp-windows/releases/tag/v1.3.29", assetSize: 100, assetSha256: "a".repeat(64) },
+      reasonCode: "localPatchRequiresReview",
+    } } } });
+    expect(screen.getByText("当前使用本地修补版。更新前需核对并保留输入修复，请先查看新版。")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "安装更新" })).toBeNull();
+  });
+
   it("updates review mode in codex section", async () => {
     cleanup();
     const onUpdateAppSettings = vi.fn().mockResolvedValue(undefined);

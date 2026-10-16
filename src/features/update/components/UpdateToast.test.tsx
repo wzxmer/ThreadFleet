@@ -12,6 +12,7 @@ import {
 } from "@services/tauri";
 import { UpdateToast } from "./UpdateToast";
 import { CodexCliUpdateToast } from "./CodexCliUpdateToast";
+import { WindowsUiUpdateToast } from "./WindowsUiUpdateToast";
 
 vi.mock("@tauri-apps/plugin-opener", () => ({
   openUrl: vi.fn(),
@@ -33,6 +34,46 @@ function renderUpdateToast(element: ReactElement) {
 }
 
 describe("UpdateToast", () => {
+  const mcpCheck = {
+    status: "available" as const, installed: true, managed: true, currentVersion: "1.3.28",
+    release: { version: "1.3.29", releaseUrl: "https://github.com/sbroenne/mcp-windows/releases/tag/v1.3.29", assetSize: 100, assetSha256: "a".repeat(64) }, reasonCode: null,
+  };
+
+  it.each(["checking", "upToDate"] as const)("hides %s results for all three updaters", (stage) => {
+    renderUpdateToast(<>
+      <UpdateToast state={{ stage }} onUpdate={vi.fn()} onDismiss={vi.fn()} />
+      <CodexCliUpdateToast state={{ stage }} onDetails={vi.fn()} onDismiss={vi.fn()} onRetry={vi.fn()} />
+      <WindowsUiUpdateToast state={{ stage }} onInstall={vi.fn()} onDismiss={vi.fn()} />
+    </>);
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByRole("region")).toBeNull();
+  });
+
+  it("stacks all three available updates in one viewport and confirms MCP installation", () => {
+    const install = vi.fn();
+    renderUpdateToast(<UpdateToast state={{ stage: "available", version: "0.8.0" }} onUpdate={vi.fn()} onDismiss={vi.fn()}
+      additionalToast={<>
+        <CodexCliUpdateToast state={{ stage: "available" }} onDetails={vi.fn()} onDismiss={vi.fn()} onRetry={vi.fn()} />
+        <WindowsUiUpdateToast state={{ stage: "available", check: mcpCheck }} onInstall={install} onDismiss={vi.fn()} />
+      </>} />);
+    expect(screen.getAllByRole("region")).toHaveLength(1);
+    expect(screen.getAllByRole("status")).toHaveLength(3);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Install update" }));
+    expect(install).not.toHaveBeenCalled();
+    const dialog = screen.getByRole("dialog", { name: "Install windows-ui update?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Download and install" }));
+    expect(install).toHaveBeenCalledOnce();
+  });
+
+  it("offers release review for a patched MCP without an install action", () => {
+    renderUpdateToast(<WindowsUiUpdateToast state={{ stage: "available", check: { ...mcpCheck, managed: false, reasonCode: "localPatchRequiresReview" } }} onInstall={vi.fn()} onDismiss={vi.fn()} />);
+    expect(screen.getByText(/local patched version/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Install update" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "View on GitHub" }));
+    expect(openUrlMock).toHaveBeenCalledWith(mcpCheck.release.releaseUrl);
+  });
+
   it("stacks CLI progress with the app update in one nonmodal viewport", () => {
     const onDetails = vi.fn();
     const onDismissCli = vi.fn();

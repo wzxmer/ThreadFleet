@@ -58,12 +58,13 @@ export function useWindowsUiUpdater({
   onDebug,
 }: UseWindowsUiUpdaterOptions) {
   const [state, setState] = useState<WindowsUiUpdaterState>({ stage: "idle" });
+  const [noticeVisible, setNoticeVisible] = useState(false);
   const checkRef = useRef<WindowsUiUpdateCheckResult | null>(null);
   const activeDownloadIdRef = useRef<string | null>(null);
   const hasAttemptedAutoCheckRef = useRef(false);
 
   const checkForUpdates = useCallback(async () => {
-    if (!enabled || !isTauri()) {
+    if (!enabled || !isTauri() || activeDownloadIdRef.current) {
       return undefined;
     }
     setState((current) => ({
@@ -73,6 +74,7 @@ export function useWindowsUiUpdater({
     try {
       const result = await checkWindowsUiUpdate();
       checkRef.current = result;
+      setNoticeVisible(result.status === "available");
       setState({
         stage: stageForCheck(result),
         check: result,
@@ -80,6 +82,8 @@ export function useWindowsUiUpdater({
       });
       return result;
     } catch (error) {
+      checkRef.current = null;
+      setNoticeVisible(false);
       const message = error instanceof Error ? error.message : String(error);
       onDebug?.({
         id: `${Date.now()}-client-windows-ui-update-check-error`,
@@ -102,12 +106,13 @@ export function useWindowsUiUpdater({
       return undefined;
     }
     const check = checkRef.current;
-    const release = check?.status === "available" ? check.release : null;
+    const release = check?.status === "available" && check.managed ? check.release : null;
     if (!release) {
       return undefined;
     }
     const requestId = `windows-ui-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     activeDownloadIdRef.current = requestId;
+    setNoticeVisible(true);
     setState({
       stage: "downloading",
       check: check ?? undefined,
@@ -158,6 +163,8 @@ export function useWindowsUiUpdater({
     checkRef.current = null;
     setState({ stage: "idle" });
   }, []);
+
+  const hideNotice = useCallback(() => setNoticeVisible(false), []);
 
   useEffect(() => {
     if (!enabled || !isTauri()) {
@@ -211,6 +218,8 @@ export function useWindowsUiUpdater({
 
   return {
     state,
+    noticeVisible: noticeVisible && ["available", "downloading", "installing", "restartRequired", "error"].includes(state.stage),
+    hideNotice,
     checkForUpdates,
     startInstall,
     dismiss,

@@ -64,15 +64,12 @@ describe("useUpdaterController", () => {
     mocks.useAgentSystemNotifications.mockClear();
   });
 
-  it("shows a three-second system notification after a manual up-to-date check", async () => {
+  it("keeps an up-to-date menu check silent", async () => {
     renderHook(() =>
       useUpdaterController({
         notificationSoundsEnabled: false,
         systemNotificationsEnabled: true,
         subagentSystemNotificationsEnabled: true,
-        updateNotificationTitle: "Update",
-        upToDateNotificationBody: "Already on the latest version.",
-        updateAvailableNotificationBody: "A new version is available.",
         onDebug: vi.fn(),
         successSoundUrl: "success.mp3",
         errorSoundUrl: "error.mp3",
@@ -89,23 +86,17 @@ describe("useUpdaterController", () => {
     });
 
     await waitFor(() => {
-      expect(mocks.sendTransientNotification).toHaveBeenCalledWith(
-        "Update",
-        "Already on the latest version.",
-        3000,
-      );
+      expect(mocks.checkForUpdates).toHaveBeenCalledOnce();
     });
+    expect(mocks.sendTransientNotification).not.toHaveBeenCalled();
   });
 
-  it("shows the same notification when settings invoke the exposed check action", async () => {
+  it("keeps an up-to-date settings check silent", async () => {
     const { result } = renderHook(() =>
       useUpdaterController({
         notificationSoundsEnabled: false,
         systemNotificationsEnabled: true,
         subagentSystemNotificationsEnabled: true,
-        updateNotificationTitle: "Update",
-        upToDateNotificationBody: "Already on the latest version.",
-        updateAvailableNotificationBody: "A new version is available.",
         onDebug: vi.fn(),
         successSoundUrl: "success.mp3",
         errorSoundUrl: "error.mp3",
@@ -116,11 +107,8 @@ describe("useUpdaterController", () => {
       await result.current.checkForUpdates();
     });
 
-    expect(mocks.sendTransientNotification).toHaveBeenCalledWith(
-      "Update",
-      "Already on the latest version.",
-      3000,
-    );
+    expect(mocks.checkForUpdates).toHaveBeenCalledOnce();
+    expect(mocks.sendTransientNotification).not.toHaveBeenCalled();
   });
 
   it("checks Codex CLI updates from the menu and settings actions", async () => {
@@ -130,9 +118,6 @@ describe("useUpdaterController", () => {
         notificationSoundsEnabled: false,
         systemNotificationsEnabled: false,
         subagentSystemNotificationsEnabled: true,
-        updateNotificationTitle: "Update",
-        upToDateNotificationBody: "Already on the latest version.",
-        updateAvailableNotificationBody: "A new version is available.",
         onCheckCodexCliUpdates: checkCodexCliUpdates,
         onDebug: vi.fn(),
         successSoundUrl: "success.mp3",
@@ -153,7 +138,7 @@ describe("useUpdaterController", () => {
     });
   });
 
-  it("shows a system notification when an update is found in the background", async () => {
+  it("leaves available updates in the app toast without duplicating system notifications", () => {
     mocks.updaterState = { stage: "available", version: "1.2.3" };
 
     renderHook(() =>
@@ -161,24 +146,12 @@ describe("useUpdaterController", () => {
         notificationSoundsEnabled: false,
         systemNotificationsEnabled: true,
         subagentSystemNotificationsEnabled: true,
-        updateNotificationTitle: "Update",
-        upToDateNotificationBody: "Already on the latest version.",
-        updateAvailableNotificationBody: "A new version is available.",
         onDebug: vi.fn(),
         successSoundUrl: "success.mp3",
         errorSoundUrl: "error.mp3",
       }),
     );
 
-    await waitFor(() => {
-      expect(mocks.sendNotification).toHaveBeenCalledWith(
-        "Update",
-        "A new version is available.",
-        {
-          autoCancel: true,
-          extra: { kind: "update_available", version: "1.2.3" },
-        },
-      );
-    });
+    expect(mocks.sendNotification).not.toHaveBeenCalled();
   });
 });

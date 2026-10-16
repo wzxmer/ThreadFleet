@@ -133,6 +133,7 @@ import { useManagedCodexActivation } from "@app/hooks/useManagedCodexActivation"
 import { CodexInstallPrompt } from "@/features/codex/components/CodexInstallPrompt";
 import { CodexCliUpdatePrompt } from "@/features/update/components/CodexCliUpdatePrompt";
 import { CodexCliUpdateToast } from "@/features/update/components/CodexCliUpdateToast";
+import { WindowsUiUpdateToast } from "@/features/update/components/WindowsUiUpdateToast";
 import { useCodexCliUpdater } from "@/features/update/hooks/useCodexCliUpdater";
 import type { ManagedSession, ManagedSessionDerivationPreview } from "@/types";
 import { SessionDerivationPrompt } from "@/features/sessions/components/SessionDerivationPrompt";
@@ -1191,9 +1192,6 @@ export default function MainApp() {
       appSettings.subagentSystemNotificationsEnabled,
     isSubagentThread,
     getWorkspaceName,
-    updateNotificationTitle: t("update.title"),
-    upToDateNotificationBody: t("update.latest"),
-    updateAvailableNotificationBody: t("update.available"),
     onDebug: addDebugEntry,
     successSoundUrl,
     errorSoundUrl,
@@ -2816,9 +2814,18 @@ export default function MainApp() {
     showMobilePollingFetchStatus,
     appModalsSettingsOpen: appModalsProps.settingsOpen,
     onCloseSettings: appModalsProps.onCloseSettings,
-    cliUpdateToast: codexCliUpdater.noticeVisible && !codexCliUpdater.promptOpen ? (
-      <CodexCliUpdateToast state={codexCliUpdater.state} onDetails={codexCliUpdater.showDetails}
-        onDismiss={codexCliUpdater.hideNotice} onRetry={() => void codexCliUpdater.checkAndUpdate()} />
+    cliUpdateToast: (codexCliUpdater.noticeVisible && !codexCliUpdater.promptOpen) || windowsUiUpdater.noticeVisible ? (
+      <>
+        {codexCliUpdater.noticeVisible && !codexCliUpdater.promptOpen ? (
+          <CodexCliUpdateToast state={codexCliUpdater.state} onDetails={codexCliUpdater.showDetails}
+            onDismiss={codexCliUpdater.hideNotice} onRetry={() => void codexCliUpdater.checkAndUpdate()} />
+        ) : null}
+        {windowsUiUpdater.noticeVisible ? (
+          <WindowsUiUpdateToast state={windowsUiUpdater.state}
+            onDismiss={windowsUiUpdater.hideNotice}
+            onInstall={() => void windowsUiUpdater.startInstall()} />
+        ) : null}
+      </>
     ) : null,
     appModalsAboutOpen:
       appModalsProps.settingsOpen && appModalsProps.settingsSection === 'about',
