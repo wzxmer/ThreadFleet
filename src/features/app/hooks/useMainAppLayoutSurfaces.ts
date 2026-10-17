@@ -745,6 +745,9 @@ function buildPrimarySurface({
         Boolean(
           activeThreadId && pendingTurnStartByThread[activeThreadId],
         ),
+      isPendingTurnStart:
+        !composerWorkspaceState.isProcessing &&
+        Boolean(activeThreadId && pendingTurnStartByThread[activeThreadId]),
       activityState: modelActivityState,
       isLoadingMessages: activeThreadId
         ? (threadResumeLoadingById[activeThreadId] ?? false) ||

@@ -4207,6 +4207,85 @@ describe("Messages", () => {
     expect(screen.getByText("First turn result.")).toBeTruthy();
   });
 
+  it.each([false, true])(
+    "keeps completed process details folded before a pending send inserts its user message (auto-collapse: %s)",
+    (defaultToolGroupsCollapsed) => {
+      const items: ConversationItem[] = [
+        {
+          id: "pending-old-user",
+          kind: "message",
+          role: "user",
+          text: "Previous request",
+          turnId: "old-turn",
+        },
+        {
+          id: "pending-old-process",
+          kind: "message",
+          role: "assistant",
+          phase: "commentary",
+          text: "Previously hidden process",
+          turnId: "old-turn",
+        },
+        {
+          id: "pending-old-tool",
+          kind: "tool",
+          toolType: "commandExecution",
+          title: "Command: inspect",
+          detail: "",
+          output: "",
+          status: "completed",
+          turnId: "old-turn",
+        },
+        {
+          id: "pending-old-result",
+          kind: "message",
+          role: "assistant",
+          phase: "commentary",
+          text: "Previous result",
+          turnId: "old-turn",
+        },
+      ];
+      const props = {
+        threadId: "thread-before-pending-anchor",
+        workspaceId: "ws-1",
+        openTargets: [],
+        selectedOpenAppId: "",
+        defaultToolGroupsCollapsed,
+      };
+      const { container, rerender } = render(
+        <Messages {...props} items={items} isThinking={false} />,
+      );
+      expect(screen.queryByText("Previously hidden process")).toBeNull();
+
+      rerender(<Messages {...props} items={items} isThinking isPendingTurnStart />);
+      expect(container.querySelector(".working")).toBeTruthy();
+      expect(screen.queryByText("Previously hidden process")).toBeNull();
+      expect(screen.getByRole("button", { name: "展开过程消息" })).toBeTruthy();
+
+      const nextItems: ConversationItem[] = [
+        ...items,
+        {
+          id: "pending-new-user",
+          kind: "message",
+          role: "user",
+          text: "Next request",
+        },
+      ];
+      rerender(<Messages {...props} items={nextItems} isThinking isPendingTurnStart />);
+      expect(screen.queryByText("Previously hidden process")).toBeNull();
+
+      rerender(
+        <Messages {...props} items={nextItems} isThinking activeTurnId="new-turn" />,
+      );
+      expect(screen.queryByText("Previously hidden process")).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "展开过程消息" }));
+      expect(screen.getByText("Previously hidden process")).toBeTruthy();
+
+      rerender(<Messages {...props} items={nextItems} isThinking isPendingTurnStart />);
+      expect(screen.getByText("Previously hidden process")).toBeTruthy();
+    },
+  );
+
   it("keeps a completed commentary-only turn collapsed while the next turn is pending start", async () => {
     const items: ConversationItem[] = [
       {

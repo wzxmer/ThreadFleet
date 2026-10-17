@@ -398,6 +398,8 @@ type MessagesProps = {
   threadId: string | null;
   workspaceId?: string | null;
   isThinking: boolean;
+  /** Preparation shows activity without treating completed history as running. */
+  isPendingTurnStart?: boolean;
   activityState?: ModelActivityState;
   isLoadingMessages?: boolean;
   historyLoadFailed?: boolean;
@@ -510,6 +512,7 @@ export const Messages = memo(function Messages({
   threadId,
   workspaceId = null,
   isThinking,
+  isPendingTurnStart = false,
   activityState = "idle",
   isLoadingMessages = false,
   historyLoadFailed = false,
@@ -712,6 +715,7 @@ export const Messages = memo(function Messages({
     threadId,
     activeTurnId,
     isThinking,
+    isPendingTurnStart,
     activeUserInputRequestId,
     hasVisibleUserInputRequest,
     defaultToolGroupsCollapsed,

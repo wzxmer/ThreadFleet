@@ -34,6 +34,7 @@ type UseMessagesViewStateArgs = {
   threadId: string | null;
   activeTurnId?: string | null;
   isThinking: boolean;
+  isPendingTurnStart?: boolean;
   activeUserInputRequestId: string | number | null;
   hasVisibleUserInputRequest: boolean;
   defaultToolGroupsCollapsed?: boolean;
@@ -48,6 +49,7 @@ export function useMessagesViewState({
   threadId,
   activeTurnId = null,
   isThinking,
+  isPendingTurnStart = false,
   activeUserInputRequestId,
   hasVisibleUserInputRequest,
   defaultToolGroupsCollapsed = false,
@@ -56,6 +58,7 @@ export function useMessagesViewState({
   onPlanSubmitChanges,
   onQuoteMessage,
 }: UseMessagesViewStateArgs) {
+  const isTurnRunning = isThinking && !isPendingTurnStart;
   const displayItems = useMemo(
     () => dedupeSubagentCheckpointItems(items),
     [items],
@@ -516,7 +519,7 @@ export function useMessagesViewState({
       const isKnownInactiveTurn =
         activeTurnId !== null && turnId !== activeTurnId;
       const canUseTerminalCommentaryFallback =
-        (!isThinking || isKnownInactiveTurn || hasFollowingTurnBoundary) &&
+        (!isTurnRunning || isKnownInactiveTurn || hasFollowingTurnBoundary) &&
         turnId !== null &&
         finalAssistantIndex < 0 &&
         fallbackAssistantEntry?.kind === "item" &&
@@ -657,7 +660,7 @@ export function useMessagesViewState({
     });
     flushTurn();
     return result;
-  }, [activeTurnId, baseGroupedItems, isThinking]);
+  }, [activeTurnId, baseGroupedItems, isTurnRunning]);
 
   const revealGroupedItem = useCallback(
     (itemId: string) => {
@@ -857,7 +860,7 @@ export function useMessagesViewState({
       itemIds,
     } = finalAssistantCollapseTarget;
     const isCurrentThinkingTurn =
-      isThinking &&
+      isTurnRunning &&
       !hasFollowingTurnBoundary &&
       (activeTurnId === null ||
         finalAssistantTurnId === null ||
@@ -924,7 +927,7 @@ export function useMessagesViewState({
   }, [
     activeTurnId,
     finalAssistantCollapseTarget,
-    isThinking,
+    isTurnRunning,
     threadId,
   ]);
 
