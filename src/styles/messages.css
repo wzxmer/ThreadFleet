@@ -267,6 +267,8 @@
 }
 
 .messages-full {
+  /* Bottom following and history restoration own this container's scroll position. */
+  overflow-anchor: none;
   background: var(--conversation-canvas);
   border-radius: 0;
   padding: 14px var(--main-panel-padding) 22px;
