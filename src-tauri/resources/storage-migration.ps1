@@ -140,11 +140,19 @@ function Snapshot([string]$Root) {
   }
   return ,$result
 }
-function Assert-Same($Left, $Right) {
-  if ($Left.Count -ne $Right.Count) { throw 'Source and destination file counts differ' }
-  foreach ($key in $Left.Keys) {
-    if (-not $Right.ContainsKey($key) -or $Left[$key] -cne $Right[$key]) { throw "Storage verification failed: $key" }
-  }
+function Assert-Same($Left, $Right, [string]$Context = 'backup', [string]$Kind = 'storage') {
+  $missing = @($Left.Keys | Where-Object { -not $Right.ContainsKey($_) } | Sort-Object)
+  $extra = @($Right.Keys | Where-Object { -not $Left.ContainsKey($_) } | Sort-Object)
+  $changed = @($Left.Keys | Where-Object { $Right.ContainsKey($_) -and $Left[$_] -cne $Right[$_] } | Sort-Object)
+  if (-not ($missing.Count + $extra.Count + $changed.Count)) { return }
+  # Keep diagnostics outside every migrating source. Persist only bounded path
+  # differences, never file contents or credentials from the snapshots.
+  $reportPath = Join-Path $ControlDir ($script:plan.id + '-' + $Kind + '-' + $Context + '.difference.json')
+  $report = @{ context = $Context; kind = $Kind; expectedCount = $Left.Count; actualCount = $Right.Count;
+    missingCount = $missing.Count; extraCount = $extra.Count; changedCount = $changed.Count;
+    missing = @($missing | Select-Object -First 20); extra = @($extra | Select-Object -First 20); changed = @($changed | Select-Object -First 20) }
+  [IO.File]::WriteAllText($reportPath, ($report | ConvertTo-Json -Depth 4), [Text.UTF8Encoding]::new($false))
+  throw "Storage verification failed ($Context, $Kind): expected $($Left.Count), actual $($Right.Count); missing $($missing.Count), extra $($extra.Count), changed $($changed.Count). Details: $reportPath"
 }
 function Verification-Path($Entry) { Join-Path $ControlDir ($script:plan.id + '-' + $Entry.kind + '.verification.json') }
 function Remove-Tree([string]$Path) {
@@ -366,6 +374,7 @@ try {
   Save-Plan
   foreach ($entry in $plan.locations) {
     Check-Cancel
+    if ((Busy-Processes).Count) { throw 'A client started during copying; close ThreadFleet and Agent clients before retrying. Original paths remain active' }
     if (-not (Exists $entry.alias)) { New-Item -ItemType Directory -Path $entry.alias -Force | Out-Null }
     if ($entry.wasLink) { Assert-Junction $entry.alias $entry.source }
     elseif (Is-Link $entry.alias) { throw "Source changed into a link: $($entry.alias)" }
@@ -380,8 +389,8 @@ try {
     # Preserve the source's access boundary even when the new parent has wider
     # inheritable permissions. Robocopy can reset the root inheritance flag.
     Set-Acl -LiteralPath $entry.destination -AclObject $permissions
-    Assert-Same $before (Snapshot $entry.source)
-    Assert-Same $before (Snapshot $entry.destination)
+    Assert-Same $before (Snapshot $entry.source) 'source-stability' $entry.kind
+    Assert-Same $before (Snapshot $entry.destination) 'destination-copy' $entry.kind
     [IO.File]::WriteAllText((Verification-Path $entry), ($before | ConvertTo-Json -Depth 4), [Text.UTF8Encoding]::new($false))
   }
   Check-Cancel
