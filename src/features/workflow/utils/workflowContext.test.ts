@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { WorkflowHostPreflightPreview, WorkflowPreflightPreview } from "@/types";
+import type {
+  WorkflowHostPreflightPreview,
+  WorkflowPreflightPreview,
+} from "@/types";
 import { compileWorkflowAdditionalContext } from "./workflowContext";
 
 const preview: WorkflowPreflightPreview = {
@@ -17,16 +20,18 @@ const preview: WorkflowPreflightPreview = {
     file_access: "supported",
     shell_access: "supported",
   },
-  triggeredSkills: [{
-    skillName: "diagnose",
-    scope: "public",
-    reason: "keyword",
-    matchedValue: "排查",
-    compatibility: "compatible",
-    missingCapabilities: [],
-    fallback: null,
-    priority: 10,
-  }],
+  triggeredSkills: [
+    {
+      skillName: "diagnose",
+      scope: "public",
+      reason: "explicit",
+      matchedValue: "$diagnose",
+      compatibility: "compatible",
+      missingCapabilities: [],
+      fallback: null,
+      priority: 10,
+    },
+  ],
   triggerSummary: "diagnose",
   fallbackSummary: "",
   validationSuggestions: [],
@@ -56,13 +61,15 @@ const hostPreview: WorkflowHostPreflightPreview = {
   completionPlan: {
     required: true,
     phase: "focused_validation",
-    validations: [{
-      id: "validation-1",
-      kind: "command",
-      instruction: "npm run typecheck",
-      status: "pending",
-      sourceAreas: ["project-baseline"],
-    }],
+    validations: [
+      {
+        id: "validation-1",
+        kind: "command",
+        instruction: "npm run typecheck",
+        status: "pending",
+        sourceAreas: ["project-baseline"],
+      },
+    ],
     changedDiffReview: {
       required: true,
       status: "pending",
@@ -80,27 +87,35 @@ const hostPreview: WorkflowHostPreflightPreview = {
 describe("workflow context compilation", () => {
   it("combines host, public skill, and explicit agent context for OpenCode", () => {
     const result = compileWorkflowAdditionalContext({
-      task: "排查失败 @reviewer",
+      task: "$diagnose 排查失败 @reviewer",
       preview,
       hostPreview,
-      skills: [{
-        name: "diagnose",
-        path: "/skills/diagnose",
-        instructions: "diagnose systematically",
-      }],
-      agents: [{
-        name: "reviewer",
-        path: "/agents/reviewer.toml",
-        developerInstructions: "review the changed diff",
-      }],
+      skills: [
+        {
+          name: "diagnose",
+          path: "/skills/diagnose",
+          instructions: "diagnose systematically",
+        },
+      ],
+      agents: [
+        {
+          name: "reviewer",
+          path: "/agents/reviewer.toml",
+          developerInstructions: "review the changed diff",
+        },
+      ],
     });
 
     expect(result.additionalContext["cm.rule.0"]?.value).toBe("project rules");
     expect(result.additionalContext["cm.workflow.completion"]?.value).toContain(
       "review changed diff",
     );
-    expect(result.additionalContext["cm.skill.0"]?.value).toContain("diagnose systematically");
-    expect(result.additionalContext["cm.agent.0"]?.value).toContain("review the changed diff");
+    expect(result.additionalContext["cm.skill.0"]?.value).toContain(
+      "diagnose systematically",
+    );
+    expect(result.additionalContext["cm.agent.0"]?.value).toContain(
+      "review the changed diff",
+    );
     expect(result.includedSkills).toEqual(["diagnose"]);
     expect(result.selectedAgents).toEqual(["reviewer"]);
   });
@@ -111,17 +126,23 @@ describe("workflow context compilation", () => {
       preview,
       hostPreview: null,
       skills: [],
-      agents: [{
-        name: "vision-agent",
-        path: "/agents/vision.toml",
-        capabilityRequirements: ["vision"],
-        fallback: "use DOM assertions",
-        developerInstructions: "inspect pixels",
-      }],
+      agents: [
+        {
+          name: "vision-agent",
+          path: "/agents/vision.toml",
+          capabilityRequirements: ["vision"],
+          fallback: "use DOM assertions",
+          developerInstructions: "inspect pixels",
+        },
+      ],
     });
 
-    expect(result.additionalContext["cm.agent.0"]?.value).toContain("use DOM assertions");
-    expect(result.additionalContext["cm.agent.0"]?.value).not.toContain("inspect pixels");
+    expect(result.additionalContext["cm.agent.0"]?.value).toContain(
+      "use DOM assertions",
+    );
+    expect(result.additionalContext["cm.agent.0"]?.value).not.toContain(
+      "inspect pixels",
+    );
   });
 
   it("deduplicates host content and reports the omitted source", () => {
@@ -131,7 +152,11 @@ describe("workflow context compilation", () => {
       hostPreview: {
         ...hostPreview,
         contextFragments: [
-          { sourceId: "cm.rule.0", kind: "application", value: "same rules\r\n" },
+          {
+            sourceId: "cm.rule.0",
+            kind: "application",
+            value: "same rules\r\n",
+          },
           { sourceId: "cm.rule.1", kind: "application", value: "same rules\n" },
         ],
       },
@@ -158,11 +183,13 @@ describe("workflow context compilation", () => {
           value: String(index).repeat(12_000),
         })),
       },
-      skills: [{
-        name: "diagnose",
-        path: "/skills/diagnose",
-        instructions: "diagnose systematically",
-      }],
+      skills: [
+        {
+          name: "diagnose",
+          path: "/skills/diagnose",
+          instructions: "diagnose systematically",
+        },
+      ],
       agents: [],
     });
 
@@ -172,5 +199,69 @@ describe("workflow context compilation", () => {
       sourceId: "cm.skill.0",
       reason: "budget",
     });
+  });
+
+  it("does not inject a skill body from keyword discovery alone", () => {
+    const result = compileWorkflowAdditionalContext({
+      task: "排查故障",
+      preview: {
+        ...preview,
+        triggeredSkills: [{ ...preview.triggeredSkills[0], reason: "keyword" }],
+      },
+      hostPreview: null,
+      skills: [
+        {
+          name: "diagnose",
+          path: "/skills/diagnose",
+          instructions: "run full diagnosis",
+        },
+      ],
+      agents: [],
+    });
+
+    expect(result.includedSkills).toEqual([]);
+    expect(result.additionalContext).toEqual({});
+  });
+
+  it.each(["Explain backend workflows", "@reviewer-extra", "不要用 @reviewer"])(
+    "does not select agents from description overlap, partial names, or negation: %s",
+    (task) => {
+      const result = compileWorkflowAdditionalContext({
+        task,
+        preview: { ...preview, triggeredSkills: [] },
+        hostPreview: null,
+        skills: [],
+        agents: [
+          {
+            name: "reviewer",
+            path: "/agents/reviewer.toml",
+            description: "Review backend workflows",
+            developerInstructions: "review the changed diff",
+          },
+        ],
+      });
+
+      expect(result.selectedAgents).toEqual([]);
+      expect(result.additionalContext).toEqual({});
+    },
+  );
+
+  it("preserves user-configured agent trigger phrases", () => {
+    const result = compileWorkflowAdditionalContext({
+      task: "执行发布审计",
+      preview: { ...preview, triggeredSkills: [] },
+      hostPreview: null,
+      skills: [],
+      agents: [
+        {
+          name: "reviewer",
+          path: "/agents/reviewer.toml",
+          triggerKeywords: ["发布审计"],
+          developerInstructions: "review the changed diff",
+        },
+      ],
+    });
+
+    expect(result.selectedAgents).toEqual(["reviewer"]);
   });
 });

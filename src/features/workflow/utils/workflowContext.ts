@@ -7,6 +7,7 @@ import type {
   WorkflowHostPreflightPreview,
   WorkflowPreflightPreview,
 } from "@/types";
+import { matchesWorkflowTrigger } from "./workflowTriggerMatching";
 
 const MAX_CONTEXT_CHARS = 48_000;
 const MAX_ENTRY_CHARS = 12_000;
@@ -20,7 +21,9 @@ function modelMatches(patterns: string[] | undefined, model: string | null) {
     return false;
   }
   const normalizedModel = normalized(model);
-  return patterns.some((pattern) => normalizedModel.includes(normalized(pattern)));
+  return patterns.some((pattern) =>
+    normalizedModel.includes(normalized(pattern)),
+  );
 }
 
 function agentApplies(
@@ -40,19 +43,17 @@ function agentApplies(
 function agentTriggered(task: string, agent: WorkflowAgentOption) {
   const name = normalized(agent.name);
   if (
-    task.includes(`$${name}`) ||
-    task.includes(`@${name}`) ||
-    task.includes(`/agent ${name}`)
+    matchesWorkflowTrigger(task, `$${name}`) ||
+    matchesWorkflowTrigger(task, `@${name}`) ||
+    matchesWorkflowTrigger(task, `/agent ${name}`)
   ) {
     return true;
   }
-  if (agent.triggerKeywords?.some((keyword) => task.includes(normalized(keyword)))) {
-    return true;
-  }
-  const descriptionTerms = normalized(agent.description ?? "")
-    .split(/[^\p{L}\p{N}_-]+/u)
-    .filter((term) => term.length >= 5);
-  return descriptionTerms.some((term) => task.includes(term));
+  return (
+    agent.triggerKeywords?.some((keyword) =>
+      matchesWorkflowTrigger(task, keyword),
+    ) ?? false
+  );
 }
 
 function missingCapabilities(
@@ -90,7 +91,9 @@ function addContextEntry(
     return false;
   }
   const remaining = MAX_CONTEXT_CHARS - usedChars.value;
-  const limited = [...value].slice(0, Math.min(remaining, MAX_ENTRY_CHARS)).join("");
+  const limited = [...value]
+    .slice(0, Math.min(remaining, MAX_ENTRY_CHARS))
+    .join("");
   if (!limited) {
     compilation.omittedSources.push({ sourceId, reason: "budget" });
     return false;
@@ -143,13 +146,19 @@ export function compileWorkflowAdditionalContext({
     skills.map((skill) => [normalized(skill.name), skill] as const),
   );
   preview.triggeredSkills.forEach((trigger, index) => {
+    // Keyword matches are discovery hints. Only explicit requests inject a skill body.
+    if (trigger.reason !== "explicit") {
+      return;
+    }
     const skill = skillsByName.get(normalized(trigger.skillName));
     if (!skill || trigger.compatibility === "blocked") {
       compilation.blockedSkills.push(trigger.skillName);
       return;
     }
     const instructions =
-      trigger.compatibility === "fallback" ? trigger.fallback : skill.instructions;
+      trigger.compatibility === "fallback"
+        ? trigger.fallback
+        : skill.instructions;
     if (!instructions) {
       compilation.blockedSkills.push(trigger.skillName);
       return;
@@ -173,8 +182,12 @@ export function compileWorkflowAdditionalContext({
     .filter((agent) => agentTriggered(normalizedTask, agent))
     .sort((left, right) => (right.priority ?? 0) - (left.priority ?? 0))
     .forEach((agent, index) => {
-      const missing = missingCapabilities(agent.capabilityRequirements, preview);
-      const instructions = missing.length > 0 ? agent.fallback : agent.developerInstructions;
+      const missing = missingCapabilities(
+        agent.capabilityRequirements,
+        preview,
+      );
+      const instructions =
+        missing.length > 0 ? agent.fallback : agent.developerInstructions;
       if (!instructions) {
         return;
       }

@@ -138,15 +138,52 @@ describe("workflow preflight", () => {
   it("does not trigger diagnose for generic BUG discussion or description overlap", () => {
     const preview = buildWorkflowPreflightPreview({
       task: "讨论当前 BUG 和知识机制是否需要优化",
-      skills: [{
-        name: "diagnose",
-        path: "/skills/diagnose",
-        description: "Diagnose hard bugs and performance regressions",
-      }],
+      skills: [
+        {
+          name: "diagnose",
+          path: "/skills/diagnose",
+          description: "Diagnose hard bugs and performance regressions",
+        },
+      ],
       providerKind: "openai",
       model: "gpt-5",
     });
 
     expect(preview.triggeredSkills).toEqual([]);
+  });
+
+  it.each([
+    "Tauri 客户端窗口为什么打不开，前端 CSS 有没有问题？",
+    "Explain debugged logs and implementation planner behavior",
+    "不要用 $diagnose，也不需要界面美化",
+    "$diagnose-extra",
+  ])("avoids incidental, negated, or partial skill matches: %s", (task) => {
+    const result = buildWorkflowPreflightPreview({
+      task,
+      skills: [
+        ...publicSkills,
+        { name: "app-ui-design", path: "/skills/app-ui-design" },
+        { name: "frontend-design", path: "/skills/frontend-design" },
+      ],
+      providerKind: "openai",
+      model: "gpt-5",
+    });
+
+    expect(result.triggeredSkills).toEqual([]);
+    expect(result.validationSuggestions).toEqual([]);
+  });
+
+  it("keeps dedicated design phrases as discovery hints", () => {
+    const result = buildWorkflowPreflightPreview({
+      task: "客户端美化",
+      skills: [{ name: "app-ui-design", path: "/skills/app-ui-design" }],
+      providerKind: "openai",
+      model: "gpt-5",
+    });
+
+    expect(result.triggeredSkills[0]).toMatchObject({
+      skillName: "app-ui-design",
+      reason: "keyword",
+    });
   });
 });

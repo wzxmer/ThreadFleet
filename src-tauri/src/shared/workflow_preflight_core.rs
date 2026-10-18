@@ -1002,7 +1002,53 @@ fn analyze_impacts(task: &str) -> Vec<WorkflowImpactItem> {
     impacts
 }
 
+fn scope_validation_candidates(workspace: &Path, impacts: &mut [WorkflowImpactItem]) {
+    // The commands above describe this product. A workspace name or task keyword
+    // is not evidence that another repository owns the same modules or scripts.
+    let package = fs::read(workspace.join("package.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
+    let host_source = workspace.join("src-tauri/src/shared/workflow_preflight_core.rs");
+    let owns_commands = package.as_ref()
+        .and_then(|package| package.get("name"))
+        .and_then(Value::as_str)
+        .is_some_and(|name| matches!(name, "threadfleet" | "codex-monitor"))
+        && host_source.is_file();
+    if !owns_commands {
+        for impact in impacts {
+            impact.validation.clear();
+        }
+    }
+}
+
 fn requires_completion_workflow(task: &str) -> bool {
+    fn strip_request_prefixes(mut clause: &str) -> &str {
+        let prefixes = [
+            "请",
+            "帮我",
+            "帮忙",
+            "麻烦",
+            "现在",
+            "直接",
+            "顺便",
+            "再",
+            "先",
+            "我想",
+            "我要",
+            "需要你",
+            "please ",
+            "can you ",
+            "could you ",
+            "help me ",
+            "then ",
+        ];
+        clause = clause.trim();
+        while let Some(prefix) = prefixes.iter().find(|prefix| clause.starts_with(**prefix)) {
+            clause = clause[prefix.len()..].trim_start();
+        }
+        clause
+    }
+
     let task = task.to_lowercase();
     let ascii_terms = [
         "implement",
@@ -1013,50 +1059,83 @@ fn requires_completion_workflow(task: &str) -> bool {
         "remove",
         "delete",
         "refactor",
-        "debug",
-        "diagnose",
         "fix",
-        "fixed",
-        "fixing",
-        "review",
-        "check",
         "test",
+        "run",
         "build",
         "release",
     ];
-    let ascii_match = task
-        .split(|character: char| {
-            !character.is_ascii_alphanumeric() && character != '-' && character != '_'
+    let chinese_terms = [
+        "实现",
+        "修改",
+        "更新",
+        "增加",
+        "新增",
+        "添加",
+        "创建",
+        "移除",
+        "删除",
+        "重构",
+        "修复",
+        "测试",
+        "运行",
+        "启动",
+        "构建",
+        "打包",
+        "发布",
+        "执行方案",
+    ];
+    task.split([
+        '，', '。', '；', '！', '？', '\n', ',', ';', '!', '?', ':', '：',
+    ])
+    .any(|clause| {
+        let clause = strip_request_prefixes(clause);
+        if [
+            "不要",
+            "不用",
+            "无需",
+            "不需要",
+            "不必",
+            "别",
+            "do not ",
+            "don't ",
+            "never ",
+            "解释",
+            "讨论",
+            "为什么",
+            "explain ",
+            "why ",
+            "how ",
+        ]
+        .iter()
+        .any(|prefix| clause.starts_with(prefix))
+        {
+            return false;
+        }
+
+        let actions = clause
+            .replace(" and ", ";")
+            .replace(" then ", ";")
+            .replace("并且", ";")
+            .replace("然后", ";")
+            .replace('并', ";");
+        actions.split(';').any(|action| {
+            let action = strip_request_prefixes(action);
+            ascii_terms.iter().any(|term| {
+                action.strip_prefix(term).is_some_and(|rest| {
+                    !rest.starts_with(|character: char| {
+                        character.is_ascii_alphanumeric() || character == '-' || character == '_'
+                    })
+                })
+            }) || chinese_terms.iter().any(|term| {
+                action.strip_prefix(term).is_some_and(|rest| {
+                    !["时", "后", "前", "了", "会", "为什么", "是否", "怎么"]
+                        .iter()
+                        .any(|suffix| rest.starts_with(suffix))
+                })
+            })
         })
-        .filter(|token| !token.is_empty())
-        .any(|token| ascii_terms.contains(&token));
-    ascii_match
-        || contains_any(
-            &task,
-            &[
-                "实现",
-                "修改",
-                "更新",
-                "增加",
-                "新增",
-                "添加",
-                "创建",
-                "移除",
-                "删除",
-                "重构",
-                "排查",
-                "修复",
-                "审查",
-                "检查",
-                "测试",
-                "运行",
-                "启动",
-                "构建",
-                "打包",
-                "发布",
-                "执行方案",
-            ],
-        )
+    })
 }
 
 fn validation_kind(instruction: &str) -> String {
@@ -1116,15 +1195,6 @@ fn build_completion_plan(task: &str, impacts: &[WorkflowImpactItem]) -> Workflow
                 }
             }
         }
-        if !by_instruction
-            .iter()
-            .any(|(instruction, _)| instruction == "npm run typecheck")
-        {
-            by_instruction.push((
-                "npm run typecheck".to_string(),
-                vec!["project-baseline".to_string()],
-            ));
-        }
         validations = by_instruction
             .into_iter()
             .enumerate()
@@ -1178,7 +1248,7 @@ fn completion_context_fragment(
         source_id: "cm.workflow.completion".to_string(),
         kind: "application".to_string(),
         value: format!(
-            "CM completion workflow (host-enforced):\n{validations}\n- Review only the task-owned changed diff after validation.\n- Perform applicable runtime verification before claiming completion.\n- Evaluate durable knowledge; submit only validated candidates through the configured concurrency-safe knowledge tools. Never overwrite a hash conflict.\n- Report incomplete gates explicitly; do not imply completion without evidence."
+            "CM completion workflow (host-enforced for task-owned changes):\n- Select validation from the actual changed diff and the affected project's rules. Read-only, planning, documentation-only, knowledge-only, and external skill/config work do not require product tests merely because the task mentions a keyword.\nCandidate validations (apply only to affected product code):\n{validations}\n- Review only the task-owned changed diff after validation.\n- Perform applicable runtime verification before claiming completion.\n- Evaluate durable knowledge; submit only validated candidates through the configured concurrency-safe knowledge tools. Never overwrite a hash conflict.\n- Report incomplete gates explicitly; do not imply completion without evidence."
         ),
     })
 }
@@ -1393,7 +1463,8 @@ fn build_preview(
         task,
         &mut source_errors,
     );
-    let impacts = analyze_impacts(task);
+    let mut impacts = analyze_impacts(task);
+    scope_validation_candidates(workspace_path, &mut impacts);
     let completion_plan = build_completion_plan(task, &impacts);
     let context_plan = build_context_plan(
         &rules,
@@ -1419,7 +1490,7 @@ fn build_preview(
         .collect::<Vec<_>>()
         .join(", ");
     let mut validation_suggestions = Vec::new();
-    for impact in &impacts {
+    for impact in impacts.iter().filter(|_| completion_plan.required) {
         for validation in &impact.validation {
             if !validation_suggestions.contains(validation) {
                 validation_suggestions.push(validation.clone());
@@ -1858,5 +1929,97 @@ mod tests {
 
         let change = build_completion_plan("增加诊断入口", &analyze_impacts("增加诊断入口"));
         assert!(change.required);
+    }
+
+    #[test]
+    fn completion_plan_does_not_turn_read_only_or_reported_behavior_into_changes() {
+        for task in [
+            "帮我看看为什么好多次会话都会创建可视化报告，以及有哪些没必要的触发",
+            "检查 workflow 技能有哪些没必要的触发",
+            "排查为什么会创建报告，先别修改代码",
+            "不要修改 workflow，只解释方案",
+            "请先不要创建并更新 workflow 报告",
+            "do not create and update workflow reports",
+            "解释为什么会创建并更新 workflow 报告",
+            "review workflow configuration",
+            "check why agents create reports",
+            "explain how to update workflow",
+            "更新时为什么会卡住",
+        ] {
+            let completion = build_completion_plan(task, &analyze_impacts(task));
+            assert!(
+                !completion.required,
+                "unexpected completion workflow: {task}"
+            );
+            assert!(completion.validations.is_empty());
+            assert!(completion_context_fragment(&completion).is_none());
+        }
+    }
+
+    #[test]
+    fn completion_plan_keeps_explicit_change_and_execution_requests() {
+        for task in [
+            "帮我修复 workflow 误触发",
+            "请修改触发规则",
+            "先排查问题，并修复 workflow",
+            "please fix workflow matching",
+            "check the cause and then fix workflow matching",
+            "运行 workflow 测试",
+        ] {
+            let completion = build_completion_plan(task, &analyze_impacts(task));
+            assert!(completion.required, "missing completion workflow: {task}");
+            let fragment = completion_context_fragment(&completion).expect("completion fragment");
+            assert!(fragment.value.contains("actual changed diff"));
+            assert!(fragment.value.contains("Candidate validations"));
+        }
+        let documentation = build_completion_plan("更新维护文档", &[]);
+        assert!(documentation.validations.is_empty());
+    }
+
+    #[test]
+    fn completion_commands_belong_to_the_target_workspace() {
+        let root = temp_root("completion-workspace-scope");
+        let external = root.join("eazyai");
+        fs::create_dir_all(&external).expect("external workspace");
+        let task = "修改模型配置并运行测试";
+        let preview = build_preview(
+            "ThreadFleet",
+            &external,
+            task,
+            "active".to_string(),
+            "codex".to_string(),
+            None,
+            None,
+        );
+        assert!(preview.completion_plan.required);
+        assert!(preview.completion_plan.validations.is_empty());
+        assert!(preview.validation_suggestions.is_empty());
+        assert!(preview.impacts.iter().all(|impact| impact.validation.is_empty()));
+        let context = preview.context_fragments.iter()
+            .find(|fragment| fragment.source_id == "cm.workflow.completion")
+            .expect("generic completion requirements");
+        assert!(!context.value.contains("npm run"));
+        assert!(!context.value.contains("src-tauri"));
+        assert_eq!(preview.completion_plan.changed_diff_review.status, "pending");
+
+        let host = root.join("host");
+        let core = host.join("src-tauri/src/shared/workflow_preflight_core.rs");
+        fs::create_dir_all(core.parent().unwrap()).expect("host source directories");
+        fs::write(&core, "// host source marker").expect("host source");
+        fs::write(host.join("package.json"), r#"{"name":"threadfleet"}"#)
+            .expect("host package");
+        let preview = build_preview(
+            "Renamed workspace", &host, task, "active".to_string(),
+            "codex".to_string(), None, None,
+        );
+        assert!(preview.completion_plan.validations.iter().any(|gate|
+            gate.instruction == "npm run test -- src/features/models"));
+        let readonly = build_preview(
+            "Renamed workspace", &host, "当前配置有没有需要删除的，以及该怎么加强规范",
+            "active".to_string(), "codex".to_string(), None, None,
+        );
+        assert!(!readonly.completion_plan.required);
+        assert!(readonly.validation_suggestions.is_empty());
+        let _ = fs::remove_dir_all(root);
     }
 }

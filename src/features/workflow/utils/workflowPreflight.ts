@@ -7,6 +7,7 @@ import type {
   WorkflowRuntimeMode,
   WorkflowSkillTrigger,
 } from "@/types";
+import { matchesWorkflowTrigger } from "./workflowTriggerMatching";
 
 type BuiltinSkillRule = {
   keywords: string[];
@@ -16,22 +17,53 @@ type BuiltinSkillRule = {
 
 const BUILTIN_SKILL_RULES: Record<string, BuiltinSkillRule> = {
   "app-ui-design": {
-    keywords: ["desktop ui", "tauri", "electron", "桌面", "客户端", "窗口", "界面美化"],
+    keywords: [
+      "desktop ui design",
+      "tauri ui design",
+      "electron ui design",
+      "客户端美化",
+      "桌面软件美化",
+      "打包软件美化",
+      "界面美化",
+    ],
   },
   brainstorming: {
     keywords: ["brainstorm", "方案设计", "架构方案", "思考方案", "讨论方案"],
   },
   "code-review": {
-    keywords: ["code review", "review diff", "审查代码", "检查改动", "复盘检查", "代码审查"],
+    keywords: [
+      "code review",
+      "review diff",
+      "审查代码",
+      "检查改动",
+      "复盘检查",
+      "代码审查",
+    ],
   },
   diagnose: {
     keywords: ["diagnose", "debug", "诊断", "调试", "排查"],
   },
   "frontend-design": {
-    keywords: ["frontend ui", "web ui", "react ui", "vue ui", "网页", "前端", "css"],
+    keywords: [
+      "frontend ui design",
+      "web ui design",
+      "react ui design",
+      "vue ui design",
+      "网页设计",
+      "网页美化",
+      "前端界面设计",
+    ],
   },
   "ui-regression-guardian": {
-    keywords: ["ui regression", "样式回归", "视觉回归", "主题冲突", "hover", "focus", "selected"],
+    keywords: [
+      "ui regression",
+      "样式回归",
+      "视觉回归",
+      "主题冲突",
+      "hover",
+      "focus",
+      "selected",
+    ],
   },
   "visual-qa-loop": {
     keywords: ["visual qa", "截图验证", "视觉验证", "界面测试"],
@@ -39,7 +71,14 @@ const BUILTIN_SKILL_RULES: Record<string, BuiltinSkillRule> = {
     fallback: "Use DOM assertions and request manual screenshot verification.",
   },
   "writing-plans": {
-    keywords: ["implementation plan", "execution plan", "实施方案", "执行方案", "制定方案", "落地方案"],
+    keywords: [
+      "implementation plan",
+      "execution plan",
+      "实施方案",
+      "执行方案",
+      "制定方案",
+      "落地方案",
+    ],
   },
 };
 
@@ -83,13 +122,13 @@ function unique<T>(values: T[]) {
 }
 
 function includesPhrase(task: string, phrase: string) {
-  return task.includes(normalized(phrase));
+  return matchesWorkflowTrigger(task, phrase);
 }
 
 function explicitSkillMatch(task: string, skillName: string) {
   const name = normalized(skillName);
   return [`$${name}`, `/skill ${name}`, `/skills ${name}`].find((value) =>
-    task.includes(value),
+    matchesWorkflowTrigger(task, value),
   );
 }
 
@@ -128,7 +167,9 @@ function skillMatchesScope(
     ...(skill.modelPatterns ?? []),
     ...Object.keys(skill.modelOverrides ?? {}),
   ];
-  return patterns.some((pattern) => normalizedModel.includes(normalized(pattern)));
+  return patterns.some((pattern) =>
+    normalizedModel.includes(normalized(pattern)),
+  );
 }
 
 export function resolveWorkflowCapabilityProfile(
@@ -146,7 +187,9 @@ export function resolveWorkflowCapabilityProfile(
   };
   return {
     ...base,
-    ...(providerKind === "custom" ? {} : KNOWN_PROVIDER_CAPABILITIES[providerKind]),
+    ...(providerKind === "custom"
+      ? {}
+      : KNOWN_PROVIDER_CAPABILITIES[providerKind]),
   };
 }
 
@@ -159,9 +202,10 @@ function resolveTrigger(
     return { reason: "explicit", matchedValue: explicit };
   }
   const builtin = BUILTIN_SKILL_RULES[normalized(skill.name)];
-  const keyword = [...(skill.triggerKeywords ?? []), ...(builtin?.keywords ?? [])].find(
-    (value) => includesPhrase(task, value),
-  );
+  const keyword = [
+    ...(skill.triggerKeywords ?? []),
+    ...(builtin?.keywords ?? []),
+  ].find((value) => includesPhrase(task, value));
   if (keyword) {
     return { reason: "keyword", matchedValue: keyword };
   }
@@ -221,17 +265,6 @@ function buildSkillTrigger({
   };
 }
 
-function validationSuggestions(task: string) {
-  const suggestions = ["npm run typecheck"];
-  if (/\b(test|react|typescript|frontend|ui)\b|测试|前端|界面|组件/u.test(task)) {
-    suggestions.push("npm run test");
-  }
-  if (/\b(rust|tauri|daemon|backend)\b|后端|守护进程/u.test(task)) {
-    suggestions.push("cd src-tauri && cargo check");
-  }
-  return suggestions;
-}
-
 export function buildWorkflowPreflightPreview({
   task,
   skills,
@@ -266,9 +299,12 @@ export function buildWorkflowPreflightPreview({
     }
   });
   const triggeredSkills = [...triggeredByName.values()].sort(
-    (left, right) => right.priority - left.priority || left.skillName.localeCompare(right.skillName),
+    (left, right) =>
+      right.priority - left.priority ||
+      left.skillName.localeCompare(right.skillName),
   );
-  const suggestions = validationSuggestions(normalizedTask);
+  // The host supplies project-specific validation candidates after classifying intent.
+  const suggestions: string[] = [];
   return {
     mode,
     providerKind,

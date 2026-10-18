@@ -394,13 +394,11 @@ describe("useThreadMessaging telemetry", () => {
             kind: "application",
             value: expect.stringContaining("windows_ui"),
           },
-          "cm.skill.0": expect.objectContaining({
-            kind: "application",
-            value: expect.stringContaining("public-check"),
-          }),
         }),
       }),
     );
+    const sentContext = vi.mocked(sendUserMessageService).mock.calls[0]?.[3]?.additionalContext;
+    expect(sentContext).not.toHaveProperty("cm.skill.0");
   });
 
   it("executes one composer submission id only once", async () => {
