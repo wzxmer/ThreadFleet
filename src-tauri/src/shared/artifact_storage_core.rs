@@ -112,6 +112,19 @@ pub(crate) async fn prepare_artifact_turn(
                     directory.display()
                 )
             })?;
+        let temporary = directory.join(".threadfleet-tmp");
+        match tokio::fs::create_dir(&temporary).await {
+            Ok(()) => {
+                tokio::fs::write(
+                    temporary.join(".threadfleet-disposable"),
+                    b"ThreadFleet disposable cache v1",
+                )
+                .await
+                .map_err(|e| e.to_string())?;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error.to_string()),
+        }
     }
     let mut context = match additional_context {
         None | Some(Value::Null) => serde_json::Map::new(),
@@ -138,6 +151,8 @@ pub(crate) fn artifact_instructions(directory: &Path, read_only: bool) -> String
          Store task-generated reports, screenshots, diagnostics, temporary build outputs and backups here; use task subdirectories as needed. \
          Keep product source, required project files and canonical knowledge in their owning locations. \
          Honor explicit user output paths. Reuse dependencies where practical instead of copying node_modules into each task. \
+         Put only reproducible intermediate files in the reserved .threadfleet-tmp subdirectory; files there may be automatically removed after the configured retention period. \
+         Never put reports, attachments, credentials, source, deployment backups or rollback materials in .threadfleet-tmp. \
          Do not move or delete existing artifacts or backups automatically. \
          This path is an output convention, not permission to bypass sandbox or approvals.{}",
         if read_only { " Read-only mode: do not create or write artifacts." } else { "" },
@@ -261,6 +276,16 @@ mod tests {
                 .unwrap();
                 assert_eq!(saved.directory, turn.directory);
                 assert!(saved.directory.is_dir());
+                assert_eq!(
+                    tokio::fs::read_to_string(
+                        saved
+                            .directory
+                            .join(".threadfleet-tmp/.threadfleet-disposable")
+                    )
+                    .await
+                    .unwrap(),
+                    "ThreadFleet disposable cache v1"
+                );
                 let other = prepare_artifact_turn(
                     &AppSettings::default(),
                     &settings_path,
