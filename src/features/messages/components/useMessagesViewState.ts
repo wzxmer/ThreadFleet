@@ -222,10 +222,21 @@ export function useMessagesViewState({
   useLayoutEffect(() => {
     const container = containerRef.current;
     const content = container?.querySelector<HTMLElement>(".messages-inner");
-    if (!container || !content || typeof ResizeObserver === "undefined") {
+    if (!container || !content) {
       return;
     }
-    const observer = new ResizeObserver(() => {
+    const pinLatest = () => {
+      if (!autoScrollRef.current || containerRef.current !== container) {
+        return;
+      }
+      const scrollHeight = container.scrollHeight;
+      if (container.scrollTop + container.clientHeight >= scrollHeight - 1) {
+        return;
+      }
+      container.scrollTop = scrollHeight;
+      setShowScrollToLatest(false);
+    };
+    const schedulePinLatest = () => {
       if (!autoScrollRef.current) {
         return;
       }
@@ -234,16 +245,28 @@ export function useMessagesViewState({
       }
       resizeScrollFrameRef.current = window.requestAnimationFrame(() => {
         resizeScrollFrameRef.current = null;
-        if (!autoScrollRef.current || !containerRef.current) {
-          return;
-        }
-        containerRef.current.scrollTop = containerRef.current.scrollHeight;
-        setShowScrollToLatest(false);
+        pinLatest();
       });
+    };
+    const resizeObserver =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(schedulePinLatest);
+    resizeObserver?.observe(content);
+    resizeObserver?.observe(container);
+
+    // A collapse and expansion can leave the same final size, so no resize is
+    // delivered even though the browser clamped scrollTop during the collapse.
+    // Follow DOM updates before their queued scroll events can cancel the intent.
+    const mutationObserver = new MutationObserver(pinLatest);
+    mutationObserver.observe(content, {
+      childList: true,
+      characterData: true,
+      subtree: true,
     });
-    observer.observe(content);
     return () => {
-      observer.disconnect();
+      resizeObserver?.disconnect();
+      mutationObserver.disconnect();
       if (resizeScrollFrameRef.current !== null) {
         window.cancelAnimationFrame(resizeScrollFrameRef.current);
         resizeScrollFrameRef.current = null;

@@ -5649,6 +5649,130 @@ describe("Messages", () => {
     vi.unstubAllGlobals();
   });
 
+  it("keeps latest pinned when the composer reduces the viewport without changing content", () => {
+    let resizeCallback: ResizeObserverCallback | null = null;
+    const observed = new Set<Element>();
+    vi.stubGlobal(
+      "ResizeObserver",
+      class ResizeObserverMock {
+        constructor(callback: ResizeObserverCallback) {
+          resizeCallback = callback;
+        }
+        observe = (node: Element) => observed.add(node);
+        unobserve = vi.fn();
+        disconnect = vi.fn();
+      },
+    );
+    const requestAnimationFrameSpy = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((callback) => {
+        callback(0);
+        return 1;
+      });
+    try {
+      const { container } = render(
+        <Messages
+          items={[{ id: "latest", kind: "message", role: "assistant", text: "Latest" }]}
+          threadId="viewport-resize"
+          workspaceId="ws-1"
+          isThinking={false}
+          openTargets={[]}
+          selectedOpenAppId=""
+        />,
+      );
+      const scrollNode = container.querySelector(".messages-full") as HTMLDivElement;
+      let clientHeight = 400;
+      let scrollTop = 600;
+      Object.defineProperties(scrollNode, {
+        scrollHeight: { configurable: true, value: 1000 },
+        clientHeight: { configurable: true, get: () => clientHeight },
+        scrollTop: {
+          configurable: true,
+          get: () => scrollTop,
+          set: (value: number) => { scrollTop = Math.min(value, 1000 - clientHeight); },
+        },
+      });
+      fireEvent.scroll(scrollNode);
+      clientHeight = 150;
+      const resizeEntry: ResizeObserverEntry = {
+        target: scrollNode,
+        contentRect: scrollNode.getBoundingClientRect(),
+        borderBoxSize: [],
+        contentBoxSize: [],
+        devicePixelContentBoxSize: [],
+      };
+      if (observed.has(scrollNode)) {
+        act(() => (resizeCallback as ResizeObserverCallback | null)?.(
+          [resizeEntry],
+          {} as ResizeObserver,
+        ));
+      }
+      expect(scrollNode.scrollHeight - scrollNode.scrollTop - scrollNode.clientHeight).toBe(0);
+
+      scrollNode.scrollTop = 100;
+      fireEvent.scroll(scrollNode);
+      clientHeight = 100;
+      act(() => (resizeCallback as ResizeObserverCallback | null)?.(
+        [resizeEntry],
+        {} as ResizeObserver,
+      ));
+      expect(scrollNode.scrollTop).toBe(100);
+    } finally {
+      requestAnimationFrameSpy.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("keeps latest pinned when preceding content shrinks and returns before a resize notification", async () => {
+    const finalItem: ConversationItem = {
+      id: "stable-final", kind: "message", role: "assistant", text: "Latest",
+    };
+    const precedingItem: ConversationItem = {
+      id: "preceding", kind: "message", role: "user", text: "Expanded preceding content",
+    };
+    const props = {
+      threadId: "coalesced-layout", workspaceId: "ws-1", isThinking: false,
+      openTargets: [], selectedOpenAppId: "",
+    };
+    const { container, rerender } = render(
+      <Messages {...props} items={[precedingItem, finalItem]} />,
+    );
+    const scrollNode = container.querySelector(".messages-full") as HTMLDivElement;
+    let scrollHeight = 1000;
+    let scrollTop = 600;
+    Object.defineProperties(scrollNode, {
+      scrollHeight: { configurable: true, get: () => scrollHeight },
+      clientHeight: { configurable: true, value: 400 },
+      scrollTop: {
+        configurable: true,
+        get: () => scrollTop,
+        set: (value: number) => { scrollTop = Math.min(value, scrollHeight - 400); },
+      },
+    });
+    fireEvent.scroll(scrollNode);
+    await act(async () => {
+      scrollHeight = 600;
+      scrollTop = 200;
+      rerender(<Messages {...props} items={[{ ...precedingItem, text: "Collapsed" }, finalItem]} />);
+      fireEvent.scroll(scrollNode);
+    });
+    await act(async () => {
+      scrollHeight = 1000;
+      rerender(<Messages {...props} items={[precedingItem, finalItem]} />);
+    });
+
+    expect(scrollNode.scrollTop).toBe(600);
+    expect(screen.queryByRole("button", { name: I18N_STRINGS.zh["messages.scrollToLatest"] })).toBeNull();
+
+    scrollNode.scrollTop = 50;
+    fireEvent.scroll(scrollNode);
+    await act(async () => {
+      scrollHeight = 1400;
+      rerender(<Messages {...props} items={[{ ...precedingItem, text: "More preceding content" }, finalItem]} />);
+    });
+    expect(scrollNode.scrollTop).toBe(50);
+  });
+
   it("does not reclaim scroll position after the user scrolls away from latest", () => {
     let resizeCallback: ResizeObserverCallback | null = null;
     vi.stubGlobal(
