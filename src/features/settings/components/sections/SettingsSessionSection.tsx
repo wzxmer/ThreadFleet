@@ -18,6 +18,7 @@ import { useSessionCleanupSettings } from "@settings/hooks/useSessionCleanupSett
 import { SessionAutoDeleteEnablePrompt } from "../session/SessionAutoDeleteEnablePrompt";
 import { SessionImmediateCleanupPrompt } from "../session/SessionImmediateCleanupPrompt";
 import { SettingsArtifactStorage } from "./SettingsArtifactStorage";
+import { SettingsDataStorage } from "./SettingsDataStorage";
 
 const AUTO_ARCHIVE_DAY_OPTIONS = [3, 5, 7, 15, 30] as const;
 const AUTO_DELETE_DAY_OPTIONS = [30, 60, 90, 180] as const;
@@ -132,6 +133,7 @@ export function SettingsSessionSection({
       title={t("settings.session.title")}
       subtitle={t("settings.session.subtitle")}
     >
+      <SettingsDataStorage remote={appSettings.backendMode === "remote"} />
       <SettingsArtifactStorage appSettings={appSettings} onUpdateAppSettings={onUpdateAppSettings} />
       <div className="settings-subsection-title">{t("settings.session.lifecycle")}</div>
       <SettingsToggleRow

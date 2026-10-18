@@ -49,6 +49,7 @@ vi.mock("@services/tauri", async () => {
   );
   return {
     ...actual,
+    getStorageStatus: vi.fn(async () => ({ supported: false, plan: null, locations: [], controlPath: "", maintenance: { enabled: false, retentionDays: 30 } })),
     getWindowsControlMcp: vi.fn(async () => ({ supported: true, provider: "sbroenne", enabled: true, revision: "config-v1", profiles: { sbroenne: { command: "Sbroenne.WindowsMcp.exe", args: [] } } })),
     connectWorkspace: vi.fn(),
     getAppBuildType: vi.fn(),

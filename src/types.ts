@@ -903,6 +903,42 @@ export type AgentCliCandidate = {
   error: string | null;
 };
 
+export type StorageLocation = {
+  kind: string;
+  alias: string;
+  source: string;
+  destination: string;
+  backup: string;
+  wasLink: boolean;
+  switched: boolean;
+};
+
+export type StorageStatus = {
+  supported: boolean;
+  controlPath: string;
+  locations: StorageLocation[];
+  maintenance: {
+    enabled: boolean;
+    retentionDays: number;
+    cacheRoots: string[];
+    artifactRoots: string[];
+    lastRun: string | null;
+    removedFiles: number;
+    removedBytes: number;
+    error: string | null;
+    status: string;
+  };
+  plan: {
+    version: number;
+    id: string;
+    root: string;
+    status: string;
+    error: string | null;
+    locations: StorageLocation[];
+    backupsCleaned: boolean;
+  } | null;
+};
+
 export type AppSettings = {
   codexBin: string | null;
   geminiBin?: string | null;

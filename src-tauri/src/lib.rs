@@ -11,6 +11,7 @@ mod autostart;
 mod backend;
 mod codex;
 mod daemon_binary;
+mod data_storage;
 mod dictation;
 mod event_sink;
 mod files;
@@ -91,6 +92,10 @@ fn is_mobile_runtime() -> bool {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    if let Err(error) = data_storage::startup_barrier() {
+        data_storage::show_startup_error(&error);
+        return;
+    }
     #[cfg(target_os = "linux")]
     {
         // Avoid WebKit compositing issues on NVIDIA Linux setups (GBM buffer errors).
@@ -222,6 +227,9 @@ pub fn run() {
             agents::discover_agent_clis,
             agents::agent_runtime_request,
             settings::get_app_settings,
+            data_storage::get_storage_status,
+            data_storage::manage_storage,
+            data_storage::set_storage_maintenance,
             settings::update_app_settings,
             session_manager::list_session_sources,
             session_manager::update_session_source,

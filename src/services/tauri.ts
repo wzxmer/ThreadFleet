@@ -7,6 +7,7 @@ import {
 } from "@tauri-apps/plugin-notification";
 import type {
   AppSettings,
+  StorageStatus,
   AgentEngine,
   AgentCliCandidate,
   ArchiveManagedSessionsRequest,
@@ -87,6 +88,7 @@ import type {
   ComputerControlRouteDecision,
   WindowsUiUpdateCheckResult,
 } from "../types";
+
 import {
   buildThirdPartyUsageUrl,
   normalizeThirdPartyUsagePayload,
@@ -106,6 +108,23 @@ import type {
   GitLogResponse,
   ReviewTarget,
 } from "../types";
+
+export function getStorageStatus(): Promise<StorageStatus> {
+  return invoke("get_storage_status");
+}
+
+export function manageStorage(action: "schedule" | "cancel" | "retry" | "cleanup", root?: string): Promise<void> {
+  return invoke("manage_storage", { action, root: root ?? null });
+}
+
+export function setStorageMaintenance(enabled: boolean, retentionDays: number): Promise<void> {
+  return invoke("set_storage_maintenance", { enabled, retentionDays });
+}
+
+export async function pickStorageDirectory(title: string): Promise<string | null> {
+  const selected = await open({ directory: true, multiple: false, title });
+  return typeof selected === "string" ? selected : null;
+}
 
 function isMissingTauriInvokeError(error: unknown) {
   return (
