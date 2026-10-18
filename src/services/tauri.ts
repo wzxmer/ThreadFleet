@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
+import { openPath } from "@tauri-apps/plugin-opener";
 import {
   removeActive,
   type Options as NotificationOptions,
@@ -730,6 +731,10 @@ export async function renameWorktreeUpstream(
 
 export async function applyWorktreeChanges(workspaceId: string): Promise<void> {
   return invoke("apply_worktree_changes", { workspaceId });
+}
+
+export async function openLocalFile(path: string): Promise<void> {
+  await openPath(path);
 }
 
 export async function openWorkspaceIn(

@@ -5,19 +5,16 @@ import { LogicalPosition } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import * as Sentry from "@sentry/react";
-import { openWorkspaceIn } from "../../../services/tauri";
-import { pushErrorToast } from "../../../services/toasts";
-import type { OpenAppTarget } from "../../../types";
+import { openLocalFile, openWorkspaceIn } from "@services/tauri";
+import { pushErrorToast } from "@services/toasts";
+import { useI18n } from "@/features/i18n/I18nProvider";
+import type { OpenAppTarget } from "@/types";
 import {
   type ParsedFileLocation,
   formatFileLocation,
   toFileUrl,
-} from "../../../utils/fileLinks";
-import {
-  isAbsolutePath,
-  joinWorkspacePath,
-  revealInFileManagerLabel,
-} from "../../../utils/platformPaths";
+} from "@utils/fileLinks";
+import { isAbsolutePath, joinWorkspacePath } from "@utils/platformPaths";
 import { resolveMountedWorkspacePath } from "../utils/mountedWorkspacePaths";
 
 type OpenTarget = {
@@ -97,6 +94,7 @@ export function useFileLinkOpener(
   openTargets: OpenAppTarget[],
   selectedOpenAppId: string,
 ) {
+  const { t } = useI18n();
   const reportOpenError = useCallback(
     (error: unknown, context: Record<string, string | null>) => {
       const message = error instanceof Error ? error.message : String(error);
@@ -110,12 +108,12 @@ export function useFileLinkOpener(
         },
       );
       pushErrorToast({
-        title: "无法打开文件",
+        title: t("messages.fileLink.openFailed"),
         message,
       });
       console.warn("Failed to open file link", { message, ...context });
     },
-    [],
+    [t],
   );
 
   const openFileLink = useCallback(
@@ -135,7 +133,7 @@ export function useFileLinkOpener(
           return;
         }
         if (target.kind === "finder") {
-          await revealItemInDir(resolvedPath);
+          await openLocalFile(resolvedPath);
           return;
         }
 
@@ -190,14 +188,14 @@ export function useFileLinkOpener(
       const canOpen = canOpenTarget(target);
       const openLabel =
         target.kind === "finder"
-          ? revealInFileManagerLabel()
+          ? t("messages.fileLink.openDefault")
           : target.kind === "command"
             ? command
-              ? `用 ${target.label} 打开`
-              : "请先在设置中配置命令"
+              ? t("openApp.openWith").replace("{app}", target.label)
+              : t("openApp.configureCommand")
             : appName
-              ? `用 ${appName} 打开`
-              : "请先在设置中配置应用名";
+              ? t("openApp.openWith").replace("{app}", appName)
+              : t("openApp.configureApp");
       const items = [
         await MenuItem.new({
           text: openLabel,
@@ -206,34 +204,30 @@ export function useFileLinkOpener(
             await openFileLink(fileLocation);
           },
         }),
-        ...(target.kind === "finder"
-          ? []
-          : [
-              await MenuItem.new({
-                text: revealInFileManagerLabel(),
-                action: async () => {
-                  try {
-                    await revealItemInDir(resolvedPath);
-                  } catch (error) {
-                    reportOpenError(error, {
-                      rawPath: rawPathLabel,
-                      resolvedPath,
-                      workspacePath,
-                      targetId: target.id,
-                      targetKind: "finder",
-                      targetAppName: null,
-                      targetCommand: null,
-                    });
-                  }
-                },
-              }),
-            ]),
         await MenuItem.new({
-          text: "下载链接文件",
+          text: t("messages.fileLink.reveal"),
+          action: async () => {
+            try {
+              await revealItemInDir(resolvedPath);
+            } catch (error) {
+              reportOpenError(error, {
+                rawPath: rawPathLabel,
+                resolvedPath,
+                workspacePath,
+                targetId: target.id,
+                targetKind: "finder",
+                targetAppName: null,
+                targetCommand: null,
+              });
+            }
+          },
+        }),
+        await MenuItem.new({
+          text: t("messages.fileLink.download"),
           enabled: false,
         }),
         await MenuItem.new({
-          text: "复制链接",
+          text: t("messages.fileLink.copy"),
           action: async () => {
             const link = toFileUrl(resolvedPath, fileLocation.line, fileLocation.column);
             try {
@@ -252,7 +246,7 @@ export function useFileLinkOpener(
       const position = new LogicalPosition(event.clientX, event.clientY);
       await menu.popup(position, window);
     },
-    [openFileLink, openTargets, reportOpenError, selectedOpenAppId, workspacePath],
+    [openFileLink, openTargets, reportOpenError, selectedOpenAppId, t, workspacePath],
   );
 
   return { openFileLink, showFileLinkMenu };

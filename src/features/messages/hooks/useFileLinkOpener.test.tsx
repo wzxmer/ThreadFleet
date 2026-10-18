@@ -1,7 +1,18 @@
 // @vitest-environment jsdom
-import { act, renderHook } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { openWorkspaceIn } from "../../../services/tauri";
+import { openLocalFile, openWorkspaceIn } from "@services/tauri";
+import { I18N_STRINGS } from "@/features/i18n/strings";
+import { I18nProvider } from "@/features/i18n/I18nProvider";
+import { Markdown } from "../components/Markdown";
 import { fileTarget } from "../test/fileLinkAssertions";
 import { useFileLinkOpener } from "./useFileLinkOpener";
 
@@ -22,10 +33,12 @@ const {
 }));
 
 vi.mock("../../../services/tauri", () => ({
+  openLocalFile: vi.fn(),
   openWorkspaceIn: vi.fn(),
 }));
 
 vi.mock("@tauri-apps/plugin-opener", () => ({
+  openUrl: vi.fn(),
   revealItemInDir: revealItemInDirMock,
 }));
 
@@ -53,6 +66,7 @@ vi.mock("../../../services/toasts", () => ({
 
 describe("useFileLinkOpener", () => {
   afterEach(() => {
+    cleanup();
     vi.clearAllMocks();
   });
 
@@ -252,7 +266,7 @@ describe("useFileLinkOpener", () => {
     );
   });
 
-  it("opens slash-prefixed Windows drive paths without passing an invalid Explorer path", async () => {
+  it("opens slash-prefixed Windows drive paths with the default app instead of revealing them", async () => {
     const { result } = renderHook(() =>
       useFileLinkOpener(
         "D:\\Project\\ThreadFleet",
@@ -267,8 +281,104 @@ describe("useFileLinkOpener", () => {
       );
     });
 
-    expect(revealItemInDirMock).toHaveBeenCalledWith(
+    expect(openLocalFile).toHaveBeenCalledWith(
       "D:/Project/rime/lua/txjx_processor.lua",
     );
+    expect(revealItemInDirMock).not.toHaveBeenCalled();
+    expect(openWorkspaceIn).not.toHaveBeenCalled();
+  });
+
+  it.each(["zh", "en"] as const)("opens an HTML message link on click and reveals it only through its context menu (%s)", async (language) => {
+    const path = "D:/reports/finance.html";
+    menuItemNewMock.mockImplementation(async (options) => options);
+    predefinedMenuItemNewMock.mockImplementation(async (options) => options);
+    const popup = vi.fn();
+    menuNewMock.mockResolvedValue({ popup });
+
+    function MessageWithFileOpener() {
+      const { openFileLink, showFileLinkMenu } = useFileLinkOpener(
+        "D:/Project/ThreadFleet",
+        [{ id: "finder", label: "Explorer", kind: "finder", args: [] }],
+        "finder",
+      );
+      return (
+        <Markdown
+          value={`[Report](${path})`}
+          className="markdown"
+          onOpenFileLink={openFileLink}
+          onOpenFileLinkMenu={showFileLinkMenu}
+        />
+      );
+    }
+
+    render(
+      <I18nProvider preference={language}>
+        <MessageWithFileOpener />
+      </I18nProvider>,
+    );
+    const link = screen.getByRole("link", { name: "Report" });
+
+    fireEvent.click(link);
+    await waitFor(() => expect(openLocalFile).toHaveBeenCalledWith(path));
+    expect(revealItemInDirMock).not.toHaveBeenCalled();
+    expect(menuNewMock).not.toHaveBeenCalled();
+
+    vi.mocked(openLocalFile).mockClear();
+    fireEvent.contextMenu(link, { clientX: 12, clientY: 24 });
+    await waitFor(() => expect(popup).toHaveBeenCalled());
+    expect(openLocalFile).not.toHaveBeenCalled();
+    expect(revealItemInDirMock).not.toHaveBeenCalled();
+
+    const items = menuNewMock.mock.calls[0][0].items;
+    const openItem = items.find(
+      (item: { text?: string }) =>
+        item.text === I18N_STRINGS[language]["messages.fileLink.openDefault"],
+    );
+    const revealItem = items.find(
+      (item: { text?: string }) =>
+        item.text === I18N_STRINGS[language]["messages.fileLink.reveal"],
+    );
+    expect(openItem).toBeDefined();
+    expect(revealItem).toBeDefined();
+
+    await act(async () => {
+      await openItem.action();
+    });
+    expect(openLocalFile).toHaveBeenCalledWith(path);
+    expect(revealItemInDirMock).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await revealItem.action();
+    });
+    expect(revealItemInDirMock).toHaveBeenCalledExactlyOnceWith(path);
+  });
+
+  it("keeps the selected editor command and line location when opening source files", async () => {
+    const { result } = renderHook(() =>
+      useFileLinkOpener(
+        "D:\\Project\\ThreadFleet",
+        [{
+          id: "cursor",
+          label: "Cursor",
+          kind: "command",
+          command: "cursor",
+          args: ["--reuse-window"],
+        }],
+        "cursor",
+      ),
+    );
+
+    await act(async () => {
+      await result.current.openFileLink(fileTarget("src/App.tsx:33:7"));
+    });
+
+    expect(openWorkspaceIn).toHaveBeenCalledWith("D:\\Project\\ThreadFleet\\src\\App.tsx", {
+      command: "cursor",
+      args: ["--reuse-window"],
+      line: 33,
+      column: 7,
+    });
+    expect(openLocalFile).not.toHaveBeenCalled();
+    expect(revealItemInDirMock).not.toHaveBeenCalled();
   });
 });
