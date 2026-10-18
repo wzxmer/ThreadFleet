@@ -429,7 +429,11 @@ enum RolloutSequenceItem {
         id: Option<String>,
         item_type: &'static str,
     },
-    AgentMessage(Value),
+    AgentMessage {
+        item: Value,
+        original_text_bytes: usize,
+        original_text_digest: [u8; 32],
+    },
     DynamicTool(Value),
 }
 
@@ -554,6 +558,49 @@ fn collect_rollout_enrichment_line(
                 .and_then(Value::as_str)
                 .map(str::to_string);
         }
+        Some("compacted") => {
+            let Some(turn) = current_turn_id
+                .as_ref()
+                .and_then(|turn_id| enrichment.turns.get_mut(turn_id))
+            else {
+                return;
+            };
+            let Some(message) = value.pointer("/payload/message").and_then(Value::as_str) else {
+                return;
+            };
+            let is_compaction_summary = match turn.sequence.last() {
+                Some(RolloutSequenceItem::AgentMessage {
+                    item,
+                    original_text_bytes,
+                    original_text_digest,
+                }) if *original_text_bytes > 0
+                    && item.get("phase").and_then(Value::as_str) == Some("final_answer") =>
+                {
+                    message
+                        .len()
+                        .checked_sub(*original_text_bytes)
+                        .and_then(|start| message.get(start..))
+                        .is_some_and(|summary| {
+                            let digest: [u8; 32] = Sha256::digest(summary.as_bytes()).into();
+                            digest == *original_text_digest
+                        })
+                }
+                _ => false,
+            };
+            if is_compaction_summary {
+                // Compaction writes its internal summary as a response_item just
+                // before the compacted record. Native history omits this message.
+                if let Some(RolloutSequenceItem::AgentMessage { item, .. }) = turn.sequence.pop() {
+                    if item.get("createdAt").and_then(Value::as_str).is_some_and(|created_at| {
+                        turn.message_timestamps
+                            .last()
+                            .is_some_and(|(role, timestamp)| role == "assistant" && timestamp == created_at)
+                    }) {
+                        turn.message_timestamps.pop();
+                    }
+                }
+            }
+        }
         Some("response_item") => {
             let Some(turn_id) = current_turn_id.as_ref() else {
                 return;
@@ -590,10 +637,9 @@ fn collect_rollout_enrichment_line(
                             let Some(id) = id else {
                                 return;
                             };
-                            let text = truncate_rollout_text(
-                                &rollout_message_text(payload),
-                                MAX_ROLLOUT_MESSAGE_CHARS,
-                            );
+                            let original_text = rollout_message_text(payload);
+                            let text =
+                                truncate_rollout_text(&original_text, MAX_ROLLOUT_MESSAGE_CHARS);
                             if text.trim().is_empty() {
                                 turn.sequence.push(RolloutSequenceItem::Anchor {
                                     id: Some(id),
@@ -612,7 +658,12 @@ fn collect_rollout_enrichment_line(
                                     object.insert("phase".to_string(), json!(phase));
                                 }
                             }
-                            turn.sequence.push(RolloutSequenceItem::AgentMessage(item));
+                            turn.sequence.push(RolloutSequenceItem::AgentMessage {
+                                item,
+                                original_text_bytes: original_text.len(),
+                                original_text_digest: Sha256::digest(original_text.as_bytes())
+                                    .into(),
+                            });
                         }
                         _ => {}
                     }
@@ -805,7 +856,7 @@ fn apply_rollout_enrichment(response: &mut Value, enrichment: &RolloutThreadEnri
                         cursor += 1;
                     }
                 }
-                RolloutSequenceItem::AgentMessage(item) => {
+                RolloutSequenceItem::AgentMessage { item, .. } => {
                     let Some(id) = item.get("id").and_then(Value::as_str) else {
                         continue;
                     };
@@ -3396,6 +3447,58 @@ base_url = "{base_url}"
         assert!(native_history_page_misses_latest_terminal_agent_message(
             &page
         ));
+    }
+
+    #[test]
+    fn rollout_enrichment_excludes_compaction_summaries_but_keeps_real_answers() {
+        for (summary, summary_timestamp) in [
+            ("Internal handoff".to_string(), Some("2026-10-18T13:56:40.736Z")),
+            ("内部交接。".repeat(5_000), Some("2026-10-18T13:56:40.736Z")),
+            ("Untimed handoff".to_string(), None),
+        ] {
+            let mut current_turn_id = None;
+            let mut enrichment = RolloutThreadEnrichment::default();
+            for line in [
+                json!({ "type": "turn_context", "payload": { "turn_id": "turn-1" } }),
+                json!({ "type": "response_item", "timestamp": "2026-10-18T13:50:00.000Z", "payload": {
+                    "type": "message", "id": "user-1", "role": "user",
+                    "content": [{ "type": "input_text", "text": "Question" }]
+                } }),
+                json!({ "type": "response_item", "timestamp": summary_timestamp, "payload": {
+                    "type": "message", "id": "internal-summary", "role": "assistant", "phase": "final_answer",
+                    "content": [{ "type": "output_text", "text": summary }]
+                } }),
+                json!({ "type": "compacted", "payload": {
+                    "message": format!("Internal continuation context:\n{summary}")
+                } }),
+                json!({ "type": "response_item", "timestamp": "2026-10-18T14:02:52.277Z", "payload": {
+                    "type": "message", "id": "real-answer", "role": "assistant", "phase": "final_answer",
+                    "content": [{ "type": "output_text", "text": "Actual answer" }]
+                } }),
+                json!({ "type": "compacted", "payload": { "message": "A different summary" } }),
+            ] {
+                collect_rollout_enrichment_line(
+                    &line.to_string(),
+                    &mut current_turn_id,
+                    &mut enrichment,
+                );
+            }
+            let mut response = json!({ "result": { "thread": { "turns": [{
+                "id": "turn-1", "items": [{ "type": "userMessage", "id": "user-1" }]
+            }] } } });
+
+            apply_rollout_enrichment(&mut response, &enrichment);
+
+            let items = response["result"]["thread"]["turns"][0]["items"]
+                .as_array()
+                .unwrap();
+            assert!(!items.iter().any(|item| item["id"] == "internal-summary"));
+            assert_eq!(items.len(), 2);
+            assert_eq!(items[0]["createdAt"], "2026-10-18T13:50:00.000Z");
+            assert_eq!(items[1]["id"], "real-answer");
+            assert_eq!(items[1]["phase"], "final_answer");
+            assert_eq!(items[1]["createdAt"], "2026-10-18T14:02:52.277Z");
+        }
     }
 
     #[test]
