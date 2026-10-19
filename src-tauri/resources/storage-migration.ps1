@@ -96,6 +96,19 @@ function Assert-Plan {
     $seen += $entry
   }
 }
+function Uses-MigratingSource($Process) {
+  if ($Mode -ne 'Migrate' -or -not $script:planValidated) { return $false }
+  foreach ($entry in $script:plan.locations) {
+    foreach ($root in @($entry.source, $entry.alias)) {
+      if ($Process.ExecutablePath -and (Is-Within (Full-Path $Process.ExecutablePath) $root)) { return $true }
+      # Native messaging wrappers and interpreted MCP servers may live outside
+      # the source while their command or script keeps a source directory open.
+      if ($Process.Name -match '^(cmd|node|bun|deno|dotnet|python|pythonw|uv|powershell|pwsh)(\.exe)?$' -and
+          $Process.CommandLine -and $Process.CommandLine.IndexOf($root + '\', [StringComparison]::OrdinalIgnoreCase) -ge 0) { return $true }
+    }
+  }
+  return $false
+}
 function Busy-Processes {
   if ($TestRoot) { return @() }
   # Fail closed when process enumeration fails. Never terminate another session.
@@ -103,7 +116,8 @@ function Busy-Processes {
     $_.ProcessId -ne $PID -and -not (Waiting-Startup $_.ProcessId) -and (
       $_.Name -match '^(threadfleet|codex|codex-code-mode-host|codexmonitor|codex_monitor|codex_monitor_daemon|codex-monitor-daemon|gemini)(\.exe)?$' -or
       ($_.Name -match '^(node|bun|deno)(\.exe)?$' -and $_.CommandLine -match '(gemini|codex|codexmonitor)') -or
-      ($_.Name -match '^msedgewebview2\.exe$' -and $_.CommandLine -match 'com\.dimillian\.codexmonitor')
+      ($_.Name -match '^msedgewebview2\.exe$' -and $_.CommandLine -match 'com\.dimillian\.codexmonitor') -or
+      (Uses-MigratingSource $_)
     )
   })
 }
@@ -119,7 +133,13 @@ function Waiting-Startup([int]$ProcessId) {
 function Check-Cancel {
   if (Exists $cancelPath) { throw 'Migration cancelled before switching data paths' }
 }
-function Snapshot([string]$Root) {
+function Snapshot-Value($Item, [switch]$PathsOnly) {
+  if (($Item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return 'link:' + $Item.LinkType + ':' + (@($Item.Target) -join '|') }
+  if ($Item.PSIsContainer) { return 'directory' }
+  if ($PathsOnly) { return 'file' }
+  return 'file:' + $Item.Length + ':' + (Get-FileHash -LiteralPath $Item.FullName -Algorithm SHA256).Hash
+}
+function Snapshot([string]$Root, [switch]$PathsOnly) {
   $result = @{}
   $pending = New-Object 'System.Collections.Generic.Stack[string]'
   $pending.Push($Root)
@@ -127,15 +147,8 @@ function Snapshot([string]$Root) {
     $directory = $pending.Pop()
     foreach ($item in Get-ChildItem -LiteralPath $directory -Force -ErrorAction Stop) {
       $relative = $item.FullName.Substring($Root.Length).TrimStart('\')
-      if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-        $result[$relative] = 'link:' + $item.LinkType + ':' + (@($item.Target) -join '|')
-      } elseif ($item.PSIsContainer) {
-        $result[$relative] = 'directory'
-        $pending.Push($item.FullName)
-      } else {
-        # Full verification includes SQLite/WAL, attachments and hidden config.
-        $result[$relative] = 'file:' + $item.Length + ':' + (Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash
-      }
+      $result[$relative] = Snapshot-Value $item -PathsOnly:$PathsOnly
+      if ($item.PSIsContainer -and ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) { $pending.Push($item.FullName) }
     }
   }
   return ,$result
@@ -155,6 +168,35 @@ function Assert-Same($Left, $Right, [string]$Context = 'backup', [string]$Kind =
   throw "Storage verification failed ($Context, $Kind): expected $($Left.Count), actual $($Right.Count); missing $($missing.Count), extra $($extra.Count), changed $($changed.Count). Details: $reportPath"
 }
 function Verification-Path($Entry) { Join-Path $ControlDir ($script:plan.id + '-' + $Entry.kind + '.verification.json') }
+function Prepare-RetryDestination($Entry, $SourceSnapshot) {
+  $paths = Snapshot $Entry.destination -PathsOnly
+  $extras = @($paths.Keys | Where-Object { -not $SourceSnapshot.ContainsKey($_) })
+  if (-not $extras.Count) { return }
+  $verified = @{}
+  $verification = Verification-Path $Entry
+  if (Exists $verification) {
+    $stored = Get-Content -LiteralPath $verification -Raw -Encoding UTF8 | ConvertFrom-Json
+    foreach ($property in $stored.PSObject.Properties) { $verified[$property.Name] = $property.Value }
+  }
+  # A retry must not accumulate obsolete cache/lock files, or delete user data.
+  # Only unchanged, previously verified transient copies may be discarded.
+  foreach ($relative in $extras) {
+    $transient = $Entry.kind -eq 'app-cache' -or ($Entry.kind -eq 'codex' -and $relative -match '^(tmp|\.tmp)(\\|$)')
+    $item = Get-Item -LiteralPath (Join-Path $Entry.destination $relative) -Force
+    if (-not $transient -or -not $verified.ContainsKey($relative) -or (Is-Link $item.FullName) -or
+        $verified[$relative] -cne (Snapshot-Value $item)) {
+      throw "Retry destination contains extra data requiring inspection; original data is preserved: $relative"
+    }
+  }
+  foreach ($relative in @($extras | Sort-Object { $_.Length } -Descending)) {
+    $item = Get-Item -LiteralPath (Join-Path $Entry.destination $relative) -Force
+    if ($item.PSIsContainer) { [IO.Directory]::Delete($item.FullName) }
+    else {
+      if (($item.Attributes -band [IO.FileAttributes]::ReadOnly) -ne 0) { $item.IsReadOnly = $false }
+      [IO.File]::Delete($item.FullName)
+    }
+  }
+}
 function Remove-Tree([string]$Path) {
   # Never traverse nested junctions into another client's or project's data.
   if (Is-Link $Path) { Remove-Link $Path; return }
@@ -384,6 +426,7 @@ try {
     $permissions.SetAccessRuleProtection($true, $true)
     Set-Acl -LiteralPath $entry.destination -AclObject $permissions
     $before = Snapshot $entry.source
+    Prepare-RetryDestination $entry $before
     & "$env:SystemRoot\System32\robocopy.exe" $entry.source $entry.destination /E /COPY:DATS /SECFIX /DCOPY:DAT /SL /SJ /R:0 /W:0 /NFL /NDL /NJH /NJS /NP *> $null
     if ($LASTEXITCODE -ge 8) { throw "Storage copy failed for $($entry.kind); code $LASTEXITCODE" }
     # Preserve the source's access boundary even when the new parent has wider
