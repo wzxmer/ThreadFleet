@@ -39,6 +39,17 @@ Set-Acl -LiteralPath $alias -AclObject $sourcePermissions
 [IO.File]::WriteAllText((Join-Path $protected 'source.ts'), 'must survive')
 New-Item -ItemType Junction -Path (Join-Path $alias 'project-link') -Target $protected | Out-Null
 $plan = Plan (Join-Path $fixture 'new') @(@{ kind = 'codex'; alias = $alias; source = $alias })
+# Chromium can update a mapped cache index without updating its file timestamp.
+# A retry must replace old contents even when size and timestamp match exactly.
+$index = Join-Path $alias 'cache-index'
+$oldIndex = Join-Path $plan.locations[0].destination 'cache-index'
+New-Item -ItemType Directory -Path $plan.locations[0].destination -Force | Out-Null
+[IO.File]::WriteAllText($index, 'new index')
+[IO.File]::WriteAllText($oldIndex, 'old index')
+$stamp = [datetime]'2026-01-01T00:00:00Z'
+[IO.File]::SetLastWriteTimeUtc($index, $stamp)
+[IO.File]::SetLastWriteTimeUtc($oldIndex, $stamp)
+[IO.File]::WriteAllText((Join-Path $plan.locations[0].destination 'previous-copy.txt'), 'preserve this extra')
 Write-Json $plan
 & $shell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $scriptCopy -ControlDir $control -Mode Migrate -TestRoot $fixture
 $migrated = Read-Plan
@@ -56,6 +67,10 @@ if ($junctionsAvailable) {
 Assert ($migrated.status -eq 'ready') 'Migration did not complete'
 Assert ((Get-Item -LiteralPath $alias -Force).LinkType -eq 'Junction') 'Original path is not a junction'
 Assert ([IO.File]::ReadAllText((Join-Path $alias 'history.jsonl')) -eq 'session history') 'History changed'
+Assert ([IO.File]::ReadAllText((Join-Path $alias 'cache-index')) -eq 'new index') 'Equal-metadata retry kept stale file contents'
+$preserved = @(Get-ChildItem -LiteralPath $plan.root -Directory -Filter '.tf-retry-preserved-*')
+Assert ($preserved.Count -eq 1) 'Retry extra was not preserved separately'
+Assert ([IO.File]::ReadAllText((Join-Path $preserved[0].FullName 'previous-copy.txt')) -eq 'preserve this extra') 'Retry lost extra data'
 Assert ((Get-Acl -LiteralPath $migrated.locations[0].destination).Owner -eq $sourcePermissions.Owner) 'Source ownership was not preserved'
 [IO.File]::WriteAllText((Join-Path $alias 'new-active-session.jsonl'), 'new history after migration')
 Run 'Cleanup'

@@ -178,23 +178,47 @@ function Prepare-RetryDestination($Entry, $SourceSnapshot) {
     $stored = Get-Content -LiteralPath $verification -Raw -Encoding UTF8 | ConvertFrom-Json
     foreach ($property in $stored.PSObject.Properties) { $verified[$property.Name] = $property.Value }
   }
-  # A retry must not accumulate obsolete cache/lock files, or delete user data.
-  # Only unchanged, previously verified transient copies may be discarded.
-  foreach ($relative in $extras) {
-    $transient = $Entry.kind -eq 'app-cache' -or ($Entry.kind -eq 'codex' -and $relative -match '^(tmp|\.tmp)(\\|$)')
-    $item = Get-Item -LiteralPath (Join-Path $Entry.destination $relative) -Force
-    if (-not $transient -or -not $verified.ContainsKey($relative) -or (Is-Link $item.FullName) -or
-        $verified[$relative] -cne (Snapshot-Value $item)) {
-      throw "Retry destination contains extra data requiring inspection; original data is preserved: $relative"
+  # Preserve unknown, changed and durable retry leftovers outside the active
+  # destination. Only unchanged verified transient copies may be discarded.
+  # Move complete extra subtrees atomically, never traverse a directory link.
+  $roots = @($extras | Where-Object {
+    $parent = Split-Path $_ -Parent
+    -not $parent -or $SourceSnapshot.ContainsKey($parent)
+  })
+  $preserved = $null
+  foreach ($relative in $roots) {
+    $members = @($extras | Where-Object { $_ -eq $relative -or $_.StartsWith($relative + '\', [StringComparison]::OrdinalIgnoreCase) })
+    $discard = $true
+    foreach ($member in $members) {
+      $item = Get-Item -LiteralPath (Join-Path $Entry.destination $member) -Force
+      $transient = $Entry.kind -eq 'app-cache' -or ($Entry.kind -eq 'codex' -and $member -match '^(tmp|\.tmp)(\\|$)')
+      if (-not $transient -or -not $verified.ContainsKey($member) -or (Is-Link $item.FullName) -or
+          $verified[$member] -cne (Snapshot-Value $item)) { $discard = $false }
     }
-  }
-  foreach ($relative in @($extras | Sort-Object { $_.Length } -Descending)) {
-    $item = Get-Item -LiteralPath (Join-Path $Entry.destination $relative) -Force
-    if ($item.PSIsContainer) { [IO.Directory]::Delete($item.FullName) }
-    else {
-      if (($item.Attributes -band [IO.FileAttributes]::ReadOnly) -ne 0) { $item.IsReadOnly = $false }
-      [IO.File]::Delete($item.FullName)
+    $path = Join-Path $Entry.destination $relative
+    if ($discard) {
+      foreach ($member in @($members | Sort-Object { $_.Length } -Descending)) {
+        $item = Get-Item -LiteralPath (Join-Path $Entry.destination $member) -Force
+        if ((Is-Link $item.FullName) -or $verified[$member] -cne (Snapshot-Value $item)) { throw 'Retry copy changed before cleanup; data preserved' }
+        if ($item.PSIsContainer) { [IO.Directory]::Delete($item.FullName) }
+        else {
+          if ($item.IsReadOnly) { $item.IsReadOnly = $false }
+          [IO.File]::Delete($item.FullName)
+        }
+      }
+      continue
     }
+    if (-not $preserved) {
+      $preserved = Join-Path $script:plan.root ('.tf-retry-preserved-' + $script:plan.id + '-' + $Entry.kind + '-' + [guid]::NewGuid().ToString('N'))
+      New-Item -ItemType Directory -Path $preserved | Out-Null
+      # Match the destination's protected access boundary for retained data.
+      Set-Acl -LiteralPath $preserved -AclObject (Get-Acl -LiteralPath $Entry.destination)
+    }
+    $target = Join-Path $preserved $relative
+    New-Item -ItemType Directory -Path (Split-Path $target -Parent) -Force | Out-Null
+    $item = Get-Item -LiteralPath $path -Force
+    if ($item.PSIsContainer) { [IO.Directory]::Move($path, $target) }
+    else { [IO.File]::Move($path, $target) }
   }
 }
 function Remove-Tree([string]$Path) {
@@ -427,7 +451,9 @@ try {
     Set-Acl -LiteralPath $entry.destination -AclObject $permissions
     $before = Snapshot $entry.source
     Prepare-RetryDestination $entry $before
-    & "$env:SystemRoot\System32\robocopy.exe" $entry.source $entry.destination /E /COPY:DATS /SECFIX /DCOPY:DAT /SL /SJ /R:0 /W:0 /NFL /NDL /NJH /NJS /NP *> $null
+    # Mapped browser indexes can change without a new size or write time.
+    # Recopy matching metadata too: retries must use the current source bytes.
+    & "$env:SystemRoot\System32\robocopy.exe" $entry.source $entry.destination /E /IS /IM /COPY:DATS /SECFIX /DCOPY:DAT /SL /SJ /R:0 /W:0 /NFL /NDL /NJH /NJS /NP *> $null
     if ($LASTEXITCODE -ge 8) { throw "Storage copy failed for $($entry.kind); code $LASTEXITCODE" }
     # Preserve the source's access boundary even when the new parent has wider
     # inheritable permissions. Robocopy can reset the root inheritance flag.
