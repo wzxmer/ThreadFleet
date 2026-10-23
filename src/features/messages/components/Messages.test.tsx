@@ -28,7 +28,10 @@ import { expectOpenedFileTarget } from "../test/fileLinkAssertions";
 import { Messages } from "./Messages";
 import { I18N_STRINGS } from "@/features/i18n/strings";
 import { pickAttachmentFiles } from "@services/tauri";
-import { buildConversationItemFromThreadItem } from "@utils/threadItems";
+import {
+  buildConversationItemFromThreadItem,
+  buildItemsFromThread,
+} from "@utils/threadItems";
 
 const useFileLinkOpenerMock = vi.fn(
   (
@@ -66,6 +69,145 @@ vi.mock("@services/tauri", async () => {
 vi.mock("@services/dragDrop", () => ({ subscribeWindowDragDrop: vi.fn(() => () => {}) }));
 
 describe("Messages", () => {
+  it.each(["active", "commentary", "final_answer", "empty-final"])(
+    "ignores empty history messages when grouping and counting a %s turn",
+    (state) => {
+      const items = buildItemsFromThread({
+        turns: [{
+          id: "turn-empty-history",
+          items: [
+            { id: "user", type: "userMessage", content: [{ type: "text", text: "Check the data." }] },
+            { id: "msg_prelude_before", type: "agentMessage", text: "" },
+            { id: "progress", type: "agentMessage", phase: "commentary", text: "Checking the current data." },
+            { id: "tool", type: "commandExecution", command: "git status", status: "completed" },
+            { id: "msg_prelude_between", type: "agentMessage", text: " \n\t " },
+            { id: "result", type: "agentMessage", phase: state === "final_answer" ? "final_answer" : "commentary", text: "Validation complete." },
+            { id: "msg_prelude_after", type: "agentMessage", text: "" },
+            ...(state === "empty-final"
+              ? [{ id: "empty-final", type: "agentMessage", phase: "final_answer", text: "" }]
+              : []),
+          ],
+        }],
+      });
+      const { container } = render(
+        <Messages items={items} threadId="thread-empty-history" workspaceId="ws-1"
+          activeTurnId={state === "active" ? "turn-empty-history" : null}
+          isThinking={state === "active"} defaultToolGroupsCollapsed
+          openTargets={[]} selectedOpenAppId="" />,
+      );
+
+      expect(screen.getByText("Validation complete.")).toBeTruthy();
+      expect(screen.getByText("1 次工具调用")).toBeTruthy();
+      expect(screen.getByText("1 条过程消息")).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: I18N_STRINGS.zh["messages.expandProcess"] }));
+
+      const processMessages = container.querySelectorAll(".process-message-inline");
+      expect(processMessages).toHaveLength(1);
+      expect(processMessages[0].textContent).toBe("Checking the current data.");
+      expect(container.querySelectorAll(".message.assistant")).toHaveLength(1);
+      expect(items.filter((item) => item.id.startsWith("msg_prelude"))).toHaveLength(3);
+    },
+  );
+
+  it("shows later streamed text for a previously empty assistant message", () => {
+    const emptyMessage = buildConversationItemFromThreadItem({
+      id: "streaming-message", type: "agentMessage", text: " \n\t ",
+    })!;
+    const props = {
+      threadId: "thread-streaming-empty", workspaceId: "ws-1", activeTurnId: "turn-streaming-empty",
+      isThinking: true, openTargets: [], selectedOpenAppId: "",
+    };
+    const { container, rerender } = render(<Messages {...props} items={[emptyMessage]} />);
+    expect(container.querySelector(".message.assistant")).toBeNull();
+    rerender(<Messages {...props} items={[{ ...emptyMessage, kind: "message", role: "assistant", text: "Received real content." }]} />);
+    expect(screen.getByText("Received real content.")).toBeTruthy();
+    expect(container.querySelectorAll(".message.assistant")).toHaveLength(1);
+  });
+
+  it("keeps visible history in the window when empty preludes follow it", () => {
+    const items: ConversationItem[] = [
+      { id: "history-user", kind: "message", role: "user", text: "Check the history." },
+      { id: "history-answer", kind: "message", role: "assistant", text: "The history is visible." },
+      ...Array.from({ length: 60 }, (_, index): ConversationItem => ({
+        id: `msg_prelude_${index}`, kind: "message", role: "assistant", text: "",
+      })),
+    ];
+    const { container } = render(
+      <Messages items={items} threadId="thread-prelude-window" workspaceId="ws-1" isThinking={false}
+        chatHistoryScrollbackItems={20} openTargets={[]} selectedOpenAppId="" />,
+    );
+    expect(screen.getByText("The history is visible.")).toBeTruthy();
+    expect(container.querySelector(".messages-history-notice")).toBeNull();
+    expect(container.querySelectorAll(".message.assistant")).toHaveLength(1);
+  });
+
+  it("preserves image, attachment and structured-question messages with empty text", () => {
+    const onQuestionReply = vi.fn();
+    const items: ConversationItem[] = [
+      { id: "image-only", kind: "message", role: "assistant", text: "", images: ["https://example.test/result.png"] },
+      { id: "attachment-only", kind: "message", role: "assistant", text: "", attachments: ["C:/files/result.log"] },
+      { id: "question-only", kind: "message", role: "assistant", text: "", asyncQuestions: [{ title: "Choose a result.", options: ["Continue", "Stop"] }] },
+    ];
+    const { container } = render(
+      <Messages items={items} threadId="thread-nontext-messages" workspaceId="ws-1" isThinking={false}
+        onQuestionReply={onQuestionReply} openTargets={[]} selectedOpenAppId="" />,
+    );
+    expect(container.querySelector('.message-image-grid img')?.getAttribute("src")).toBe("https://example.test/result.png");
+    expect(screen.getByText("result.log")).toBeTruthy();
+    expect(screen.getByRole("radio", { name: "Continue" })).toBeTruthy();
+    expect(screen.getByRole("radio", { name: "Stop" })).toBeTruthy();
+    expect(container.querySelectorAll(".message.assistant")).toHaveLength(3);
+  });
+
+  it("reveals search matches after empty preludes without shifting the history index", async () => {
+    const items: ConversationItem[] = [
+      ...Array.from({ length: 40 }, (_, index): ConversationItem => ({
+        id: `empty-search-${index}`, kind: "message", role: "assistant", text: "",
+      })),
+      ...Array.from({ length: 8 }, (_, index): ConversationItem => ({
+        id: `search-${index}`, kind: "message", role: "user", text: `Searchable message ${index}`,
+      })),
+    ];
+    render(
+      <Messages items={items} threadId="thread-search-empty" workspaceId="ws-1" isThinking={false}
+        chatHistoryScrollbackItems={2} openTargets={[]} selectedOpenAppId="" />,
+    );
+    expect(screen.queryByText("Searchable message 1")).toBeNull();
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    fireEvent.change(screen.getByLabelText(I18N_STRINGS.zh["messages.searchCurrentSession"]), {
+      target: { value: "message 1" },
+    });
+    await waitFor(() => {
+      expect(screen.getByText("Searchable message 1").closest(".is-active-search-match")).toBeTruthy();
+    });
+  });
+
+  it("keeps ordinary question choices available when an empty prelude follows", () => {
+    const items: ConversationItem[] = [
+      {
+        id: "ordinary-question",
+        kind: "message",
+        role: "assistant",
+        phase: "final_answer",
+        text: "Which region?\n\n- Asia\n- Europe",
+      },
+      { id: "question-prelude", kind: "message", role: "assistant", text: "" },
+    ];
+    render(
+      <Messages
+        items={items}
+        threadId="thread-question-prelude"
+        workspaceId="ws-1"
+        isThinking={false}
+        onQuestionReply={vi.fn()}
+        openTargets={[]}
+        selectedOpenAppId=""
+      />,
+    );
+    expect(screen.getByRole("radio", { name: "Asia" })).toBeTruthy();
+    expect(screen.getByRole("radio", { name: "Europe" })).toBeTruthy();
+  });
+
   it.each([false, true])("sends reply attachments with question context (async: %s)", async (async) => {
     const onQuestionReply = vi.fn().mockResolvedValue({ status: "sent" });
     vi.mocked(pickAttachmentFiles).mockResolvedValue(["C:/files/error.png", "C:/files/request.log"]);

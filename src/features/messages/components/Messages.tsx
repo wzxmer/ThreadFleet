@@ -38,6 +38,7 @@ import {
   countApplyPatchLineChanges,
   countDiffLineChanges,
   getConversationItemSearchText,
+  isEmptyAssistantMessage,
   parseReasoning,
   type MessageListBaseEntry,
   type MessageListEntry,
@@ -508,7 +509,7 @@ export function getRetryableUserMessageId(
 }
 
 export const Messages = memo(function Messages({
-  items,
+  items: rawItems,
   threadId,
   workspaceId = null,
   isThinking,
@@ -558,6 +559,11 @@ export const Messages = memo(function Messages({
   composerSendShortcut = "enter",
   onResendUserMessage,
 }: MessagesProps) {
+  // History indices, grouping and metadata must share the same display list.
+  const items = useMemo(
+    () => rawItems.filter((item) => !isEmptyAssistantMessage(item)),
+    [rawItems],
+  );
   const pendingOlderHistoryRestoreRef = useRef<{
     threadId: string | null;
     anchorKey: string;

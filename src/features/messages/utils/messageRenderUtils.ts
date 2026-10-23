@@ -225,6 +225,17 @@ export function parseReasoning(
   };
 }
 
+export function isEmptyAssistantMessage(item: ConversationItem) {
+  return (
+    item.kind === "message" &&
+    item.role === "assistant" &&
+    !item.text.trim() &&
+    !item.images?.length &&
+    !item.attachments?.length &&
+    !item.asyncQuestions?.length
+  );
+}
+
 export function normalizeMessageImageSrc(path: string) {
   if (!path) {
     return "";

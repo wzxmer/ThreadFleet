@@ -45,6 +45,7 @@ import {
   formatCount,
   formatDurationMs,
   formatToolStatusLabel,
+  isEmptyAssistantMessage,
   normalizeMessageImageSrc,
   stripAnsiControlCodes,
   toolNameFromTitle,
@@ -1255,6 +1256,9 @@ export const ProcessMessageRow = memo(function ProcessMessageRow({
   onOpenFileLinkMenu,
   onOpenThreadLink,
 }: ProcessMessageRowProps) {
+  if (isEmptyAssistantMessage(item)) {
+    return null;
+  }
   return (
     <div className="tool-inline process-message-inline">
       <div className="tool-inline-bar-toggle" aria-hidden />
