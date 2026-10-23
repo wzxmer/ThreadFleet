@@ -3349,6 +3349,10 @@
   margin: 0;
 }
 
+.markdown li > * + p {
+  margin-top: 8px;
+}
+
 .message.assistant .markdown :where(p, ul, ol, blockquote) {
   max-width: 100%;
 }
