@@ -66,12 +66,18 @@
 }
 
 .request-user-input-question {
-  display: grid;
-  gap: 8px;
+  /* WebKit can shrink the legend to its min-content width on grid fieldsets. */
+  display: block;
   min-width: 0;
   margin: 0;
   padding: 0;
   border: 0;
+}
+
+.request-user-input-question-body {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
 }
 
 .request-user-input-question-header {

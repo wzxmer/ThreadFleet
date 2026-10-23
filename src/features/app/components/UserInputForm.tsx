@@ -66,38 +66,40 @@ export function UserInputForm({ draftKey, questions, title, description, queueLa
           return (
             <fieldset key={question.id} className="request-user-input-question" disabled={draft.submitting || draft.submitted}>
               <legend className="request-user-input-question-text">{question.question}</legend>
-              {question.header ? <span className="request-user-input-question-header">{question.header}</span> : null}
-              {hasOptions ? (
-                <div className="request-user-input-options">
-                  {question.options?.map((option, optionIndex) => (
-                    <label key={optionIndex} className={`request-user-input-option${draft.selections[question.id] === optionIndex ? " is-selected" : ""}`}>
-                      <input type="radio" name={`${formId}-${question.id}`}
-                        aria-label={option.label || option.description}
-                        aria-describedby={option.description ? `${fieldId}-option-${optionIndex}` : undefined}
-                        checked={draft.selections[question.id] === optionIndex}
-                        onChange={() => update({ selections: { ...draft.selections, [question.id]: optionIndex } })} />
-                      <span className="request-user-input-option-content">
-                        <span className="request-user-input-option-label">{option.label}</span>
-                        {option.description ? <span id={`${fieldId}-option-${optionIndex}`} className="request-user-input-option-description">{option.description}</span> : null}
-                      </span>
-                    </label>
-                  ))}
-                </div>
-              ) : null}
-              <label className="request-user-input-answer-label" htmlFor={fieldId}>{t(hasOptions ? "userInput.notes" : "userInput.answer")}</label>
-              {question.isSecret ? (
-                <input id={fieldId} type="password" autoComplete="off" className="request-user-input-notes"
-                  value={draft.notes[question.id] ?? ""} onChange={(event) => changeNote(event.target.value)} />
-              ) : (
-                <textarea id={fieldId} className="request-user-input-notes" rows={2}
-                  onPaste={(event) => { if (attachmentsEnabled) void readAttachments(() => drop.handlePaste(event)); }}
-                  placeholder={t(hasOptions ? "userInput.notesPlaceholder" : "userInput.answerPlaceholder")}
-                  value={draft.notes[question.id] ?? ""} onChange={(event) => changeNote(event.target.value)} />
-              )}
-              {hasOptions && draft.selections[question.id] !== undefined ? (
-                <button type="button" className="ghost" data-button-elevation="none"
-                  onClick={() => update({ selections: { ...draft.selections, [question.id]: undefined } })}>{t("userInput.clearSelection")}</button>
-              ) : null}
+              <div className="request-user-input-question-body">
+                {question.header ? <span className="request-user-input-question-header">{question.header}</span> : null}
+                {hasOptions ? (
+                  <div className="request-user-input-options">
+                    {question.options?.map((option, optionIndex) => (
+                      <label key={optionIndex} className={`request-user-input-option${draft.selections[question.id] === optionIndex ? " is-selected" : ""}`}>
+                        <input type="radio" name={`${formId}-${question.id}`}
+                          aria-label={option.label || option.description}
+                          aria-describedby={option.description ? `${fieldId}-option-${optionIndex}` : undefined}
+                          checked={draft.selections[question.id] === optionIndex}
+                          onChange={() => update({ selections: { ...draft.selections, [question.id]: optionIndex } })} />
+                        <span className="request-user-input-option-content">
+                          <span className="request-user-input-option-label">{option.label}</span>
+                          {option.description ? <span id={`${fieldId}-option-${optionIndex}`} className="request-user-input-option-description">{option.description}</span> : null}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                ) : null}
+                <label className="request-user-input-answer-label" htmlFor={fieldId}>{t(hasOptions ? "userInput.notes" : "userInput.answer")}</label>
+                {question.isSecret ? (
+                  <input id={fieldId} type="password" autoComplete="off" className="request-user-input-notes"
+                    value={draft.notes[question.id] ?? ""} onChange={(event) => changeNote(event.target.value)} />
+                ) : (
+                  <textarea id={fieldId} className="request-user-input-notes" rows={2}
+                    onPaste={(event) => { if (attachmentsEnabled) void readAttachments(() => drop.handlePaste(event)); }}
+                    placeholder={t(hasOptions ? "userInput.notesPlaceholder" : "userInput.answerPlaceholder")}
+                    value={draft.notes[question.id] ?? ""} onChange={(event) => changeNote(event.target.value)} />
+                )}
+                {hasOptions && draft.selections[question.id] !== undefined ? (
+                  <button type="button" className="ghost" data-button-elevation="none"
+                    onClick={() => update({ selections: { ...draft.selections, [question.id]: undefined } })}>{t("userInput.clearSelection")}</button>
+                ) : null}
+              </div>
             </fieldset>
           );
         })}
