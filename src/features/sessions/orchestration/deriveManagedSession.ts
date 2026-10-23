@@ -44,3 +44,22 @@ export async function deriveManagedSessionIntoWorkspace(args: Args): Promise<str
   });
   return threadId;
 }
+
+type NavigateToDerivedSessionArgs = {
+  destination: WorkspaceInfo;
+  threadId: string;
+  isCompact: boolean;
+  exitDiffView: () => void;
+  selectWorkspace: (workspaceId: string) => void;
+  setActiveThreadId: (threadId: string, workspaceId: string) => void;
+  setActiveTab: (tab: "codex") => void;
+  closeSessionManager: () => void;
+};
+
+export function navigateToDerivedSession(args: NavigateToDerivedSessionArgs): void {
+  args.exitDiffView();
+  args.selectWorkspace(args.destination.id);
+  args.setActiveThreadId(args.threadId, args.destination.id);
+  if (args.isCompact) args.setActiveTab("codex");
+  args.closeSessionManager();
+}

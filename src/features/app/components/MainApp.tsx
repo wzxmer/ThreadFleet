@@ -138,7 +138,10 @@ import { useCodexCliUpdater } from "@/features/update/hooks/useCodexCliUpdater";
 import type { ManagedSession, ManagedSessionDerivationPreview } from "@/types";
 import { SessionDerivationPrompt } from "@/features/sessions/components/SessionDerivationPrompt";
 import { loadThreadDerivations, saveThreadDerivation } from "@threads/utils/threadStorage";
-import { deriveManagedSessionIntoWorkspace } from "@/features/sessions/orchestration/deriveManagedSession";
+import {
+  deriveManagedSessionIntoWorkspace,
+  navigateToDerivedSession,
+} from "@/features/sessions/orchestration/deriveManagedSession";
 import { SessionManagerProvider } from "@/features/sessions/context/SessionManagerContext";
 import { SessionManagerWorkspace } from "@/features/sessions/components/SessionManagerWorkspace";
 import { SessionResumeChoicePrompt } from "@/features/sessions/components/SessionResumeChoicePrompt";
@@ -1653,10 +1656,18 @@ export default function MainApp() {
         remainingPreviews = remainingPreviews.slice(1);
       }
       setThreadDerivations(nextDerivations);
-      exitDiffView();
-      selectWorkspace(destination.id);
-      if (latestThreadId) setActiveThreadId(latestThreadId, destination.id);
-      if (isCompact) setActiveTab("codex");
+      if (latestThreadId) {
+        navigateToDerivedSession({
+          destination,
+          threadId: latestThreadId,
+          isCompact,
+          exitDiffView,
+          selectWorkspace,
+          setActiveThreadId,
+          setActiveTab,
+          closeSessionManager: () => handleSessionManagerActiveChange(false),
+        });
+      }
       setManagedSessionDerivation(null);
     } catch (error) {
       setThreadDerivations(nextDerivations);
@@ -1667,7 +1678,7 @@ export default function MainApp() {
         isBusy: false,
       } : current);
     }
-  }, [connectWorkspace, exitDiffView, isCompact, managedSessionDerivation, selectWorkspace, sendUserMessageToThread, setActiveTab, setActiveThreadId, startThreadForWorkspace, t, threadDerivations]);
+  }, [connectWorkspace, exitDiffView, handleSessionManagerActiveChange, isCompact, managedSessionDerivation, selectWorkspace, sendUserMessageToThread, setActiveTab, setActiveThreadId, startThreadForWorkspace, t, threadDerivations]);
   const resolveCloneProjectContext = useCallback(
     (workspace: WorkspaceInfo) => {
       const groupId = workspace.settings.groupId ?? null;
