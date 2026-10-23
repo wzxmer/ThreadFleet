@@ -26,6 +26,8 @@ mod menu;
 #[path = "menu_mobile.rs"]
 mod menu;
 mod notifications;
+#[cfg(target_os = "macos")]
+mod macos_proxy;
 mod prompts;
 mod remote_backend;
 mod rules;

@@ -1358,7 +1358,15 @@ async fn download_to_path(
             None
         }
     };
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
+    let system_proxy = match crate::macos_proxy::resolve_proxy_for_url().await {
+        Ok(proxy) => proxy,
+        Err(error) => {
+            errors.push(format!("system-proxy resolution: {error}"));
+            None
+        }
+    };
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     let system_proxy = None;
 
     let routes = build_update_download_routes(system_proxy, has_environment_proxy_for_url(url));
