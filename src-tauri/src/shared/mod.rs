@@ -44,6 +44,7 @@ pub(crate) mod session_manager_core;
 pub(crate) mod settings_core;
 pub(crate) mod storage_migration_core;
 pub(crate) mod task_coordination_core;
+pub(crate) mod thread_workspace_core;
 pub(crate) mod turn_execution_summary_core;
 pub(crate) mod windows_control_mcp_core;
 pub(crate) mod windows_ui_update_core;

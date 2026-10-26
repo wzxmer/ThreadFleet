@@ -1155,6 +1155,7 @@ export function useThreadActions({
       });
       try {
         const matchingThreadsByWorkspace: Record<string, Record<string, unknown>[]> = {};
+        const ownersByThread: Record<string, string> = {};
         let workspacePathLookup = buildWorkspacePathLookup(targets);
         let knownWorkspaces: WorkspaceInfo[] = knownWorkspacesFromOptions ?? [];
         let workspaceLookupComplete = Boolean(knownWorkspacesFromOptions);
@@ -1225,6 +1226,10 @@ export function useThreadActions({
               String(thread?.cwd ?? ""),
               workspacePathLookup,
             );
+            const id = String(thread?.id ?? "");
+            const owner = localCodexOnly ? LOCAL_CODEX_WORKSPACE_ID : workspaceId ??
+              (workspaceLookupComplete ? LOCAL_CODEX_WORKSPACE_ID : null);
+            if (id && owner) ownersByThread[id] = owner;
             const targetWorkspaceIdsForThread = localCodexOnly
               ? [LOCAL_CODEX_WORKSPACE_ID]
               : workspaceId && targetWorkspaceIds.has(workspaceId)
@@ -1419,6 +1424,9 @@ export function useThreadActions({
 
         const nextThreadActivity = { ...threadActivityRef.current };
         let didChangeAnyActivity = false;
+        if (targets.some((workspace) => isThreadListRequestCurrent(workspace.id, requestSequence, runtimeContext, sourceId))) {
+          dispatch({ type: "reconcileThreadWorkspaces", sourceKey: `${sourceId ?? ""}:${runtimeContext.runtimeGeneration}`, sourceId, owners: ownersByThread });
+        }
         const hasUnmatchedLocalCodexThreads =
           (matchingThreadsByWorkspace[LOCAL_CODEX_WORKSPACE_ID]?.length ?? 0) > 0;
         const outputTargets = includeUnmatchedLocalCodexSessions && hasUnmatchedLocalCodexThreads
@@ -1779,6 +1787,7 @@ export function useThreadActions({
       });
       try {
         const hiddenThreadIds = new Set<string>();
+        const olderOwnersByThread: Record<string, string> = {};
         let requestWorkspaceId = workspace.id;
         let workspaceLookupComplete = false;
         try {
@@ -1891,6 +1900,9 @@ export function useThreadActions({
                   String(thread?.cwd ?? ""),
                   workspacePathLookup,
                 );
+                const id = String(thread?.id ?? "");
+                const owner = owningWorkspaceId ?? (workspaceLookupComplete ? LOCAL_CODEX_WORKSPACE_ID : null);
+                if (id && owner) olderOwnersByThread[id] = owner;
                 if (workspace.id === LOCAL_CODEX_WORKSPACE_ID) {
                   const threadId = String(thread?.id ?? "");
                   if (threadId && shouldHideSubagentThreadFromSidebar(thread.source)) {
@@ -1978,6 +1990,7 @@ export function useThreadActions({
             trackMatchingThreads(
               data.filter((thread) => {
                 const threadId = String(thread?.id ?? "");
+                if (threadId) olderOwnersByThread[threadId] = LOCAL_CODEX_WORKSPACE_ID;
                 if (threadId && shouldHideSubagentThreadFromSidebar(thread.source)) {
                   hiddenThreadIds.add(threadId);
                   return false;
@@ -2012,6 +2025,8 @@ export function useThreadActions({
                   String(thread.cwd ?? ""),
                   workspacePathLookup,
                 );
+                const id = String(thread.id ?? "");
+                if (id) olderOwnersByThread[id] = owningWorkspaceId ?? LOCAL_CODEX_WORKSPACE_ID;
                 const belongsToWorkspace =
                   workspace.id === LOCAL_CODEX_WORKSPACE_ID
                     ? !owningWorkspaceId
@@ -2080,6 +2095,7 @@ export function useThreadActions({
         hiddenThreadIds.forEach((threadId) => {
           dispatch({ type: "hideThread", workspaceId: workspace.id, threadId });
         });
+        dispatch({ type: "reconcileThreadWorkspaces", sourceKey: `${sourceId ?? ""}:${runtimeContext.runtimeGeneration}`, sourceId, owners: olderOwnersByThread });
         const currentContinuity =
           threadListContinuityByWorkspace[workspace.id];
         const continuity = preserveSessionLibraryOnProviderSwitch

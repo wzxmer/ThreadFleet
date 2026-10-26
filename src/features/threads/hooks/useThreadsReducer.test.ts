@@ -7,6 +7,64 @@ import { initialState, threadReducer } from "./useThreadsReducer";
 import type { ThreadState } from "./useThreadsReducer";
 
 describe("threadReducer", () => {
+  it("repairs a running thread's workspace without deleting its history or reviving hidden threads", () => {
+    const thread = { id: "shared", name: "Audit", updatedAt: 100 };
+    const state: ThreadState = {
+      ...initialState,
+      threadsByWorkspace: { wrong: [thread], right: [] },
+      activeThreadIdByWorkspace: { wrong: "shared" },
+      itemsByThread: { shared: [{ id: "message", kind: "message", role: "assistant", text: "Working" }] },
+      activeTurnIdByThread: { shared: "turn" },
+      threadStatusById: { shared: { isProcessing: true, isReviewing: false, hasUnread: false, processingStartedAt: 10, lastDurationMs: null } },
+    };
+    const repaired = threadReducer(state, {
+      type: "reconcileThreadWorkspaces", sourceKey: "source-a:1", owners: { shared: "right" },
+    });
+    expect(repaired.threadsByWorkspace.wrong).toEqual([]);
+    expect(repaired.threadsByWorkspace.right).toEqual([thread]);
+    expect(repaired.activeThreadIdByWorkspace.wrong).toBeNull();
+    expect(repaired.itemsByThread).toBe(state.itemsByThread);
+    expect(repaired.activeTurnIdByThread).toBe(state.activeTurnIdByThread);
+    expect(repaired.threadStatusById).toBe(state.threadStatusById);
+    const refreshed = threadReducer(repaired, {
+      type: "setThreads", workspaceId: "wrong", threads: [thread], sortKey: "updated_at",
+    });
+    expect(refreshed.threadsByWorkspace.wrong).toEqual([]);
+    expect(threadReducer(refreshed, { type: "ensureThread", workspaceId: "wrong", threadId: "shared" })).toBe(refreshed);
+    const hidden = threadReducer({ ...state, hiddenThreadIdsByWorkspace: { right: { shared: true } } }, {
+      type: "reconcileThreadWorkspaces", sourceKey: "source-a:1", owners: { shared: "right" },
+    });
+    expect(hidden.threadsByWorkspace.right).toEqual([]);
+  });
+
+  it("scopes ownership claims to the current session source and allows archived placement in the library", () => {
+    const claimed = threadReducer(initialState, {
+      type: "reconcileThreadWorkspaces", sourceKey: "source-a:1", owners: { a: "project", b: "project" },
+    });
+    const switched = threadReducer(claimed, {
+      type: "reconcileThreadWorkspaces", sourceKey: "source-b:2", owners: { a: "other" },
+    });
+    expect(switched.threadWorkspaceById).toEqual({ a: "other" });
+    const archived = threadReducer(switched, {
+      type: "reconcileThreadWorkspaces", sourceKey: "source-b:2", owners: { a: "__local_codex_sessions__" },
+    });
+    const listed = threadReducer(archived, {
+      type: "setThreads", workspaceId: "__local_codex_sessions__", threads: [{ id: "a", name: "Archived", updatedAt: 1 }], sortKey: "updated_at",
+    });
+    expect(listed.threadsByWorkspace.__local_codex_sessions__).toHaveLength(1);
+  });
+
+  it("does not remove the same ID from a separately sourced workspace snapshot", () => {
+    const thread = { id: "shared", name: "Other source", updatedAt: 1 };
+    const continuity = { sourceId: "source-b", runtimeGeneration: 1, listGeneration: 1, requestId: "b", requestSequence: 1, paginationComplete: true, verifiedSnapshot: null, staleThreadIds: [] };
+    const state = { ...initialState, threadsByWorkspace: { other: [thread] }, threadListContinuityByWorkspace: { other: continuity } };
+    const claimed = threadReducer(state, {
+      type: "reconcileThreadWorkspaces", sourceKey: "source-a:2", sourceId: "source-a", owners: { shared: "project" },
+    });
+    expect(claimed.threadsByWorkspace.other).toEqual([thread]);
+    const refreshed = threadReducer(claimed, { type: "setThreads", workspaceId: "other", threads: [thread], sortKey: "updated_at", continuity });
+    expect(refreshed.threadsByWorkspace.other).toEqual([thread]);
+  });
   it("expires only requests belonging to the resolved workspace, thread and turn", () => {
     const request = { workspace_id: "a", request_id: 1, params: { thread_id: "t", turn_id: "turn", item_id: "i", questions: [] } };
     const state = { ...initialState, userInputRequests: [request,

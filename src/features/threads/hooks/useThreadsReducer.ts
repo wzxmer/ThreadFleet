@@ -34,6 +34,9 @@ export type ThreadState = {
   itemsByThread: Record<string, ConversationItem[]>;
   maxItemsPerThread: number | null;
   threadsByWorkspace: Record<string, ThreadSummary[]>;
+  threadWorkspaceById: Record<string, string>;
+  threadWorkspaceSourceKey: string | null;
+  threadWorkspaceSourceId: string | null;
   hiddenThreadIdsByWorkspace: Record<string, Record<string, true>>;
   threadParentById: Record<string, string>;
   threadStatusById: Record<string, ThreadActivityStatus>;
@@ -69,6 +72,7 @@ export type ThreadState = {
 };
 
 export type ThreadAction =
+  | { type: "reconcileThreadWorkspaces"; sourceKey: string; sourceId?: string | null; owners: Record<string, string> }
   | { type: "setActiveThreadId"; workspaceId: string; threadId: string | null }
   | { type: "setMaxItemsPerThread"; maxItemsPerThread: number | null }
   | { type: "ensureThread"; workspaceId: string; threadId: string }
@@ -302,6 +306,9 @@ export const initialState: ThreadState = {
   itemsByThread: emptyItems,
   maxItemsPerThread: CHAT_SCROLLBACK_DEFAULT,
   threadsByWorkspace: {},
+  threadWorkspaceById: {},
+  threadWorkspaceSourceKey: null,
+  threadWorkspaceSourceId: null,
   hiddenThreadIdsByWorkspace: {},
   threadParentById: {},
   threadStatusById: {},

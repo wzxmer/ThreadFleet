@@ -142,6 +142,25 @@ const managedSession = (
 });
 
 describe("useThreads UX integration", () => {
+  it("repairs a running cross-project duplicate when the real cwd arrives", async () => {
+    const eazyai = { ...workspace, id: "eazyai", name: "eazyai", path: "/tmp/eazyai" };
+    vi.mocked(listWorkspaces).mockResolvedValue([workspace, eazyai]);
+    vi.mocked(listThreads).mockResolvedValue({ result: { data: [{ id: "audit", cwd: eazyai.path, name: "Audit", updatedAt: 100 }], nextCursor: null } });
+    const { result } = renderHook(() => useThreads({ activeWorkspace: workspace, workspaces: [workspace, eazyai], onWorkspaceConnected: vi.fn() }));
+    act(() => {
+      handlers?.onThreadStarted?.(workspace.id, { id: "audit", name: "Audit" });
+      handlers?.onTurnStarted?.(workspace.id, "audit", "turn");
+      handlers?.onAgentMessageCompleted?.({ workspaceId: workspace.id, threadId: "audit", itemId: "answer", text: "Working" });
+    });
+    expect(result.current.threadsByWorkspace[workspace.id].map((t) => t.id)).toContain("audit");
+    await act(async () => result.current.listThreadsForWorkspace(eazyai));
+    expect(result.current.threadsByWorkspace[workspace.id].map((t) => t.id)).not.toContain("audit");
+    expect(result.current.threadsByWorkspace.eazyai.map((t) => t.id)).toEqual(["audit"]);
+    expect(result.current.threadStatusById.audit.isProcessing).toBe(true);
+    expect(result.current.itemsByThread.audit.some((item) => item.id === "answer")).toBe(true);
+    await act(async () => result.current.listThreadsForWorkspace(workspace));
+    expect(result.current.threadsByWorkspace[workspace.id].map((t) => t.id)).not.toContain("audit");
+  });
   let now: number;
   let nowSpy: ReturnType<typeof vi.spyOn>;
 

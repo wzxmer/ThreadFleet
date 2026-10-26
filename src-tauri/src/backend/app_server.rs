@@ -20,6 +20,10 @@ use crate::shared::computer_control_core::{
 };
 use crate::shared::process_core::{kill_child_process_tree, tokio_command};
 use crate::shared::provider_gateway_core::ProviderGatewayShutdown;
+use crate::shared::thread_workspace_core::{
+    normalize_root_path, remember_request_workspace, remember_thread_workspace,
+    resolve_workspace_for_cwd, DeferredThreadEvents,
+};
 use crate::types::WorkspaceEntry;
 
 #[cfg(target_os = "windows")]
@@ -179,34 +183,6 @@ fn extract_related_thread_ids(value: &Value) -> Vec<String> {
         .collect()
 }
 
-fn normalize_root_path(value: &str) -> String {
-    let normalized = value.replace('\\', "/");
-    let normalized = normalized.trim_end_matches('/');
-    if normalized.is_empty() {
-        return String::new();
-    }
-    let lower = normalized.to_ascii_lowercase();
-    let normalized = if lower.starts_with("//?/unc/") {
-        format!("//{}", &normalized[8..])
-    } else if lower.starts_with("//?/") || lower.starts_with("//./") {
-        normalized[4..].to_string()
-    } else {
-        normalized.to_string()
-    };
-    if normalized.is_empty() {
-        return String::new();
-    }
-
-    let bytes = normalized.as_bytes();
-    let is_drive_path =
-        bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'/';
-    if is_drive_path || normalized.starts_with("//") {
-        normalized.to_ascii_lowercase()
-    } else {
-        normalized.to_string()
-    }
-}
-
 #[derive(Debug, Clone)]
 struct ThreadListEntry {
     thread_id: String,
@@ -279,34 +255,6 @@ fn extract_thread_entries_from_thread_list_result(value: &Value) -> Vec<ThreadLi
         collect_entries(result, &mut out);
     }
     out
-}
-
-fn resolve_workspace_for_cwd(
-    cwd: &str,
-    workspace_roots: &HashMap<String, String>,
-) -> Option<String> {
-    let normalized_cwd = normalize_root_path(cwd);
-    if normalized_cwd.is_empty() {
-        return None;
-    }
-    workspace_roots
-        .iter()
-        .filter_map(|(workspace_id, root)| {
-            if root.is_empty() {
-                return None;
-            }
-            let is_exact_match = root == &normalized_cwd;
-            let is_nested_match = normalized_cwd.len() > root.len()
-                && normalized_cwd.starts_with(root)
-                && normalized_cwd.as_bytes().get(root.len()) == Some(&b'/');
-            if is_exact_match || is_nested_match {
-                Some((workspace_id, root.len()))
-            } else {
-                None
-            }
-        })
-        .max_by_key(|(_, root_len)| *root_len)
-        .map(|(workspace_id, _)| workspace_id.clone())
 }
 
 fn normalize_subagent_kind(value: &str) -> String {
@@ -852,10 +800,11 @@ impl WorkspaceSession {
             },
         );
         if let Some(thread_id) = thread_id {
-            self.thread_workspace
-                .lock()
-                .await
-                .insert(thread_id, workspace_id.to_string());
+            remember_request_workspace(
+                &mut *self.thread_workspace.lock().await,
+                &thread_id,
+                workspace_id,
+            );
         }
         if let Err(error) = self
             .write_message(json!({ "id": id, "method": method, "params": params }))
@@ -1249,6 +1198,7 @@ pub(crate) async fn spawn_workspace_session<E: EventSink>(
     let event_sink_clone = event_sink.clone();
     tokio::spawn(async move {
         let mut lines = BufReader::new(stdout).lines();
+        let mut deferred_thread_events = DeferredThreadEvents::default();
         while let Ok(Some(line)) = lines.next_line().await {
             if line.trim().is_empty() {
                 continue;
@@ -1291,14 +1241,14 @@ pub(crate) async fn spawn_workspace_session<E: EventSink>(
                 if !related_thread_ids.is_empty() {
                     let mut thread_workspace = session_clone.thread_workspace.lock().await;
                     for tid in related_thread_ids {
-                        thread_workspace.insert(tid, workspace_id.clone());
+                        remember_request_workspace(&mut thread_workspace, &tid, workspace_id);
                     }
                 } else if let Some(ref tid) = thread_id {
-                    session_clone
-                        .thread_workspace
-                        .lock()
-                        .await
-                        .insert(tid.clone(), workspace_id.clone());
+                    remember_request_workspace(
+                        &mut *session_clone.thread_workspace.lock().await,
+                        tid,
+                        workspace_id,
+                    );
                 }
             }
             if matches!(request_method.as_deref(), Some("thread/list")) {
@@ -1331,7 +1281,12 @@ pub(crate) async fn spawn_workspace_session<E: EventSink>(
                 }
             }
 
-            let mapped_thread_workspace = if let Some(ref tid) = thread_id {
+            if let Some(ref tid) = thread_id {
+                let roots = session_clone.workspace_roots.lock().await;
+                let mut owners = session_clone.thread_workspace.lock().await;
+                remember_thread_workspace(&mut owners, &roots, tid, &value);
+            }
+            let mut mapped_thread_workspace = if let Some(ref tid) = thread_id {
                 session_clone
                     .thread_workspace
                     .lock()
@@ -1342,7 +1297,8 @@ pub(crate) async fn spawn_workspace_session<E: EventSink>(
                 None
             };
 
-            let routed_workspace_id = mapped_thread_workspace
+            let mut routed_workspace_id = mapped_thread_workspace
+                .clone()
                 .or_else(|| request_workspace.clone())
                 .unwrap_or_else(|| fallback_workspace_id.clone());
             track_active_turn_event(&session_clone, method_name, thread_id.as_ref(), &value).await;
@@ -1394,7 +1350,9 @@ pub(crate) async fn spawn_workspace_session<E: EventSink>(
                 }
             }
 
-            if matches!(method_name, Some("item/started") | Some("item/completed")) {
+            if mapped_thread_workspace.is_some()
+                && matches!(method_name, Some("item/started") | Some("item/completed"))
+            {
                 let related_thread_ids = extract_related_thread_ids(&value);
                 if !related_thread_ids.is_empty() {
                     let mut thread_workspace = session_clone.thread_workspace.lock().await;
@@ -1402,6 +1360,43 @@ pub(crate) async fn spawn_workspace_session<E: EventSink>(
                         thread_workspace
                             .entry(related_id)
                             .or_insert_with(|| routed_workspace_id.clone());
+                    }
+                }
+            }
+
+            let ready = {
+                let roots = session_clone.workspace_roots.lock().await;
+                let mut owners = session_clone.thread_workspace.lock().await;
+                deferred_thread_events.take_resolved(&mut owners, &roots)
+            };
+            for (workspace_id, message) in ready {
+                if let Some(id) = extract_thread_id(&message) {
+                    let callbacks = session_clone.background_thread_callbacks.lock().await;
+                    if let Some(tx) = callbacks.get(&id) {
+                        let _ = tx.send(message);
+                        continue;
+                    }
+                }
+                let hidden = session_clone.hidden_thread_ids.lock().await;
+                if extract_thread_id(&message).is_some_and(|id| hidden.contains(&id)) {
+                    continue;
+                }
+                drop(hidden);
+                event_sink_clone.emit_app_server_event(AppServerEvent {
+                    workspace_id,
+                    message,
+                });
+            }
+            if mapped_thread_workspace.is_none() {
+                if let Some(ref tid) = thread_id {
+                    mapped_thread_workspace = session_clone
+                        .thread_workspace
+                        .lock()
+                        .await
+                        .get(tid)
+                        .cloned();
+                    if let Some(ref owner) = mapped_thread_workspace {
+                        routed_workspace_id = owner.clone();
                     }
                 }
             }
@@ -1430,6 +1425,8 @@ pub(crate) async fn spawn_workspace_session<E: EventSink>(
                     }
                     // Don't emit to frontend if this is a background thread event
                     if !sent_to_background {
+                        // Keep interactive server requests reachable while
+                        // ownership is unknown; they do not claim ownership.
                         if should_broadcast_global_workspace_notification(
                             method_name,
                             thread_id.as_ref(),
@@ -1474,6 +1471,24 @@ pub(crate) async fn spawn_workspace_session<E: EventSink>(
                 }
                 // Don't emit to frontend if this is a background thread event
                 if !sent_to_background {
+                    if let Some(ref tid) = thread_id {
+                        if mapped_thread_workspace.is_none() {
+                            let dropped = deferred_thread_events.push(tid.clone(), value);
+                            if dropped > 0 {
+                                event_sink_clone.emit_app_server_event(AppServerEvent {
+                                    workspace_id: fallback_workspace_id.clone(),
+                                    message: json!({
+                                        "method": "codex/threadRoutingError",
+                                        "params": {
+                                            "code": "unresolved_notification_buffer_full",
+                                            "droppedEvents": dropped
+                                        }
+                                    }),
+                                });
+                            }
+                            continue;
+                        }
+                    }
                     if should_broadcast_global_workspace_notification(
                         method_name,
                         thread_id.as_ref(),

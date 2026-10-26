@@ -113,6 +113,57 @@ export function reduceThreadLifecycle(
   action: ThreadAction,
 ): ThreadState {
   switch (action.type) {
+    case "reconcileThreadWorkspaces": {
+      const owners = {
+        ...(state.threadWorkspaceSourceKey === action.sourceKey ? state.threadWorkspaceById : {}),
+        ...action.owners,
+      };
+      const threadsByWorkspace = { ...state.threadsByWorkspace };
+      const activeThreadIdByWorkspace = { ...state.activeThreadIdByWorkspace };
+      const continuityByWorkspace = { ...state.threadListContinuityByWorkspace };
+      const displaced = new Map<string, ThreadSummary>();
+      Object.entries(threadsByWorkspace).forEach(([workspaceId, threads]) => {
+        const listedSource = continuityByWorkspace[workspaceId]?.sourceId;
+        if (action.sourceId && listedSource && listedSource !== action.sourceId) return;
+        const belongsHere = (threadId: string) => !owners[threadId] || owners[threadId] === workspaceId;
+        threadsByWorkspace[workspaceId] = threads.filter((thread) => {
+          if (belongsHere(thread.id)) return true;
+          const previous = displaced.get(thread.id);
+          displaced.set(thread.id, previous ? mergeThreadSummary(previous, thread) : thread);
+          return false;
+        });
+        const active = activeThreadIdByWorkspace[workspaceId];
+        if (active && !belongsHere(active)) {
+          activeThreadIdByWorkspace[workspaceId] = threadsByWorkspace[workspaceId][0]?.id ?? null;
+        }
+        const continuity = continuityByWorkspace[workspaceId];
+        if (continuity) {
+          continuityByWorkspace[workspaceId] = {
+            ...continuity,
+            staleThreadIds: continuity.staleThreadIds.filter(belongsHere),
+          };
+        }
+      });
+      displaced.forEach((thread, threadId) => {
+        const owner = owners[threadId];
+        if (state.hiddenThreadIdsByWorkspace[owner]?.[threadId]) return;
+        const list = threadsByWorkspace[owner] ?? [];
+        if (!list.some((entry) => entry.id === threadId)) {
+          const next = [...list];
+          insertThreadSummaryBySort(next, thread, state.threadSortKeyByWorkspace[owner] ?? "updated_at");
+          threadsByWorkspace[owner] = next;
+        }
+      });
+      return {
+        ...state,
+        threadWorkspaceById: owners,
+        threadWorkspaceSourceKey: action.sourceKey,
+        threadWorkspaceSourceId: action.sourceId ?? null,
+        threadsByWorkspace,
+        activeThreadIdByWorkspace,
+        threadListContinuityByWorkspace: continuityByWorkspace,
+      };
+    }
     case "setActiveThreadId":
       return {
         ...state,
@@ -139,6 +190,8 @@ export function reduceThreadLifecycle(
           : state.threadStatusById,
       };
     case "ensureThread": {
+      const owner = state.threadWorkspaceById[action.threadId];
+      if (owner && owner !== action.workspaceId) return state;
       const hidden =
         state.hiddenThreadIdsByWorkspace[action.workspaceId]?.[action.threadId] ??
         false;
@@ -162,7 +215,7 @@ export function reduceThreadLifecycle(
         },
         threadStatusById: {
           ...state.threadStatusById,
-          [action.threadId]: {
+          [action.threadId]: state.threadStatusById[action.threadId] ?? {
             isProcessing: false,
             hasUnread: false,
             isReviewing: false,
@@ -553,12 +606,15 @@ export function reduceThreadLifecycle(
                 },
               }
             : state.threadListContinuityByWorkspace;
-      const existingThreads = state.threadsByWorkspace[action.workspaceId] ?? [];
+      const belongsHere = (thread: ThreadSummary) =>
+        (action.continuity?.sourceId && state.threadWorkspaceSourceId && action.continuity.sourceId !== state.threadWorkspaceSourceId) ||
+        !state.threadWorkspaceById[thread.id] || state.threadWorkspaceById[thread.id] === action.workspaceId;
+      const existingThreads = (state.threadsByWorkspace[action.workspaceId] ?? []).filter(belongsHere);
       const existingById = new Map(
         existingThreads.map((thread) => [thread.id, thread] as const),
       );
       const visibleThreads = dedupeThreadSummaries(
-        action.threads.filter((thread) => !hidden[thread.id]),
+        action.threads.filter((thread) => belongsHere(thread) && !hidden[thread.id]),
       ).map((thread) => {
         const existing = existingById.get(thread.id);
         if (!thread.nameIsFallback || !existing || existing.nameIsFallback) {

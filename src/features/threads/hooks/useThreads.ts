@@ -778,12 +778,21 @@ export function useThreads({
 
   const handleThreadStarted = useCallback(
     (workspaceId: string, thread: Record<string, unknown>) => {
-      threadHandlers.onThreadStarted(workspaceId, thread);
       const threadId = String(thread.id ?? "").trim();
       if (!threadId) {
         return;
       }
       const parentThreadId = getParentThreadIdFromThread(thread);
+      const owner = resolveWorkspaceIdForThreadPath(String(thread.cwd ?? ""), buildWorkspacePathLookup(workspaces)) ??
+        (parentThreadId ? state.threadWorkspaceById[parentThreadId] : null);
+      if (owner) {
+        const runtime = getThreadListRuntimeContext();
+        const sourceKey = runtime.sourceId ? `${runtime.sourceId}:${runtime.runtimeGeneration}` :
+          state.threadWorkspaceSourceKey ?? `:${runtime.runtimeGeneration}`;
+        dispatch({ type: "reconcileThreadWorkspaces", sourceKey, sourceId: runtime.sourceId ?? state.threadWorkspaceSourceId, owners: { [threadId]: owner } });
+        workspaceId = owner;
+      }
+      threadHandlers.onThreadStarted(workspaceId, thread);
       if (!parentThreadId) {
         return;
       }
@@ -796,6 +805,11 @@ export function useThreads({
       onSubagentTitleCandidate,
       threadHandlers,
       updateThreadParent,
+      workspaces,
+      getThreadListRuntimeContext,
+      state.threadWorkspaceById,
+      state.threadWorkspaceSourceKey,
+      state.threadWorkspaceSourceId,
     ],
   );
 
