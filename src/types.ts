@@ -689,7 +689,7 @@ export type MessageReadingStyle = "bubble" | "native" | "cli";
 export type AppLanguagePreference = "system" | "zh" | "en";
 export type PersonalityPreference = "friendly" | "pragmatic";
 export type FollowUpMessageBehavior = "queue" | "steer";
-export type SubagentCheckpointSyncMode = "finalOnly" | "checkpoints" | "continuous";
+export type SubagentCheckpointSyncMode = "off" | "finalOnly" | "checkpoints" | "continuous";
 export type ComposerSendShortcut =
   | "enter"
   | "ctrl-enter"
@@ -1037,6 +1037,7 @@ export type AppSettings = {
   steerEnabled: boolean;
   followUpMessageBehavior: FollowUpMessageBehavior;
   subagentCheckpointSyncMode: SubagentCheckpointSyncMode;
+  subagentCheckpointSyncVersion?: number;
   composerSendShortcut: ComposerSendShortcut;
   composerTriggerMode?: ComposerTriggerMode;
   composerFollowUpHintEnabled: boolean;

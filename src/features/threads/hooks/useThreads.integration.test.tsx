@@ -142,7 +142,7 @@ const managedSession = (
 });
 
 describe("useThreads UX integration", () => {
-  it("repairs a running cross-project duplicate when the real cwd arrives", async () => {
+  it("repairs a running cross-project duplicate when the real cwd arrives and keeps native results without checkpoint injection", async () => {
     const eazyai = { ...workspace, id: "eazyai", name: "eazyai", path: "/tmp/eazyai" };
     vi.mocked(listWorkspaces).mockResolvedValue([workspace, eazyai]);
     vi.mocked(listThreads).mockResolvedValue({ result: { data: [{ id: "audit", cwd: eazyai.path, name: "Audit", updatedAt: 100 }], nextCursor: null } });
@@ -160,6 +160,16 @@ describe("useThreads UX integration", () => {
     expect(result.current.itemsByThread.audit.some((item) => item.id === "answer")).toBe(true);
     await act(async () => result.current.listThreadsForWorkspace(workspace));
     expect(result.current.threadsByWorkspace[workspace.id].map((t) => t.id)).not.toContain("audit");
+    act(() => {
+      handlers?.onThreadStarted?.(workspace.id, { id: "audit", cwd: eazyai.path });
+      handlers?.onThreadStarted?.(eazyai.id, { id: "child", cwd: eazyai.path, source: { subagent: { thread_spawn: { parent_thread_id: "audit" } } } });
+      handlers?.onTurnStarted?.(eazyai.id, "child", "child-turn");
+      handlers?.onAgentMessageCompleted?.({ workspaceId: eazyai.id, threadId: "child", itemId: "native-result", text: "Child result" });
+      handlers?.onTurnCompleted?.(eazyai.id, "child", "child-turn", "completed");
+    });
+    expect(result.current.itemsByThread.child.some((item) => item.id === "native-result")).toBe(true);
+    expect(steerTurn).not.toHaveBeenCalled();
+    expect(result.current.threadsByWorkspace[workspace.id]).toEqual([]);
   });
   let now: number;
   let nowSpy: ReturnType<typeof vi.spyOn>;

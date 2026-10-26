@@ -165,7 +165,7 @@ export function useThreads({
   onSelectServiceTier,
   reviewDeliveryMode = "inline",
   steerEnabled = false,
-  subagentCheckpointSyncMode = "checkpoints",
+  subagentCheckpointSyncMode = "off",
   threadTitleAutogenerationEnabled = true,
   chatHistoryScrollbackItems,
   autoArchiveThreadsEnabled = false,

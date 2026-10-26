@@ -21,6 +21,20 @@ const updateAppSettingsMock = vi.mocked(updateAppSettings);
 const runCodexDoctorMock = vi.mocked(runCodexDoctor);
 
 describe("useAppSettings", () => {
+  it.each([undefined, "checkpoints", "finalOnly", "continuous"])("defaults legacy checkpoint sync %s to off", async (mode) => {
+    getAppSettingsMock.mockResolvedValue({ subagentCheckpointSyncMode: mode } as AppSettings);
+    const { result } = renderHook(() => useAppSettings());
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.settings.subagentCheckpointSyncMode).toBe("off");
+    expect(result.current.settings.subagentCheckpointSyncVersion).toBe(1);
+  });
+
+  it.each(["off", "finalOnly", "checkpoints", "continuous"] as const)("preserves the explicit upgraded sync choice %s", async (mode) => {
+    getAppSettingsMock.mockResolvedValue({ subagentCheckpointSyncMode: mode, subagentCheckpointSyncVersion: 1 } as AppSettings);
+    const { result } = renderHook(() => useAppSettings());
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.settings.subagentCheckpointSyncMode).toBe(mode);
+  });
   beforeEach(() => {
     vi.clearAllMocks();
   });

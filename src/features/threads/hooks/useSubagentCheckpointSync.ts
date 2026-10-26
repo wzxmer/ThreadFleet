@@ -61,6 +61,7 @@ export function useSubagentCheckpointSync({
   onDebug,
 }: UseSubagentCheckpointSyncOptions) {
   const modeRef = useRef(mode);
+  const deliveryEpochRef = useRef(0);
   const pendingByParentRef = useRef<Record<string, SubagentCheckpoint[]>>({});
   const deliveredIdsRef = useRef(new Set<string>());
   const deliveredByResultKeyRef = useRef(new Map<string, SubagentCheckpoint>());
@@ -73,6 +74,17 @@ export function useSubagentCheckpointSync({
   const flushTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   modeRef.current = mode;
+
+  useEffect(() => {
+    if (mode !== "off") return;
+    deliveryEpochRef.current += 1;
+    Object.values(flushTimersRef.current).forEach(clearTimeout);
+    flushTimersRef.current = {};
+    pendingByParentRef.current = {};
+    latestAgentMessageRef.current = {};
+    activeTurnByChildRef.current = {};
+    progressCountByTurnRef.current = {};
+  }, [mode]);
 
   const emitDebug = useCallback(
     (label: string, payload: Record<string, unknown>) => {
@@ -115,7 +127,7 @@ export function useSubagentCheckpointSync({
 
   const flushParent = useCallback(
     async (parentThreadId: string) => {
-      if (deliveryInFlightByParentRef.current[parentThreadId]) {
+      if (modeRef.current === "off" || deliveryInFlightByParentRef.current[parentThreadId]) {
         return;
       }
       const turnId = activeTurnIdByThreadRef.current[parentThreadId] ?? null;
@@ -149,6 +161,8 @@ export function useSubagentCheckpointSync({
       }
 
       deliveryInFlightByParentRef.current[parentThreadId] = true;
+      const deliveryEpoch = deliveryEpochRef.current;
+      const deliveryIsCurrent = () => deliveryEpoch === deliveryEpochRef.current && modeRef.current !== "off";
       const batch = [...eligiblePending].sort((left, right) => left.sequence - right.sequence);
       pendingByParentRef.current[parentThreadId] = [];
       const text = batch
@@ -161,6 +175,7 @@ export function useSubagentCheckpointSync({
         .join("\n\n");
       try {
         await steerTurn(batch[0].workspaceId, parentThreadId, turnId, text);
+        if (!deliveryIsCurrent()) return;
         batch.forEach((checkpoint) => {
           deliveredIdsRef.current.add(checkpoint.id);
           deliveredByResultKeyRef.current.set(checkpointResultKey(checkpoint), checkpoint);
@@ -178,6 +193,7 @@ export function useSubagentCheckpointSync({
           checkpointIds: batch.map((checkpoint) => checkpoint.id),
         });
       } catch (error) {
+        if (!deliveryIsCurrent()) return;
         const message = errorMessage(error);
         const staleTurn = isStaleTurnError(message);
         const retryBatch = batch
@@ -225,7 +241,7 @@ export function useSubagentCheckpointSync({
 
   const submitCheckpoint = useCallback(
     (checkpoint: SubagentCheckpoint | null) => {
-      if (!checkpoint || deliveredIdsRef.current.has(checkpoint.id)) {
+      if (modeRef.current === "off" || !checkpoint || deliveredIdsRef.current.has(checkpoint.id)) {
         return;
       }
       const resultKey = checkpointResultKey(checkpoint);
@@ -263,6 +279,7 @@ export function useSubagentCheckpointSync({
 
   const onAgentMessageCompleted = useCallback(
     (event: AgentMessageCompletedEvent) => {
+      if (modeRef.current === "off") return;
       const parentThreadId = threadParentByIdRef.current[event.threadId];
       if (!parentThreadId) {
         return;
@@ -295,6 +312,7 @@ export function useSubagentCheckpointSync({
 
   const onTurnStarted = useCallback(
     (workspaceId: string, threadId: string, turnId: string) => {
+      if (modeRef.current === "off") return;
       activeTurnByChildRef.current[threadId] = turnId;
       void flushParent(threadId);
       emitDebug("turn-started", { workspaceId, threadId, turnId });
@@ -304,6 +322,7 @@ export function useSubagentCheckpointSync({
 
   const onTurnCompleted = useCallback(
     (workspaceId: string, threadId: string, turnId: string) => {
+      if (modeRef.current === "off") return;
       const parentThreadId = threadParentByIdRef.current[threadId];
       const latest = latestAgentMessageRef.current[threadId];
       activeTurnByChildRef.current[threadId] = null;

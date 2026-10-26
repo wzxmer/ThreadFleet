@@ -2114,7 +2114,11 @@ pub(crate) async fn send_user_message_with_session_core(
             params.insert("collaborationMode".to_string(), mode);
         }
     }
-    insert_optional_non_null_value(&mut params, "additionalContext", additional_context);
+    insert_optional_non_null_value(
+        &mut params,
+        "additionalContext",
+        Some(crate::shared::subagent_policy_core::with_subagent_policy(additional_context)?),
+    );
     session
         .send_request_for_workspace(&workspace_id, "turn/start", Value::Object(params))
         .await
@@ -2175,7 +2179,11 @@ pub(crate) async fn turn_steer_with_session_core(
         ("expectedTurnId".to_string(), json!(turn_id)),
         ("input".to_string(), json!(input)),
     ]);
-    insert_optional_non_null_value(&mut params, "additionalContext", additional_context);
+    insert_optional_non_null_value(
+        &mut params,
+        "additionalContext",
+        Some(crate::shared::subagent_policy_core::with_subagent_policy(additional_context)?),
+    );
     let params = Value::Object(params);
     session
         .send_request_for_workspace(&workspace_id, "turn/steer", params)

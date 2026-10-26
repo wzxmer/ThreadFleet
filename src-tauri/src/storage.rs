@@ -170,6 +170,19 @@ pub(crate) fn read_settings(path: &PathBuf) -> Result<AppSettings, String> {
     let data = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
     let mut value: Value = serde_json::from_str(&data).map_err(|e| e.to_string())?;
     migrate_follow_up_message_behavior(&mut value);
+    if let Some(root) = value.as_object_mut() {
+        if root
+            .get("subagentCheckpointSyncVersion")
+            .and_then(Value::as_u64)
+            != Some(1)
+        {
+            root.insert(
+                "subagentCheckpointSyncMode".into(),
+                serde_json::json!("off"),
+            );
+            root.insert("subagentCheckpointSyncVersion".into(), serde_json::json!(1));
+        }
+    }
     match serde_json::from_value(value.clone()) {
         Ok(settings) => Ok(finalize_loaded_settings(path, settings)),
         Err(_) => {
@@ -247,6 +260,22 @@ mod tests {
     use super::{read_settings, read_workspaces, write_settings, write_workspaces};
     use crate::types::{AppSettings, WorkspaceEntry, WorkspaceKind, WorkspaceSettings};
     use uuid::Uuid;
+
+    #[test]
+    fn read_settings_disables_legacy_checkpoint_injection_once_and_preserves_new_choices() {
+        let temp_dir = std::env::temp_dir().join(format!("tf-sync-settings-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let path = temp_dir.join("settings.json");
+        std::fs::write(&path, r#"{"subagentCheckpointSyncMode":"checkpoints"}"#).unwrap();
+        let mut settings = read_settings(&path).unwrap();
+        assert_eq!(settings.subagent_checkpoint_sync_mode, "off");
+        assert_eq!(settings.subagent_checkpoint_sync_version, 1);
+        settings.subagent_checkpoint_sync_mode = "checkpoints".into();
+        write_settings(&path, &settings).unwrap();
+        let reloaded = read_settings(&path).unwrap();
+        assert_eq!(reloaded.subagent_checkpoint_sync_mode, "checkpoints");
+        std::fs::remove_dir_all(temp_dir).unwrap();
+    }
 
     #[test]
     fn write_read_workspaces_persists_sort_and_group() {

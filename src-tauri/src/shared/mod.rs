@@ -43,6 +43,7 @@ pub(crate) mod provider_profiles_core;
 pub(crate) mod session_manager_core;
 pub(crate) mod settings_core;
 pub(crate) mod storage_migration_core;
+pub(crate) mod subagent_policy_core;
 pub(crate) mod task_coordination_core;
 pub(crate) mod thread_workspace_core;
 pub(crate) mod turn_execution_summary_core;

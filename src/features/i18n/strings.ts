@@ -1540,12 +1540,13 @@ export const I18N_STRINGS = {
     "settings.agents.importNativeMarkdownHelp":
       "首次发现插件中的 Markdown agents 时，自动导入为托管自定义 agent；关闭后不再自动导入，已导入项不会删除。",
     "settings.agents.enableMultiAgent": "启用 Multi-Agent",
-    "settings.agents.enableMultiAgentHelp": "写入 config.toml 中的",
+    "settings.agents.enableMultiAgentHelp": "能力默认开启；用户明确要求并行、分工或子会话后，AI 才创建和调用子会话。此开关写入 config.toml 中的",
     "settings.agents.checkpointSyncMode": "子会话进度同步",
     "settings.agents.checkpointSyncHelp":
-      "父会话运行时实时注入；父会话空闲时等待下一轮。持续同步仅建议调试使用。",
+      "默认关闭 TF 额外注入，子会话结果仍通过原生工具回传。旧版同步设置首次升级重置为关闭；需要实时汇报时可手动开启。开启后父会话运行时实时注入，空闲时等待下一轮。",
+    "settings.agents.checkpointSyncOff": "关闭（默认）",
     "settings.agents.checkpointSyncFinalOnly": "仅最终结果",
-    "settings.agents.checkpointSyncCheckpoints": "关键检查点（推荐）",
+    "settings.agents.checkpointSyncCheckpoints": "关键检查点",
     "settings.agents.checkpointSyncContinuous": "持续同步（调试）",
     "settings.agents.maxThreads": "最大线程数",
     "settings.agents.maxThreadsHelp": "最大打开 agent 线程数。有效范围：",
@@ -3533,12 +3534,13 @@ export const I18N_STRINGS = {
     "settings.agents.importNativeMarkdownHelp":
       "When Markdown agents are first found in plugins, import them as managed custom agents. Turning this off stops future imports and does not delete imported agents.",
     "settings.agents.enableMultiAgent": "Enable Multi-Agent",
-    "settings.agents.enableMultiAgentHelp": "Writes to",
+    "settings.agents.enableMultiAgentHelp": "Enabled by default; AI creates and calls subagents only when the user explicitly requests parallel work, delegation, or subagents. This switch writes to",
     "settings.agents.checkpointSyncMode": "Subagent progress sync",
     "settings.agents.checkpointSyncHelp":
-      "Injects into an active parent turn, or waits for the next turn when the parent is idle. Continuous sync is intended for debugging.",
+      "TF injection is off by default; native tools still return child results. Legacy sync settings reset to off once on upgrade. Enable manually for live updates, injected while the parent runs or queued until its next turn.",
+    "settings.agents.checkpointSyncOff": "Off (default)",
     "settings.agents.checkpointSyncFinalOnly": "Final result only",
-    "settings.agents.checkpointSyncCheckpoints": "Key checkpoints (recommended)",
+    "settings.agents.checkpointSyncCheckpoints": "Key checkpoints",
     "settings.agents.checkpointSyncContinuous": "Continuous sync (debug)",
     "settings.agents.maxThreads": "Max threads",
     "settings.agents.maxThreadsHelp": "Maximum open agent threads. Valid range:",

@@ -60,6 +60,7 @@ export function shouldCreateCheckpoint({
   kind: SubagentCheckpointKind;
   progressCount: number;
 }) {
+  if (mode === "off") return false;
   if (kind === "final") {
     return true;
   }

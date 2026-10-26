@@ -51,6 +51,7 @@ const allowedAppLanguages = new Set(["system", "zh", "en"]);
 const allowedPersonality = new Set(["friendly", "pragmatic"]);
 const allowedFollowUpMessageBehavior = new Set(["queue", "steer"]);
 const allowedSubagentCheckpointSyncMode = new Set([
+  "off",
   "finalOnly",
   "checkpoints",
   "continuous",
@@ -470,7 +471,8 @@ function buildDefaultSettings(): AppSettings {
     collaborationModesEnabled: true,
     steerEnabled: true,
     followUpMessageBehavior: "queue",
-    subagentCheckpointSyncMode: "checkpoints",
+    subagentCheckpointSyncMode: "off",
+    subagentCheckpointSyncVersion: 1,
     composerSendShortcut: "enter",
     composerTriggerMode: "default",
     composerFollowUpHintEnabled: true,
@@ -684,11 +686,12 @@ function normalizeAppSettings(settings: AppSettings): AppSettings {
       : settings.steerEnabled
         ? "steer"
         : "queue",
-    subagentCheckpointSyncMode: allowedSubagentCheckpointSyncMode.has(
+    subagentCheckpointSyncMode: settings.subagentCheckpointSyncVersion === 1 && allowedSubagentCheckpointSyncMode.has(
       settings.subagentCheckpointSyncMode,
     )
       ? settings.subagentCheckpointSyncMode
-      : "checkpoints",
+      : "off",
+    subagentCheckpointSyncVersion: 1,
     composerFollowUpHintEnabled:
       typeof settings.composerFollowUpHintEnabled === "boolean"
         ? settings.composerFollowUpHintEnabled
@@ -731,6 +734,7 @@ export function useAppSettings() {
             normalizeAppSettings({
               ...defaultSettings,
               ...response,
+              subagentCheckpointSyncVersion: response.subagentCheckpointSyncVersion ?? 0,
             }),
           );
         }

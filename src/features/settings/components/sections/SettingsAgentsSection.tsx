@@ -439,9 +439,11 @@ export function SettingsAgentsSection({
               ...appSettings,
               subagentCheckpointSyncMode: event.target
                 .value as typeof appSettings.subagentCheckpointSyncMode,
+              subagentCheckpointSyncVersion: 1,
             })
           }
         >
+          <option value="off">{t("settings.agents.checkpointSyncOff")}</option>
           <option value="finalOnly">{t("settings.agents.checkpointSyncFinalOnly")}</option>
           <option value="checkpoints">{t("settings.agents.checkpointSyncCheckpoints")}</option>
           <option value="continuous">{t("settings.agents.checkpointSyncContinuous")}</option>

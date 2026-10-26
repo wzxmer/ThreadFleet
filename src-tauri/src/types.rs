@@ -1440,6 +1440,8 @@ pub(crate) struct AppSettings {
         rename = "subagentCheckpointSyncMode"
     )]
     pub(crate) subagent_checkpoint_sync_mode: String,
+    #[serde(default, rename = "subagentCheckpointSyncVersion")]
+    pub(crate) subagent_checkpoint_sync_version: u32,
     #[serde(
         default = "default_composer_send_shortcut",
         rename = "composerSendShortcut"
@@ -1920,7 +1922,7 @@ fn default_follow_up_message_behavior() -> String {
 }
 
 fn default_subagent_checkpoint_sync_mode() -> String {
-    "checkpoints".to_string()
+    "off".to_string()
 }
 
 fn default_composer_send_shortcut() -> String {
@@ -2276,6 +2278,7 @@ impl Default for AppSettings {
             steer_enabled: true,
             follow_up_message_behavior: default_follow_up_message_behavior(),
             subagent_checkpoint_sync_mode: default_subagent_checkpoint_sync_mode(),
+            subagent_checkpoint_sync_version: 1,
             composer_send_shortcut: default_composer_send_shortcut(),
             composer_trigger_mode: default_composer_trigger_mode(),
             composer_follow_up_hint_enabled: default_composer_follow_up_hint_enabled(),
@@ -2476,7 +2479,7 @@ mod tests {
         assert!(settings.collaboration_modes_enabled);
         assert!(settings.steer_enabled);
         assert_eq!(settings.follow_up_message_behavior, "queue");
-        assert_eq!(settings.subagent_checkpoint_sync_mode, "checkpoints");
+        assert_eq!(settings.subagent_checkpoint_sync_mode, "off");
         assert!(settings.composer_follow_up_hint_enabled);
         assert!(settings.pause_queued_messages_when_response_required);
         assert!(settings.unified_exec_enabled);

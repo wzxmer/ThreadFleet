@@ -21,6 +21,8 @@ describe("subagent checkpoints", () => {
   it("applies mode throttles and preserves final checkpoints", () => {
     expect(checkpointThrottleMs("continuous")).toBe(3_000);
     expect(checkpointThrottleMs("checkpoints")).toBe(10_000);
+    expect(shouldCreateCheckpoint({ mode: "off", kind: "progress", progressCount: 0 })).toBe(false);
+    expect(shouldCreateCheckpoint({ mode: "off", kind: "final", progressCount: 0 })).toBe(false);
     expect(shouldCreateCheckpoint({ mode: "finalOnly", kind: "progress", progressCount: 0 })).toBe(false);
     expect(shouldCreateCheckpoint({ mode: "finalOnly", kind: "final", progressCount: 99 })).toBe(true);
     expect(shouldCreateCheckpoint({ mode: "checkpoints", kind: "progress", progressCount: 8 })).toBe(false);

@@ -7,7 +7,8 @@ import { SettingsAgentsSection } from "./SettingsAgentsSection";
 
 const baseAppSettings = {
   nativeAgentMarkdownImportEnabled: true,
-  subagentCheckpointSyncMode: "checkpoints",
+  subagentCheckpointSyncMode: "off",
+  subagentCheckpointSyncVersion: 1,
 } as AppSettings;
 
 const baseProps = (): SettingsAgentsSectionProps => ({

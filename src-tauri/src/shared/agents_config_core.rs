@@ -412,7 +412,7 @@ fn resolve_codex_home() -> Result<PathBuf, String> {
 }
 
 fn read_multi_agent_enabled(document: &Document) -> bool {
-    read_feature_flag(document, "multi_agent").unwrap_or(false)
+    read_feature_flag(document, "multi_agent").unwrap_or(true)
 }
 
 fn read_feature_flag(document: &Document, key: &str) -> Option<bool> {
@@ -1123,6 +1123,9 @@ mod tests {
 
     #[test]
     fn read_multi_agent_enabled_reads_multi_agent_flag() {
+        assert!(read_multi_agent_enabled(&Document::new()));
+        let disabled: Document = "[features]\nmulti_agent = false\n".parse().expect("parse");
+        assert!(!read_multi_agent_enabled(&disabled));
         let document: Document = "[features]\nmulti_agent = true\n".parse().expect("parse");
         assert!(read_multi_agent_enabled(&document));
     }
