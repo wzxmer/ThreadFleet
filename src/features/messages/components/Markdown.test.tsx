@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { cleanup, createEvent, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, createEvent, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectOpenedFileTarget } from "../test/fileLinkAssertions";
 import { Markdown } from "./Markdown";
+import { I18N_STRINGS } from "@/features/i18n/strings";
 
 vi.mock("@tauri-apps/api/core", () => ({
   convertFileSrc: (path: string) => `asset://localhost/${encodeURIComponent(path)}`,
@@ -652,6 +653,62 @@ describe("Markdown file-like href behavior", () => {
     expect(container.querySelector("img")?.getAttribute("src")).toBe(
       "asset://localhost/D%3A%2FProject%2FCodexMonitor%2F.codex-monitor%2Fpreview.png",
     );
+  });
+
+  it("opens the clicked inline image at full size and supports all close actions", () => {
+    const { container } = render(
+      <Markdown value="![first](/D:/Pictures/first.png)\n\n![second](https://example.com/second.png)" className="markdown" />,
+    );
+    const images = container.querySelectorAll("img");
+    const previousOverflow = document.body.style.overflow;
+    for (const closeAction of ["escape", "backdrop", "button"]) {
+      fireEvent.click(images[1]);
+      const dialog = screen.getByRole("dialog", { name: I18N_STRINGS.zh["files.imagePreview"] });
+      expect(dialog.parentElement).toBe(document.body);
+      expect(within(dialog).getByRole("img").getAttribute("src")).toBe("https://example.com/second.png");
+      expect(document.body.style.overflow).toBe("hidden");
+      const close = within(dialog).getByRole("button", { name: I18N_STRINGS.zh["files.closePreview"] });
+      expect(document.activeElement).toBe(close);
+      fireEvent.click(within(dialog).getByRole("img"));
+      expect(screen.getByRole("dialog")).toBe(dialog);
+      if (closeAction === "escape") fireEvent.keyDown(window, { key: "Escape" });
+      else if (closeAction === "backdrop") fireEvent.click(dialog);
+      else fireEvent.click(close);
+      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(document.body.style.overflow).toBe(previousOverflow);
+      expect(document.activeElement).toBe(images[1]);
+    }
+  });
+
+  it.each(["Enter", " "])("opens local inline images with %s and restores focus on close", (key) => {
+    const { container, unmount } = render(<Markdown value="![preview](/D:/Pictures/preview.png)" />);
+    const image = container.querySelector("img")!;
+    image.focus();
+    fireEvent.keyDown(image, { key });
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByRole("img").getAttribute("src")).toBe(image.getAttribute("src"));
+    fireEvent.keyDown(document.activeElement!, { key: "Tab", shiftKey: true });
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(document.activeElement).toBe(image);
+    fireEvent.keyDown(image, { key });
+    unmount();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.body.style.overflow).not.toBe("hidden");
+  });
+
+  it("previews a linked image without opening its enclosing file link", () => {
+    const onOpenFileLink = vi.fn();
+    const { container, rerender } = render(
+      <Markdown value="[![preview](/D:/Pictures/preview.png)](./Pictures/full-size.png)" onOpenFileLink={onOpenFileLink} />,
+    );
+    const image = container.querySelector("img")!;
+    fireEvent.click(image);
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    rerender(<Markdown value="[![preview](/D:/Pictures/preview.png)](./Pictures/full-size.png)\n\nMore text" onOpenFileLink={onOpenFileLink} />);
+    expect(container.querySelector("img")).toBe(image);
+    fireEvent.click(screen.getByRole("dialog"));
+    expect(onOpenFileLink).not.toHaveBeenCalled();
   });
 
   it("preserves Markdown images across unrelated rerenders and text updates", () => {

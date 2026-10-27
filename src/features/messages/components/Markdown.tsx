@@ -26,6 +26,8 @@ import {
   toFileLink,
 } from "../utils/messageFileLinks";
 import { normalizeMessageImageSrc } from "../utils/messageRenderUtils";
+import { ImageLightbox } from "@/features/messages/components/ImageLightbox";
+import { useI18n } from "@/features/i18n/I18nProvider";
 import type { ParsedFileLocation } from "../../../utils/fileLinks";
 
 type MarkdownProps = {
@@ -678,11 +680,46 @@ function ModifierCopyMessagePreBlock({ node, children }: MessagePreProps) {
 }
 
 function MarkdownImage({ src, alt }: ComponentPropsWithoutRef<"img"> & ExtraProps) {
+  const { t } = useI18n();
+  const [previewOpen, setPreviewOpen] = useState(false);
   const normalizedSrc = normalizeMessageImageSrc(src ?? "");
   if (!normalizedSrc) {
     return null;
   }
-  return <img src={normalizedSrc} alt={alt ?? ""} loading="lazy" />;
+  return (
+    <>
+      <img
+        src={normalizedSrc}
+        alt={alt ?? ""}
+        loading="lazy"
+        className="markdown-image-preview-trigger"
+        role="button"
+        tabIndex={0}
+        aria-label={`${t("composer.openImage")}${alt ? `: ${alt}` : ""}`}
+        aria-haspopup="dialog"
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          event.currentTarget.focus();
+          setPreviewOpen(true);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            event.stopPropagation();
+            setPreviewOpen(true);
+          }
+        }}
+      />
+      {previewOpen && (
+        <ImageLightbox
+          images={[{ src: normalizedSrc, label: alt ?? "" }]}
+          activeIndex={0}
+          onClose={() => setPreviewOpen(false)}
+        />
+      )}
+    </>
+  );
 }
 
 type MarkdownRenderContextValue = {

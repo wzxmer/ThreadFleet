@@ -2893,6 +2893,15 @@
   border-radius: 8px;
 }
 
+.markdown-image-preview-trigger {
+  cursor: zoom-in;
+}
+
+.markdown-image-preview-trigger:focus-visible {
+  outline: 2px solid var(--border-accent);
+  outline-offset: 2px;
+}
+
 .markdown code {
   font-family: var(--code-font-family);
   font-weight: var(--code-font-weight, 400);

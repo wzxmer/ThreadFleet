@@ -1,6 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent, ReactNode } from "react";
-import { createPortal } from "react-dom";
 import Bot from "lucide-react/dist/esm/icons/bot";
 import Brain from "lucide-react/dist/esm/icons/brain";
 import Check from "lucide-react/dist/esm/icons/check";
@@ -56,6 +55,7 @@ import {
   type ToolSummary,
 } from "../utils/messageRenderUtils";
 import { Markdown } from "./Markdown";
+import { ImageLightbox } from "@/features/messages/components/ImageLightbox";
 import { isStandaloneMarkdownTable } from "./Markdown";
 import { MessageReferenceMenu } from "./MessageReferenceMenu";
 import {
@@ -251,67 +251,6 @@ const MessageImageGrid = memo(function MessageImageGrid({
         </button>
       ))}
     </div>
-  );
-});
-
-const ImageLightbox = memo(function ImageLightbox({
-  images,
-  activeIndex,
-  onClose,
-}: {
-  images: MessageImage[];
-  activeIndex: number;
-  onClose: () => void;
-}) {
-  const activeImage = images[activeIndex];
-
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [onClose]);
-
-  useEffect(() => {
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = previous;
-    };
-  }, []);
-
-  if (!activeImage) {
-    return null;
-  }
-
-  return createPortal(
-    <div
-      className="message-image-lightbox"
-      role="dialog"
-      aria-modal="true"
-      onClick={onClose}
-    >
-      <div
-        className="message-image-lightbox-content"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <button
-          type="button"
-          className="message-image-lightbox-close"
-          onClick={onClose}
-          aria-label="Close image preview"
-        >
-          <X size={16} aria-hidden />
-        </button>
-        <img src={activeImage.src} alt={activeImage.label} />
-      </div>
-    </div>,
-    document.body,
   );
 });
 
