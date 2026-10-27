@@ -25,9 +25,7 @@ const MAX_KNOWLEDGE_CACHE_ENTRIES: usize = 8;
 const MAX_MATCH_TERMS: usize = 5;
 const MAX_TASK_CHARS: usize = 8_000;
 const MAX_CONTEXT_FRAGMENT_CHARS: usize = 4_000;
-const MAX_RULE_CONTEXT_CHARS: usize = 16_000;
 const MAX_KNOWLEDGE_CONTEXT_CHARS: usize = 12_000;
-const MAX_RULE_FILE_BYTES: u64 = 256 * 1024;
 const DEFAULT_CONTEXT_BUDGET_TOKENS: usize = 12_000;
 
 #[derive(Clone, Debug, Serialize)]
@@ -818,37 +816,23 @@ fn build_context_plan(
     rules: &[WorkflowRuleCandidate],
     knowledge_candidates: &[WorkflowKnowledgeCandidate],
     completion_plan: &WorkflowCompletionPlan,
-    source_errors: &mut Vec<String>,
 ) -> WorkflowContextPlan {
     let mut sources = Vec::new();
     let mut mandatory_tokens = 0usize;
-    for rule in rules.iter().filter(|rule| rule.scope != "nested") {
-        let path = Path::new(&rule.path);
-        if fs::metadata(path).is_ok_and(|metadata| metadata.len() > MAX_RULE_FILE_BYTES) {
-            source_errors.push(format!(
-                "workflow rule exceeds context limit: {}",
-                rule.path
-            ));
+    for rule in rules {
+        let Some(reference) = supplemental_rule_reference(rule) else {
             continue;
-        }
-        match fs::read_to_string(path) {
-            Ok(content) => {
-                let estimated_tokens = estimate_tokens(&content);
-                mandatory_tokens = mandatory_tokens.saturating_add(estimated_tokens);
-                sources.push(WorkflowContextSource {
-                    phase: "stable".to_string(),
-                    kind: rule.kind.clone(),
-                    path: rule.path.clone(),
-                    fingerprint: content_fingerprint(&content),
-                    estimated_tokens,
-                    selected: true,
-                });
-            }
-            Err(error) => source_errors.push(format!(
-                "workflow rule unavailable for context plan: {} ({error})",
-                rule.path
-            )),
-        }
+        };
+        let estimated_tokens = estimate_tokens(&reference);
+        mandatory_tokens = mandatory_tokens.saturating_add(estimated_tokens);
+        sources.push(WorkflowContextSource {
+            phase: "stable".to_string(),
+            kind: rule.kind.clone(),
+            path: rule.path.clone(),
+            fingerprint: content_fingerprint(&reference),
+            estimated_tokens,
+            selected: true,
+        });
     }
 
     let mut selected_tokens = mandatory_tokens;
@@ -1257,33 +1241,29 @@ fn truncate_chars(value: &str, limit: usize) -> String {
     value.chars().take(limit).collect()
 }
 
-fn rule_context_fragments(rules: &[WorkflowRuleCandidate]) -> Vec<WorkflowContextFragment> {
-    let mut total_chars = 0;
-    let mut fragments = Vec::new();
-    for rule in rules.iter().filter(|rule| rule.scope != "nested") {
-        if total_chars >= MAX_RULE_CONTEXT_CHARS {
-            break;
-        }
-        let path = Path::new(&rule.path);
-        if fs::metadata(path).is_ok_and(|metadata| metadata.len() > MAX_RULE_FILE_BYTES) {
-            continue;
-        }
-        let Ok(content) = fs::read_to_string(path) else {
-            continue;
-        };
-        let remaining = MAX_RULE_CONTEXT_CHARS - total_chars;
-        let body = truncate_chars(&content, remaining.min(MAX_CONTEXT_FRAGMENT_CHARS));
-        if body.trim().is_empty() {
-            continue;
-        }
-        total_chars += body.chars().count();
-        fragments.push(WorkflowContextFragment {
-            source_id: format!("cm.rule.{}", fragments.len()),
-            kind: "application".to_string(),
-            value: format!("CM rule source: {}\n{}", rule.path, body),
-        });
+fn supplemental_rule_reference(rule: &WorkflowRuleCandidate) -> Option<String> {
+    // The Codex runtime owns AGENTS loading and precedence, regardless of model provider.
+    // RTK is supplemental: preserve its entry point without copying a partial rule body.
+    if rule.scope == "nested" || !rule.kind.eq_ignore_ascii_case("RTK.md") {
+        return None;
     }
-    fragments
+    Some(format!(
+        "CM supplemental rule reference ({}): {}\nRead the full file if it applies to this task. Follow the file's stated scope and normal instruction precedence.",
+        rule.scope, rule.path
+    ))
+}
+
+fn rule_context_fragments(rules: &[WorkflowRuleCandidate]) -> Vec<WorkflowContextFragment> {
+    rules
+        .iter()
+        .filter_map(supplemental_rule_reference)
+        .enumerate()
+        .map(|(index, value)| WorkflowContextFragment {
+            source_id: format!("cm.rule-reference.{index}"),
+            kind: "application".to_string(),
+            value,
+        })
+        .collect()
 }
 
 fn knowledge_excerpt(candidate: &WorkflowKnowledgeCandidate) -> Option<String> {
@@ -1466,12 +1446,7 @@ fn build_preview(
     let mut impacts = analyze_impacts(task);
     scope_validation_candidates(workspace_path, &mut impacts);
     let completion_plan = build_completion_plan(task, &impacts);
-    let context_plan = build_context_plan(
-        &rules,
-        &ranking.candidates,
-        &completion_plan,
-        &mut source_errors,
-    );
+    let context_plan = build_context_plan(&rules, &ranking.candidates, &completion_plan);
     let mut context_fragments = rule_context_fragments(&rules);
     let (knowledge_fragments, selected_knowledge) =
         knowledge_context_fragments(&ranking.candidates, &context_plan);
@@ -1625,7 +1600,7 @@ mod tests {
             Some(&root.join("knowledge")),
         );
         assert!(cached.knowledge_cache_hit);
-        assert!(preview
+        assert!(!preview
             .context_fragments
             .iter()
             .any(|fragment| fragment.source_id.starts_with("cm.rule.")));
@@ -1799,16 +1774,23 @@ mod tests {
     }
 
     #[test]
-    fn context_plan_keeps_rules_and_deterministically_budgets_dynamic_sources() {
+    fn context_plan_budgets_supplemental_references_and_dynamic_sources() {
         let root = temp_root("context-plan");
         fs::create_dir_all(&root).expect("context plan root");
         let rule_path = root.join("AGENTS.md");
-        fs::write(&rule_path, "stable rules").expect("rule file");
-        let rules = vec![WorkflowRuleCandidate {
-            path: normalized_path(&rule_path),
-            kind: "AGENTS.md".to_string(),
-            scope: "workspace".to_string(),
-        }];
+        fs::write(&rule_path, "native rules\n".repeat(10_000)).expect("rule file");
+        let rules = vec![
+            WorkflowRuleCandidate {
+                path: normalized_path(&rule_path),
+                kind: "AGENTS.md".to_string(),
+                scope: "workspace".to_string(),
+            },
+            WorkflowRuleCandidate {
+                path: normalized_path(&root.join("RTK.md")),
+                kind: "RTK.md".to_string(),
+                scope: "workspace".to_string(),
+            },
+        ];
         let knowledge = vec![
             WorkflowKnowledgeCandidate {
                 knowledge_id: "small-id".to_string(),
@@ -1849,13 +1831,14 @@ mod tests {
                 content: "large".to_string(),
             },
         ];
-        let mut errors = Vec::new();
-
         let completion = build_completion_plan("implement workflow", &[]);
-        let first = build_context_plan(&rules, &knowledge, &completion, &mut errors);
-        let second = build_context_plan(&rules, &knowledge, &completion, &mut errors);
+        let first = build_context_plan(&rules, &knowledge, &completion);
+        let second = build_context_plan(&rules, &knowledge, &completion);
 
-        assert!(errors.is_empty());
+        assert!(first
+            .sources
+            .iter()
+            .all(|source| source.kind != "AGENTS.md"));
         assert!(first.sources[0].selected);
         assert!(first.sources[1].selected);
         assert!(
@@ -1872,6 +1855,58 @@ mod tests {
             first.stable_prefix_fingerprint,
             second.stable_prefix_fingerprint
         );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn native_rule_bodies_are_not_injected_or_budgeted() {
+        let root = temp_root("native-rule-context");
+        fs::create_dir_all(&root).expect("rules root");
+        let agents_path = root.join("AGENTS.md");
+        let rtk_path = root.join("RTK.md");
+        let rule_body = format!("{}\nRULE_BODY_END", "RULE_BODY_START\n".repeat(1_000));
+        fs::write(&agents_path, &rule_body).expect("long native rule");
+        fs::write(&rtk_path, &rule_body).expect("long supplemental rule");
+        let rules = vec![
+            WorkflowRuleCandidate {
+                path: normalized_path(&agents_path),
+                kind: "AGENTS.md".to_string(),
+                scope: "global".to_string(),
+            },
+            WorkflowRuleCandidate {
+                path: normalized_path(&rtk_path),
+                kind: "RTK.md".to_string(),
+                scope: "workspace".to_string(),
+            },
+            WorkflowRuleCandidate {
+                path: normalized_path(&root.join("src/RTK.md")),
+                kind: "RTK.md".to_string(),
+                scope: "nested".to_string(),
+            },
+        ];
+        let fragments = rule_context_fragments(&rules);
+        assert_eq!(fragments.len(), 1);
+        assert!(fragments[0].value.contains(&normalized_path(&rtk_path)));
+        assert!(!fragments[0].value.contains("RULE_BODY_START"));
+        assert!(!fragments[0].value.contains("RULE_BODY_END"));
+        assert!(!fragments[0].value.contains("src/RTK.md"));
+
+        let completion = build_completion_plan("explain the rules", &[]);
+        let plan = build_context_plan(&rules, &[], &completion);
+        assert_eq!(plan.sources.len(), 1);
+        assert_eq!(plan.mandatory_tokens, estimate_tokens(&fragments[0].value));
+        assert_eq!(plan.selected_tokens, plan.mandatory_tokens);
+        assert!(!plan.truncated);
+
+        // Native/supplemental body changes cannot be counted as host-injected context.
+        fs::write(&agents_path, "changed native body").expect("changed native rule");
+        fs::write(&rtk_path, "changed supplemental body").expect("changed RTK rule");
+        let changed = build_context_plan(&rules, &[], &completion);
+        assert_eq!(changed.context_fingerprint, plan.context_fingerprint);
+        let native_only = build_context_plan(&rules[..1], &[], &completion);
+        assert!(native_only.sources.is_empty());
+        assert_eq!(native_only.selected_tokens, 0);
+        assert!(!native_only.truncated);
         let _ = fs::remove_dir_all(root);
     }
 
