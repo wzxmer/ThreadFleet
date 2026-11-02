@@ -212,6 +212,18 @@ pub fn managed_codex_platform() -> String {
     crate::shared::codex_cli_update_core::managed_codex_platform()
 }
 
+#[tauri::command]
+pub(crate) async fn get_official_codex_package(
+    state: State<'_, AppState>,
+) -> Result<crate::shared::managed_codex_core::ManagedCodexPackage, String> {
+    if matches!(state.app_settings.lock().await.backend_mode, BackendMode::Remote) {
+        return Err(
+            "Managed Codex installation must run on the remote execution host.".to_string(),
+        );
+    }
+    crate::shared::managed_codex_core::fetch_managed_codex_package(&managed_codex_platform()).await
+}
+
 fn resolve_release_architecture(
     os: &str,
     process_architecture: &str,

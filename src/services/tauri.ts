@@ -22,6 +22,7 @@ import type {
   CodexUpdateResult,
   CodexDoctorResult,
   InstalledManagedCodex,
+  ManagedCodexPackage,
   InstalledWindowsUi,
   WindowsControlMcpConfig,
   SetWindowsControlMcpRequest,
@@ -1917,6 +1918,10 @@ export async function installWindowsUiUpdate(
 
 export async function getManagedCodexPlatform(): Promise<string> {
   return invoke<string>("managed_codex_platform");
+}
+
+export async function getOfficialCodexPackage(): Promise<ManagedCodexPackage> {
+  return invoke<ManagedCodexPackage>("get_official_codex_package");
 }
 
 export async function getReleasePlatform(): Promise<string> {

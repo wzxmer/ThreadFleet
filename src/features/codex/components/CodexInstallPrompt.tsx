@@ -44,7 +44,7 @@ export function CodexInstallPrompt({
           <span>{progress ? `${Math.round(progress)}%` : t("codexInstall.connecting")}</span>
         </div>
       )}
-      {error && <div className="ds-modal-error">{error}</div>}
+      {error && <div className="ds-modal-error">{t("codexInstall.failed")}: {error}</div>}
       <div className="ds-modal-actions">
         <button type="button" className="ghost ds-modal-button" onClick={onLater} disabled={busy}>
           {t("codexInstall.later")}

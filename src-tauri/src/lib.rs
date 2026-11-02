@@ -437,6 +437,7 @@ pub fn run() {
             updater::check_windows_ui_update,
             updater::install_windows_ui_update,
             updater::managed_codex_platform,
+            updater::get_official_codex_package,
             updater::release_platform,
             updater::windows_installer_kind,
             windows_installer::preview_windows_installer_repair,

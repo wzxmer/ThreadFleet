@@ -1,4 +1,5 @@
 import type { ManagedCodexPackage } from "@/types";
+import { getOfficialCodexPackage } from "@services/tauri";
 export type { ManagedCodexPackage } from "@/types";
 
 type ManagedCodexManifest = {
@@ -60,5 +61,10 @@ export async function fetchManagedCodexPackage(
       errors.push(error instanceof Error ? error.message : String(error));
     }
   }
-  throw new Error(`无法获取 Codex CLI 下载信息：${errors.join(" | ")}`);
+  try {
+    return await getOfficialCodexPackage();
+  } catch (error) {
+    const officialError = error instanceof Error ? error.message : String(error);
+    throw new Error(`ThreadFleet: ${errors.join(" | ")} | OpenAI: ${officialError}`);
+  }
 }
