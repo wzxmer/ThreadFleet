@@ -57,15 +57,13 @@ mod workspaces;
 static EXIT_CLEANUP_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 
 #[cfg(desktop)]
-fn keep_daemon_running_after_close(app_handle: &tauri::AppHandle) -> bool {
-    let state = app_handle.state::<state::AppState>();
-    tauri::async_runtime::block_on(async {
-        state
-            .app_settings
-            .lock()
-            .await
-            .keep_daemon_running_after_app_close
-    })
+async fn keep_daemon_running_after_close(
+    app_settings: &tokio::sync::Mutex<types::AppSettings>,
+) -> bool {
+    app_settings
+        .lock()
+        .await
+        .keep_daemon_running_after_app_close
 }
 
 #[cfg(target_os = "macos")]
@@ -81,10 +79,28 @@ fn show_main_window(app_handle: &tauri::AppHandle) {
 async fn stop_managed_daemons_for_exit(app_handle: tauri::AppHandle) {
     let state = app_handle.state::<state::AppState>();
     state.gemini_runtime.shutdown().await;
-    if keep_daemon_running_after_close(&app_handle) {
+    if keep_daemon_running_after_close(&state.app_settings).await {
         return;
     }
     let _ = tailscale::tailscale_daemon_stop(state).await;
+}
+
+#[cfg(all(test, desktop))]
+mod exit_tests {
+    use super::*;
+
+    #[test]
+    fn exit_cleanup_reads_daemon_policy_inside_async_runtime() {
+        tauri::async_runtime::block_on(async {
+            for keep_running in [false, true] {
+                let settings = tokio::sync::Mutex::new(types::AppSettings {
+                    keep_daemon_running_after_app_close: keep_running,
+                    ..Default::default()
+                });
+                assert_eq!(keep_daemon_running_after_close(&settings).await, keep_running);
+            }
+        });
+    }
 }
 
 #[tauri::command]
