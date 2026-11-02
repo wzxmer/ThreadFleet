@@ -120,16 +120,13 @@ import {
 import { credentialSelectionId } from "@/utils/providerCredentials";
 import {
   getProviderModels,
-  getManagedCodexPlatform,
-  installManagedCodex,
   prepareManagedSessionDerivation,
   createMessageReference,
   resumeManagedSession,
   workflowGateStatus,
 } from "@services/tauri";
-import { subscribeReleaseAssetDownloadProgress } from "@services/events";
-import { fetchManagedCodexPackage } from "@/features/codex/utils/managedCodex";
 import { useManagedCodexActivation } from "@app/hooks/useManagedCodexActivation";
+import { useCodexInstallation } from "@app/hooks/useCodexInstallation";
 import { CodexInstallPrompt } from "@/features/codex/components/CodexInstallPrompt";
 import { CodexCliUpdatePrompt } from "@/features/update/components/CodexCliUpdatePrompt";
 import { CodexCliUpdateToast } from "@/features/update/components/CodexCliUpdateToast";
@@ -193,12 +190,6 @@ export default function MainApp() {
     error: string | null;
     isBusy: boolean;
   } | null>(null);
-  const [codexInstallPromptOpen, setCodexInstallPromptOpen] = useState(false);
-  const [codexInstallStage, setCodexInstallStage] = useState<"ready" | "downloading" | "error">("ready");
-  const [codexInstallProgress, setCodexInstallProgress] = useState(0);
-  const [codexInstallError, setCodexInstallError] = useState<string | null>(null);
-  const codexInstallCheckStartedRef = useRef(false);
-  const codexInstallRequestIdRef = useRef<string | null>(null);
   const [threadListRuntimeContext, setThreadListRuntimeContext] =
     useState<ThreadListRuntimeContext>({
       sourceId: null,
@@ -320,26 +311,16 @@ export default function MainApp() {
   });
   const updaterEnabled = !isMobileRuntime;
 
-  useEffect(() => {
-    if (appSettingsLoading || isMobileRuntime || newAgentEngine === "gemini" || codexInstallCheckStartedRef.current) return;
-    codexInstallCheckStartedRef.current = true;
-    void doctor(appSettings.codexBin, appSettings.codexArgs).catch((error) => {
-      const message = error instanceof Error ? error.message : String(error);
-      if (
-        appSettings.backendMode === "local" &&
-        message.toLowerCase().includes("codex cli not found")
-      ) {
-        setCodexInstallPromptOpen(true);
-      }
-    });
-  }, [appSettings.backendMode, appSettings.codexArgs, appSettings.codexBin, appSettingsLoading, doctor, isMobileRuntime, newAgentEngine]);
-
-  useEffect(() => subscribeReleaseAssetDownloadProgress((progress) => {
-    if (progress.id !== codexInstallRequestIdRef.current) return;
-    if (progress.totalBytes && progress.totalBytes > 0) {
-      setCodexInstallProgress((progress.downloadedBytes / progress.totalBytes) * 100);
-    }
-  }), []);
+  const activateManagedCodex = useManagedCodexActivation(appSettings, queueSaveSettings, setAppSettings);
+  const codexInstallation = useCodexInstallation({
+    enabled: !appSettingsLoading && !isMobileRuntime &&
+      appSettings.backendMode === "local" && newAgentEngine !== "gemini",
+    codexBin: appSettings.codexBin,
+    codexArgs: appSettings.codexArgs,
+    doctor,
+    onInstalled: activateManagedCodex,
+  });
+  const startupUpdatesReady = !appSettingsLoading && codexInstallation.startupReady;
 
   const localCodexWorkspace = useMemo<WorkspaceInfo>(
     () => ({
@@ -1161,12 +1142,11 @@ export default function MainApp() {
       reconnectLive,
     });
   const codexCliUpdaterEnabled = !isMobileRuntime;
-  const activateManagedCodex = useManagedCodexActivation(appSettings, queueSaveSettings, setAppSettings);
   const codexCliUpdater = useCodexCliUpdater({
     enabled: codexCliUpdaterEnabled,
     installEnabled: appSettings.backendMode === "local",
     autoCheckOnMount:
-      !appSettingsLoading && appSettings.automaticCodexCliUpdateChecksEnabled,
+      startupUpdatesReady && appSettings.automaticCodexCliUpdateChecksEnabled,
     autoInstallOnMount: true,
     codexBin: appSettings.codexBin,
     onInstalled: activateManagedCodex,
@@ -1184,7 +1164,7 @@ export default function MainApp() {
   } = useUpdaterController({
     enabled: updaterEnabled,
     autoCheckOnMount:
-      !appSettingsLoading && appSettings.automaticAppUpdateChecksEnabled,
+      startupUpdatesReady && appSettings.automaticAppUpdateChecksEnabled,
     onCheckCodexCliUpdates: codexCliUpdater.checkAndUpdate,
     experimentalWindowsInstallerMigrationEnabled:
       appSettings.experimentalWindowsInstallerMigrationEnabled,
@@ -1204,7 +1184,7 @@ export default function MainApp() {
   const windowsUiUpdater = useWindowsUiUpdater({
     enabled: windowsUiUpdaterEnabled,
     autoCheckOnMount:
-      !appSettingsLoading &&
+      startupUpdatesReady &&
       appSettings.automaticWindowsUiUpdateChecksEnabled,
     onDebug: addDebugEntry,
   });
@@ -2113,34 +2093,6 @@ export default function MainApp() {
     }
   }, [activeThreadId, activeWorkspace, alertError, composerWorkspaceState, exitDiffView, isCompact, selectWorkspace, setActiveTab, setActiveThreadId, startThreadForWorkspace, t, threadDerivations]);
 
-  const handleInstallManagedCodex = useCallback(async () => {
-    setCodexInstallStage("downloading");
-    setCodexInstallError(null);
-    setCodexInstallProgress(0);
-    const requestId = `${Date.now()}-managed-codex`;
-    codexInstallRequestIdRef.current = requestId;
-    try {
-      const platform = await getManagedCodexPlatform();
-      const packageInfo = await fetchManagedCodexPackage(platform);
-      await installManagedCodex(
-        packageInfo.urls,
-        packageInfo.fileName,
-        requestId,
-        packageInfo.version,
-        packageInfo.size,
-        packageInfo.sha256,
-      );
-      await queueSaveSettings({ ...appSettings, codexBin: null });
-      setAppSettings((current) => ({ ...current, codexBin: null }));
-      setCodexInstallPromptOpen(false);
-      setCodexInstallStage("ready");
-    } catch (error) {
-      setCodexInstallStage("error");
-      setCodexInstallError(error instanceof Error ? error.message : String(error));
-    } finally {
-      codexInstallRequestIdRef.current = null;
-    }
-  }, [appSettings, queueSaveSettings, setAppSettings]);
   useSessionCleanupScheduler({
     settingsLoading: appSettingsLoading,
     startupReady: initialWorkspaceRestoreComplete,
@@ -3000,16 +2952,16 @@ export default function MainApp() {
       <SessionManagerProvider active={sessionManagerOpen} onActiveChange={handleSessionManagerActiveChange} onResumeSession={handleResumeManagedSession} onDeriveSession={handleDeriveManagedSession} onDeriveSessions={handleDeriveManagedSessions} currentWorkspace={projectActiveWorkspace ? { name: projectActiveWorkspace.name, path: projectActiveWorkspace.path } : null}>
         <MainAppShell {...mainAppShellProps} />
         <CodexInstallPrompt
-          open={codexInstallPromptOpen}
-          stage={codexInstallStage}
-          progress={codexInstallProgress}
-          error={codexInstallError}
-          onInstall={() => void handleInstallManagedCodex()}
+          open={codexInstallation.promptOpen}
+          stage={codexInstallation.stage}
+          progress={codexInstallation.progress}
+          error={codexInstallation.error}
+          onInstall={() => void codexInstallation.install()}
           onChooseExisting={() => {
-            setCodexInstallPromptOpen(false);
+            codexInstallation.dismiss();
             modalActions.openSettings("codex");
           }}
-          onLater={() => setCodexInstallPromptOpen(false)}
+          onLater={codexInstallation.dismiss}
         />
         <CodexCliUpdatePrompt
           open={codexCliUpdater.promptOpen}
