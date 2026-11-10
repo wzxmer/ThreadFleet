@@ -66,6 +66,11 @@ import {
 } from "./MessageRows";
 import { SubagentResultSummary } from "./SubagentResultSummary";
 import { useMessagesViewState } from "./useMessagesViewState";
+import {
+  getMessageSearchRanges,
+  highlightMessageSearchRanges,
+  scrollToMessageSearchRange,
+} from "@/features/messages/utils/messageSearch";
 import type { SubagentResultSummary as SubagentResultSummaryData } from "../utils/subagentResults";
 import { ConversationExportControls } from "../export/ConversationExportControls";
 import { useConversationExport } from "../export/useConversationExport";
@@ -206,12 +211,6 @@ function getSearchTargetForEntry(entry: MessageListEntry) {
     return `tool-group-${entry.group.id}`;
   }
   return `item-${entry.item.id}`;
-}
-
-function baseEntryContainsItem(entry: MessageListBaseEntry, itemId: string) {
-  return entry.kind === "toolGroup"
-    ? entry.group.items.some((item) => item.id === itemId)
-    : entry.item.id === itemId;
 }
 
 function entryContainsTurn(
@@ -378,18 +377,6 @@ function derivePersistedLineChangeStats(entry: MessageListEntry) {
     }
   });
   return hasPatch ? patchStats : null;
-}
-
-function getSearchTargetForItem(entries: MessageListEntry[], itemId: string) {
-  const entry = entries.find((candidate) => {
-    if (candidate.kind === "processGroup") {
-      return candidate.group.entries.some((processEntry) =>
-        baseEntryContainsItem(processEntry, itemId),
-      );
-    }
-    return baseEntryContainsItem(candidate, itemId);
-  });
-  return entry ? getSearchTargetForEntry(entry) : null;
 }
 
 const HISTORY_TOP_CONTINUED_SCROLL_THRESHOLD_PX = 24;
@@ -695,6 +682,7 @@ export const Messages = memo(function Messages({
     containerRef,
     updateAutoScroll,
     requestAutoScroll,
+    pauseAutoScroll,
     showScrollToLatest,
     scrollToLatest,
     hiddenBeforeCount,
@@ -908,7 +896,7 @@ export const Messages = memo(function Messages({
       ? searchMatches[Math.min(activeSearchIndex, searchMatches.length - 1)]
       : null;
   const activeSearchTargetId = activeSearchMatch
-    ? getSearchTargetForItem(groupedItems, activeSearchMatch.itemId)
+    ? `item-${activeSearchMatch.itemId}`
     : null;
   const activeSearchDisplayIndex =
     searchMatches.length > 0
@@ -963,17 +951,24 @@ export const Messages = memo(function Messages({
   }, []);
 
   useEffect(() => {
-    if (!activeSearchMatch) {
+    if (
+      !activeSearchMatch ||
+      handledSearchNavigationVersionRef.current === searchNavigationVersion
+    ) {
       return;
     }
+    pauseAutoScroll();
     revealHistoryItemAtIndex(activeSearchMatch.itemIndex);
     revealGroupedItem(activeSearchMatch.itemId);
-  }, [activeSearchMatch, revealGroupedItem, revealHistoryItemAtIndex]);
+  }, [
+    activeSearchMatch,
+    pauseAutoScroll,
+    revealGroupedItem,
+    revealHistoryItemAtIndex,
+    searchNavigationVersion,
+  ]);
 
   useEffect(() => {
-    if (handledSearchNavigationVersionRef.current === searchNavigationVersion) {
-      return;
-    }
     if (!isSearchActiveForThread || !activeSearchTargetId) {
       return;
     }
@@ -981,12 +976,29 @@ export const Messages = memo(function Messages({
     if (!node) {
       return;
     }
-    handledSearchNavigationVersionRef.current = searchNavigationVersion;
+    const ranges = getMessageSearchRanges(node, searchQuery);
+    const clearHighlight = highlightMessageSearchRanges(ranges);
+    if (handledSearchNavigationVersionRef.current === searchNavigationVersion) {
+      return clearHighlight;
+    }
     const frameId = window.requestAnimationFrame(() => {
-      node.scrollIntoView({ block: "center", behavior: "smooth" });
+      handledSearchNavigationVersionRef.current = searchNavigationVersion;
+      scrollToMessageSearchRange(node, ranges[0], containerRef.current);
     });
-    return () => window.cancelAnimationFrame(frameId);
-  }, [activeSearchTargetId, isSearchActiveForThread, searchNavigationVersion]);
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      clearHighlight();
+    };
+  }, [
+    activeSearchTargetId,
+    isSearchActiveForThread,
+    searchNavigationVersion,
+    searchQuery,
+    groupedItems,
+    expandedItems,
+    collapsedToolGroups,
+    containerRef,
+  ]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -1615,6 +1627,17 @@ export const Messages = memo(function Messages({
     }
     return null;
   };
+  const renderSearchableItem = (item: ConversationItem, content: ReactNode) => (
+    <div
+      key={item.id}
+      ref={registerSearchTarget(`item-${item.id}`)}
+      className={`messages-search-target${
+        activeSearchTargetId === `item-${item.id}` ? " is-active-search-match" : ""
+      }`}
+    >
+      {content}
+    </div>
+  );
   const renderProcessGroupEntry = (processEntry: MessageListBaseEntry) => {
     if (processEntry.kind === "toolGroup") {
       const shouldCollapseNestedGroup = processEntry.group.items.length >= 4;
@@ -1626,14 +1649,16 @@ export const Messages = memo(function Messages({
           >
             <div className="tool-group-body">
               {processEntry.group.items.map((nestedItem) =>
-                renderItem(nestedItem),
+                renderSearchableItem(nestedItem, renderItem(nestedItem)),
               )}
             </div>
           </div>
         );
       }
       const nestedStateId = `nested-tool-group-${processEntry.group.id}`;
-      const isExpanded = expandedItems.has(nestedStateId);
+      const isExpanded =
+        expandedItems.has(nestedStateId) ||
+        processEntry.group.items.some((item) => item.id === activeSearchMatch?.itemId);
       const nestedBodyId = `${nestedStateId}-body`;
       const ChevronIcon = isExpanded ? ChevronDown : ChevronRight;
       return (
@@ -1672,7 +1697,7 @@ export const Messages = memo(function Messages({
           {isExpanded ? (
             <div className="tool-group-body" id={nestedBodyId}>
               {processEntry.group.items.map((nestedItem) =>
-                renderItem(nestedItem),
+                renderSearchableItem(nestedItem, renderItem(nestedItem)),
               )}
             </div>
           ) : null}
@@ -1683,7 +1708,7 @@ export const Messages = memo(function Messages({
       processEntry.item.kind === "message" &&
       processEntry.item.role === "assistant"
     ) {
-      return (
+      return renderSearchableItem(processEntry.item,
         <ProcessMessageRow
           key={processEntry.item.id}
           item={processEntry.item}
@@ -1695,7 +1720,7 @@ export const Messages = memo(function Messages({
         />
       );
     }
-    return renderItem(processEntry.item);
+    return renderSearchableItem(processEntry.item, renderItem(processEntry.item));
   };
 
   const activeToolProcessContent =
@@ -1952,7 +1977,9 @@ export const Messages = memo(function Messages({
                   </div>
                   {!isCollapsed && (
                     <div className="tool-group-body" id={groupBodyId}>
-                      {group.items.map((item) => renderItem(item))}
+                      {group.items.map((item) =>
+                        renderSearchableItem(item, renderItem(item)),
+                      )}
                     </div>
                   )}
                 </div>

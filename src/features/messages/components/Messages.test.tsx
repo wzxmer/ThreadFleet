@@ -1682,6 +1682,64 @@ describe("Messages", () => {
     expect(scrollIntoViewMock).toHaveBeenCalledTimes(1);
   });
 
+  it("positions a search match inside a collapsed nested process group", async () => {
+    const scrollIntoViewMock = vi.fn();
+    HTMLElement.prototype.scrollIntoView = scrollIntoViewMock;
+    const items: ConversationItem[] = [
+      ...Array.from({ length: 5 }, (_, index): ConversationItem => ({
+        id: `search-tool-${index}`, kind: "tool", toolType: "commandExecution",
+        title: `Command ${index}`, detail: `echo ${index}`, status: "completed",
+        output: index === 2 ? "Graphify target output" : "Other output",
+        turnId: "search-turn",
+      })),
+      { id: "search-final", kind: "message", role: "assistant", phase: "final_answer",
+        text: "Completed", turnId: "search-turn" },
+    ];
+    render(<Messages items={items} threadId="thread-nested-search" workspaceId="ws-1"
+      isThinking={false} defaultToolGroupsCollapsed openTargets={[]} selectedOpenAppId="" />);
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    fireEvent.change(screen.getByLabelText("搜索当前会话"), { target: { value: "Graphify" } });
+
+    await waitFor(() => {
+      expect(screen.getByText("Graphify target output")).toBeTruthy();
+      expect(scrollIntoViewMock).toHaveBeenCalled();
+    });
+    const target = scrollIntoViewMock.mock.instances[scrollIntoViewMock.mock.instances.length - 1] as HTMLElement;
+    expect(target.textContent).toContain("Graphify target output");
+    expect(target.textContent).not.toContain("Command 0");
+    expect(target.closest(".is-active-search-match")).toBeTruthy();
+  });
+
+  it("paints the active result and clears text highlights on close", async () => {
+    const highlights = new Map<string, Set<Range>>();
+    vi.stubGlobal("CSS", { highlights });
+    vi.stubGlobal("Highlight", class extends Set<Range> {
+      constructor(...ranges: Range[]) { super(ranges); }
+    });
+    try {
+      render(<Messages items={[
+        { id: "paint-user", kind: "message", role: "user", text: "First Graphify result" },
+        { id: "paint-answer", kind: "message", role: "assistant", text: "Second Graphify result" },
+      ]} threadId="thread-painted-search" isThinking={false} openTargets={[]} selectedOpenAppId="" />);
+      fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+      fireEvent.change(screen.getByLabelText("搜索当前会话"), { target: { value: "Graphify" } });
+      await waitFor(() => expect(highlights.size).toBe(1));
+      let range = [...highlights.values()][0].values().next().value as Range;
+      expect(range.toString()).toBe("Graphify");
+      expect(range.startContainer.textContent).toContain("First");
+      fireEvent.click(screen.getByRole("button", { name: I18N_STRINGS.zh["messages.searchNext"] }));
+      await waitFor(() => {
+        range = [...highlights.values()][0].values().next().value as Range;
+        expect(range.startContainer.textContent).toContain("Second");
+      });
+      fireEvent.click(screen.getByRole("button", { name: I18N_STRINGS.zh["messages.searchClose"] }));
+      expect(highlights.size).toBe(0);
+    } finally {
+      cleanup();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("renders image grid above message text and opens lightbox", () => {
     const items: ConversationItem[] = [
       {

@@ -812,6 +812,11 @@
   border-radius: 16px;
 }
 
+::highlight(threadfleet-message-search) {
+  background-color: #ffe066;
+  color: #241a00;
+}
+
 .messages-search-target.is-active-search-match {
   outline: 2px solid color-mix(in srgb, var(--border-accent) 72%, transparent);
   outline-offset: 4px;

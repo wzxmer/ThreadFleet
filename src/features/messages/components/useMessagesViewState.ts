@@ -167,6 +167,19 @@ export function useMessagesViewState({
     setShowScrollToLatest(false);
   }, [showLatest]);
 
+  const pauseAutoScroll = useCallback(() => {
+    autoScrollRef.current = false;
+    pendingContentScrollIntentRef.current = null;
+    if (pendingContentScrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(pendingContentScrollFrameRef.current);
+      pendingContentScrollFrameRef.current = null;
+    }
+    if (resizeScrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(resizeScrollFrameRef.current);
+      resizeScrollFrameRef.current = null;
+    }
+  }, []);
+
   useLayoutEffect(() => {
     const didThreadChange = previousThreadIdRef.current !== threadId;
     previousThreadIdRef.current = threadId;
@@ -998,6 +1011,7 @@ export function useMessagesViewState({
     containerRef,
     updateAutoScroll,
     requestAutoScroll,
+    pauseAutoScroll,
     showScrollToLatest,
     scrollToLatest,
     hiddenBeforeCount,
