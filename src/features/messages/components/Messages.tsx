@@ -1616,6 +1616,9 @@ export const Messages = memo(function Messages({
           onOpenFileLinkMenu={showFileLinkMenu}
           onOpenThreadLink={handleOpenThreadLink}
           onRequestAutoScroll={requestAutoScroll}
+          searchQuery={
+            activeSearchMatch?.itemId === item.id ? searchQuery : undefined
+          }
         />
       );
     }

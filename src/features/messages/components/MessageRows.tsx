@@ -190,6 +190,7 @@ type ToolRowProps = MarkdownFileLinkProps & {
   isExpanded: boolean;
   onToggle: (id: string) => void;
   onRequestAutoScroll?: () => void;
+  searchQuery?: string;
 };
 
 type ExploreRowProps = {
@@ -202,6 +203,7 @@ type ProcessRowProps = {
 
 type CommandOutputProps = {
   output: string;
+  searchQuery?: string;
 };
 
 function extractTimestampFromMessageId(id: string) {
@@ -285,6 +287,7 @@ const MessageAttachmentList = memo(function MessageAttachmentList({
 
 const CommandOutput = memo(function CommandOutput({
   output,
+  searchQuery,
 }: CommandOutputProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [isPinned, setIsPinned] = useState(true);
@@ -301,8 +304,23 @@ const CommandOutput = memo(function CommandOutput({
       remainingLines -= 1;
     }
     const contentStart = start > 0 ? start + 1 : 0;
+    const query = searchQuery?.trim().toLowerCase();
+    const matchOffset = query ? output.toLowerCase().indexOf(query) : -1;
+    if (matchOffset >= 0 && matchOffset < contentStart) {
+      const matchStart = output.lastIndexOf("\n", matchOffset - 1) + 1;
+      let end = matchStart;
+      for (let line = 0; line < MAX_COMMAND_OUTPUT_LINES; line += 1) {
+        const newline = output.indexOf("\n", end);
+        if (newline < 0) {
+          end = output.length;
+          break;
+        }
+        end = newline + 1;
+      }
+      return { contentStart: matchStart, text: output.slice(matchStart, end) };
+    }
     return { contentStart, text: output.slice(contentStart) };
-  }, [output]);
+  }, [output, searchQuery]);
   const lines = useMemo(() => {
     if (!outputTail.text) {
       return [];
@@ -1559,6 +1577,7 @@ export const ToolRow = memo(function ToolRow({
   onOpenFileLinkMenu,
   onOpenThreadLink,
   onRequestAutoScroll,
+  searchQuery,
 }: ToolRowProps) {
   const isFileChange = item.toolType === "fileChange";
   const isCommand = item.toolType === "commandExecution";
@@ -1748,7 +1767,9 @@ export const ToolRow = memo(function ToolRow({
             onOpenThreadLink={onOpenThreadLink}
           />
         )}
-        {showCommandOutput && <CommandOutput output={summary.output ?? ""} />}
+        {showCommandOutput && (
+          <CommandOutput output={summary.output ?? ""} searchQuery={searchQuery} />
+        )}
         {showToolOutput && summary.output && !isCommand && (
           <Markdown
             value={stripAnsiControlCodes(summary.output)}

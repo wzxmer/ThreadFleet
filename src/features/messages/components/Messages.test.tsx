@@ -1710,6 +1710,21 @@ describe("Messages", () => {
     expect(target.closest(".is-active-search-match")).toBeTruthy();
   });
 
+  it("reveals a search match outside the rendered command output tail", async () => {
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const output = ["Graphify early output", ...Array.from({ length: 250 }, (_, i) => `Log line ${i}`)].join("\n");
+    render(<Messages items={[{ id: "long-command", kind: "tool", toolType: "commandExecution",
+      title: "Command: check", detail: "", status: "completed", output }]}
+      threadId="thread-output-search" isThinking={false} openTargets={[]} selectedOpenAppId="" />);
+    expect(screen.queryByText("Graphify early output")).toBeNull();
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    fireEvent.change(screen.getByLabelText("搜索当前会话"), { target: { value: "Graphify" } });
+    await waitFor(() => expect(screen.getByText("Graphify early output")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: I18N_STRINGS.zh["messages.searchClose"] }));
+    await waitFor(() => expect(screen.queryByText("Graphify early output")).toBeNull());
+    expect(screen.getByText("Log line 249")).toBeTruthy();
+  });
+
   it("paints the active result and clears text highlights on close", async () => {
     const highlights = new Map<string, Set<Range>>();
     vi.stubGlobal("CSS", { highlights });
