@@ -1719,7 +1719,7 @@ describe("useThreads UX integration", () => {
     now = Date.UTC(2026, 0, 10);
     vi.mocked(scanManagedSessions).mockResolvedValue({
       requestId: "scan",
-      totalSessions: 3,
+      totalSessions: 4,
       diagnosticCount: 0,
       cancelled: false,
       sourceSnapshots: [],
@@ -1728,11 +1728,12 @@ describe("useThreads UX integration", () => {
       requestId: "scan",
       items: [
         managedSession("thread-fresh", "/tmp/codex", now - DAY_MS),
+        managedSession("thread-metadata", "/tmp/codex", now - 5 * DAY_MS, { sourceKind: "codexMonitorMetadata" }),
         managedSession("thread-old", "/tmp/codex", now - 5 * DAY_MS),
         managedSession("thread-other-workspace", "/tmp/other", now - 5 * DAY_MS),
       ],
       diagnostics: [],
-      total: 3,
+      total: 4,
       nextOffset: null,
     });
     vi.mocked(archiveThread).mockResolvedValue({});
@@ -1751,6 +1752,7 @@ describe("useThreads UX integration", () => {
       expect(vi.mocked(archiveThread)).toHaveBeenCalledWith("ws-1", "thread-old");
     });
     expect(vi.mocked(archiveThread)).not.toHaveBeenCalledWith("ws-1", "thread-fresh");
+    expect(vi.mocked(archiveThread)).not.toHaveBeenCalledWith("ws-1", "thread-metadata");
     expect(vi.mocked(archiveThread)).not.toHaveBeenCalledWith(
       "ws-1",
       "thread-other-workspace",

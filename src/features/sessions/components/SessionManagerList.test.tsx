@@ -27,6 +27,18 @@ const source: SessionSource = { id: "source-a", name: "Primary", codexHomePath: 
 const managedSession: ManagedSession = { key: "source-a:thread-a", sourceId: "source-a", threadId: "thread-a", sourceKind: "cli", cwd: "C:/missing/project", title: "Archived child", preview: null, createdAt: 1, updatedAt: 2, archivedAt: 2, isArchived: true, parentThreadId: "parent", isSubagent: true, subagentNickname: "worker", subagentRole: null, projectExists: false, fileStatus: "mapped", fileConfidence: "exact" };
 
 describe("SessionManagerList", () => {
+  it("explains immediate archival for metadata helpers while keeping records accessible", () => {
+    const helper = { ...managedSession, sourceKind: "codexMonitorMetadata", isSubagent: false, parentThreadId: null };
+    const onSelectSingle = vi.fn();
+    render(<SessionManagerList sessions={[helper]} sources={[source]} selected={new Set([helper.key])} resumingKey={null} archivingKeys={new Set()} loading={false} loadingMore={false} error={null} hasMore={false} onToggleSelected={vi.fn()} onSelectSingle={onSelectSingle} onResume={vi.fn()} onArchive={vi.fn()} onDerive={vi.fn()} onLoadMore={vi.fn()} />);
+    expect(screen.getByText("标题生成辅助会话")).toBeTruthy();
+    expect(screen.getByTitle("用于生成会话标题和工作树名称，任务完成后立即归档，不受空闲归档天数限制。")).toBeTruthy();
+    expect(screen.queryByText("主会话")).toBeNull();
+    fireEvent.click(screen.getByText(helper.title));
+    expect(onSelectSingle).toHaveBeenCalledWith(helper.key);
+    expect((screen.getByRole("button", { name: "归档" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("selects one session from the whole row without elevating inner controls", () => {
     const onSelectSingle = vi.fn();
     const selectionProps = { onSelectSingle };

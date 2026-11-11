@@ -1,4 +1,5 @@
 import type { ManagedSession } from "@/types";
+import { isMetadataSession } from "@utils/sessionKinds";
 
 export type SessionManagerDateField = "updatedAt" | "createdAt" | "archivedAt";
 export type SessionManagerDatePreset = "all" | "today" | "yesterday" | "last7" | "last30" | "thisWeek" | "thisMonth" | "custom" | "unknown";
@@ -122,7 +123,7 @@ export function filterAndSortManagedSessions(
       if (filters.storage === "local" && session.isArchived) return false;
       if (filters.storage === "archived" && !session.isArchived) return false;
       if (filters.sourceId !== "all" && session.sourceId !== filters.sourceId) return false;
-      if (filters.sessionType === "main" && session.isSubagent) return false;
+      if (filters.sessionType === "main" && (session.isSubagent || isMetadataSession(session))) return false;
       if (filters.sessionType === "subagent" && !session.isSubagent) return false;
       if (filters.projectMode === "current" && normalizeSessionProjectPath(session.cwd) !== normalizedCurrentProject) return false;
       if (filters.projectMode === "missing" && session.projectExists) return false;

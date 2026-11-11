@@ -25,6 +25,7 @@ pub(crate) fn parse_session_metadata(path: &Path) -> Result<ParsedSessionMetadat
     let reader = BufReader::new(file);
     let mut parse_error = None;
     let mut metadata = None;
+    let mut is_monitor_session = false;
     for line in reader.lines() {
         let line = line.map_err(|error| error.to_string())?;
         let value: Value = match serde_json::from_str(&line) {
@@ -35,6 +36,8 @@ pub(crate) fn parse_session_metadata(path: &Path) -> Result<ParsedSessionMetadat
             }
         };
         if value.get("type").and_then(Value::as_str) == Some("session_meta") {
+            is_monitor_session = value.pointer("/payload/originator").and_then(Value::as_str)
+                == Some("codex_monitor");
             metadata = Some(parse_session_meta_value(&value)?);
             break;
         }
@@ -43,6 +46,19 @@ pub(crate) fn parse_session_metadata(path: &Path) -> Result<ParsedSessionMetadat
         parse_error.unwrap_or_else(|| "Session metadata record not found".to_string())
     })?;
     metadata.last_activity_at = read_last_activity_at(path)?.or(metadata.created_at);
+    // Background naming tasks predate a persisted helper flag. Match the entire
+    // generated opening template, never a mutable title or a keyword in a chat.
+    if is_monitor_session && !metadata.is_subagent {
+        if let Ok(Some(opening)) = super::preview::read_session_opening_message(path) {
+            let prefix = crate::shared::codex_aux_core::build_run_metadata_prompt("");
+            if opening
+                .strip_prefix(&prefix)
+                .is_some_and(|task| !task.trim().is_empty())
+            {
+                metadata.source_kind = Some("codexMonitorMetadata".to_string());
+            }
+        }
+    }
     Ok(metadata)
 }
 

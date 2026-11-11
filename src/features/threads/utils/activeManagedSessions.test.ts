@@ -79,6 +79,7 @@ describe("activeManagedSessions", () => {
   });
 
   it("keeps exact normal and linked subagent sessions only", () => {
+    expect(isSidebarManagedSessionCandidate(session({ sourceKind: "codexMonitorMetadata" }))).toBe(false);
     expect(isSidebarManagedSessionCandidate(session())).toBe(true);
     expect(
       isSidebarManagedSessionCandidate(

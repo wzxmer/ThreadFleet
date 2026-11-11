@@ -7,6 +7,7 @@ import SlidersHorizontal from "lucide-react/dist/esm/icons/sliders-horizontal";
 import X from "lucide-react/dist/esm/icons/x";
 import { useI18n } from "@/features/i18n/I18nProvider";
 import type { SessionSource } from "@/types";
+import { CODEX_METADATA_SESSION_SOURCE_KIND } from "@utils/sessionKinds";
 import type { SessionManagerState } from "../hooks/useSessionManager";
 import type { SessionManagerDatePreset } from "../utils/sessionManagerFilters";
 import {
@@ -67,7 +68,7 @@ export function SessionManagerToolbar({ manager }: Props) {
     if (manager.sourceFilter !== "all") values.push({ id: "source", label: sourceName, remove: () => manager.setSourceFilter("all") });
     if (manager.sessionTypeFilter !== "all") values.push({ id: "type", label: manager.sessionTypeFilter === "main" ? t("sessionManager.mainSession") : t("sessionManager.subagent"), remove: () => manager.setSessionTypeFilter("all") });
     if (manager.projectMode !== "all") values.push({ id: "project", label: manager.projectMode === "current" ? t("sessionManager.currentProject") : manager.projectMode === "missing" ? t("sessionManager.missing") : `${t("sessionManager.selectedProjects")} ${manager.projectPaths.length}`, remove: () => manager.setProjectMode("all") });
-    if (manager.sourceKindFilter !== "all") values.push({ id: "sourceKind", label: manager.sourceKindFilter, remove: () => manager.setSourceKindFilter("all") });
+    if (manager.sourceKindFilter !== "all") values.push({ id: "sourceKind", label: manager.sourceKindFilter === CODEX_METADATA_SESSION_SOURCE_KIND ? t("sessionManager.metadataSession") : manager.sourceKindFilter, remove: () => manager.setSourceKindFilter("all") });
     if (manager.fileStatusFilter !== "all") values.push({ id: "fileStatus", label: fileStatusLabel(manager.fileStatusFilter), remove: () => manager.setFileStatusFilter("all") });
     if (manager.fileConfidenceFilter !== "all") values.push({ id: "confidence", label: confidenceLabel(manager.fileConfidenceFilter), remove: () => manager.setFileConfidenceFilter("all") });
     if (manager.subagentQuery.trim()) values.push({ id: "subagent", label: manager.subagentQuery.trim(), remove: () => manager.setSubagentQuery("") });
@@ -154,7 +155,7 @@ export function SessionManagerToolbar({ manager }: Props) {
 
       {filtersOpen && <div className="session-manager-filter-panel">
         <label><span>{t("sessionManager.dateField")}</span><select value={manager.dateField} onChange={(event) => manager.setDateField(event.target.value as typeof manager.dateField)}><option value="updatedAt">{t("sessionManager.lastUsed")}</option><option value="createdAt">{t("sessionManager.createdAt")}</option><option value="archivedAt">{t("sessionManager.archivedAt")}</option></select></label>
-        <label><span>{t("sessionManager.sourceKind")}</span><select value={manager.sourceKindFilter} onChange={(event) => manager.setSourceKindFilter(event.target.value)}><option value="all">{t("sessionManager.all")}</option>{manager.sourceKindOptions.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+        <label><span>{t("sessionManager.sourceKind")}</span><select value={manager.sourceKindFilter} onChange={(event) => manager.setSourceKindFilter(event.target.value)}><option value="all">{t("sessionManager.all")}</option>{manager.sourceKindOptions.map((value) => <option key={value} value={value}>{value === CODEX_METADATA_SESSION_SOURCE_KIND ? t("sessionManager.metadataSession") : value}</option>)}</select></label>
         <label><span>{t("sessionManager.fileStatus")}</span><select value={manager.fileStatusFilter} onChange={(event) => manager.setFileStatusFilter(event.target.value)}><option value="all">{t("sessionManager.all")}</option>{manager.fileStatusOptions.map((value) => <option key={value} value={value}>{fileStatusLabel(value)}</option>)}</select></label>
         <label><span>{t("sessionManager.fileConfidence")}</span><select value={manager.fileConfidenceFilter} onChange={(event) => manager.setFileConfidenceFilter(event.target.value)}><option value="all">{t("sessionManager.all")}</option>{manager.fileConfidenceOptions.map((value) => <option key={value} value={value}>{confidenceLabel(value)}</option>)}</select></label>
         <label className="session-manager-filter-panel-wide"><span>{t("sessionManager.subagentIdentity")}</span><input value={manager.subagentQuery} onChange={(event) => manager.setSubagentQuery(event.target.value)} /></label>

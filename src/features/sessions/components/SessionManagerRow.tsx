@@ -3,6 +3,7 @@ import { formatLocalDateTime, formatRelativeTimeShort } from "@/utils/time";
 import { useI18n } from "@/features/i18n/I18nProvider";
 import type { CSSProperties } from "react";
 import { sessionSourceSupports } from "../utils/sessionSourceCapabilities";
+import { isMetadataSession } from "@utils/sessionKinds";
 
 type Props = {
   session: ManagedSession;
@@ -56,7 +57,9 @@ export function SessionManagerRow({ session, source, depth = 0, selected, resumi
         {!compact && session.preview && <span className="session-manager-row-preview">{session.preview}</span>}
         <span className="session-manager-row-tags">
           <span>{source?.name ?? session.sourceId}</span>
-          <span>{session.isSubagent ? (session.subagentNickname ?? t("sessionManager.subagent")) : t("sessionManager.mainSession")}</span>
+          {isMetadataSession(session)
+            ? <span title={t("sessionManager.metadataSessionHelp")}>{t("sessionManager.metadataSession")}</span>
+            : <span>{session.isSubagent ? (session.subagentNickname ?? t("sessionManager.subagent")) : t("sessionManager.mainSession")}</span>}
           {!session.projectExists && <span className="is-warning">{t("sessionManager.projectMissing")}</span>}
         </span>
       </button>

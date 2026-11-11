@@ -1,4 +1,5 @@
 import type { ManagedSession } from "@/types";
+import { isMetadataSession } from "@utils/sessionKinds";
 import {
   cancelSessionTask,
   fetchManagedSessionsPage,
@@ -92,6 +93,7 @@ export function isSidebarManagedSessionCandidate(
 ): boolean {
   return (
     !session.isArchived &&
+    !isMetadataSession(session) &&
     session.fileStatus === "mapped" &&
     session.fileConfidence === "exact" &&
     (!session.isSubagent ||

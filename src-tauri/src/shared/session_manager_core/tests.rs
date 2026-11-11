@@ -56,6 +56,68 @@ fn scans_multiple_sources_with_duplicate_thread_ids() {
 }
 
 #[test]
+fn classifies_metadata_helpers_without_relying_on_the_session_title() {
+    let fixture = SessionFixture::new();
+    let root = fixture.root.join("home");
+    let prompt = crate::shared::codex_aux_core::build_run_metadata_prompt("检查全局规则");
+    for (id, archived, originator, message, subagent) in [
+        (
+            "helper-active",
+            false,
+            "codex_monitor",
+            prompt.clone(),
+            false,
+        ),
+        (
+            "helper-archived",
+            true,
+            "codex_monitor",
+            prompt.clone(),
+            false,
+        ),
+        (
+            "similar-user",
+            true,
+            "codex_monitor",
+            format!("请解释这个模板：\n{prompt}"),
+            false,
+        ),
+        ("other-client", true, "codex_cli_rs", prompt.clone(), false),
+        ("subagent", true, "codex_monitor", prompt.clone(), true),
+    ] {
+        create_session(&root, archived, id, None, json!("vscode"), None);
+        let path = session_path(&root, archived, id);
+        let mut meta: serde_json::Value =
+            serde_json::from_str(fs::read_to_string(&path).unwrap().trim()).unwrap();
+        meta["payload"]["originator"] = json!(originator);
+        if subagent {
+            meta["payload"]["thread_source"] = json!("subagent");
+        }
+        let user = json!({"timestamp":"2026-07-10T08:01:00Z", "type":"event_msg", "payload":{"type":"user_message", "message":message}});
+        fs::write(&path, format!("{meta}\n{user}\n")).unwrap();
+    }
+    // Renaming an indexed helper must not turn it into an ordinary session.
+    write_index(&root, "helper-archived", "用户修改的标题");
+    let result = scan_session_source(&source("source-a", &root));
+    assert_eq!(result.sessions.len(), 5);
+    assert!(result.diagnostics.is_empty());
+    for session in result.sessions {
+        let expected = if session.thread_id.starts_with("helper-") {
+            "codexMonitorMetadata"
+        } else {
+            "vscode"
+        };
+        assert_eq!(
+            session.source_kind.as_deref(),
+            Some(expected),
+            "{}",
+            session.thread_id
+        );
+        assert!(result.files_by_key.contains_key(&session.key));
+    }
+}
+
+#[test]
 fn source_scan_distinguishes_an_existing_session_from_a_true_deletion() {
     let fixture = SessionFixture::new();
     let source_root = fixture.root.join("home");

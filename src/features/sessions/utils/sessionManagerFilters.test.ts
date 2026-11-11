@@ -51,6 +51,14 @@ const baseFilters: SessionManagerFilterState = {
 };
 
 describe("session manager filters", () => {
+  it("keeps metadata helpers inspectable without counting them as main sessions", () => {
+    const main = session({ key: "main" });
+    const helper = session({ key: "helper", sourceKind: "codexMonitorMetadata", isArchived: true });
+    expect(filterAndSortManagedSessions([main, helper], baseFilters)).toHaveLength(2);
+    expect(filterAndSortManagedSessions([main, helper], { ...baseFilters, sessionType: "main" })).toEqual([main]);
+    expect(filterAndSortManagedSessions([main, helper], { ...baseFilters, sourceKind: "codexMonitorMetadata" })).toEqual([helper]);
+  });
+
   it("uses local calendar-day boundaries for today, yesterday, and inclusive custom ranges", () => {
     const now = new Date(2026, 6, 22, 15, 30).getTime();
     const items = [
