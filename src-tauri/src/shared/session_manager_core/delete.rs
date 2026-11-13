@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::types::{ManagedSession, SessionFileConfidence, SessionSource};
 
@@ -16,7 +16,10 @@ pub(crate) fn delete_exact_archived_session(
     if session.file_confidence != SessionFileConfidence::Exact {
         return Err("Managed session does not have an exact verified mapping".to_string());
     }
-    let source_root = PathBuf::from(&source.codex_home_path);
+    // The configured source can be a migration junction; only its resolved
+    // directory is trusted. Links under the archive root remain forbidden.
+    let source_root = std::fs::canonicalize(&source.codex_home_path)
+        .map_err(|error| format!("Failed to resolve source CODEX_HOME: {error}"))?;
     let archived_root = source_root.join("archived_sessions");
     let source_metadata =
         std::fs::symlink_metadata(&source_root).map_err(|error| error.to_string())?;
@@ -152,5 +155,23 @@ mod tests {
         assert!(delete_exact_archived_session(&source, &session, &path).is_err());
         assert!(path.exists());
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn rejects_junction_archived_directory() {
+        let (root, source, session, path) = fixture();
+        let archived = root.join("archived_sessions");
+        let outside = root.join("other-archive");
+        fs::rename(&archived, &outside).unwrap();
+        crate::shared::attachment_storage_core::tests::create_directory_junction(
+            &outside, &archived,
+        );
+
+        assert!(delete_exact_archived_session(&source, &session, &path).is_err());
+        assert!(outside.join("rollout-thread-a.jsonl").exists());
+
+        fs::remove_dir(&archived).unwrap();
+        fs::remove_dir_all(root).unwrap();
     }
 }

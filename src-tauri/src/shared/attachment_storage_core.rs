@@ -55,9 +55,13 @@ pub(crate) fn validate_session_attachment_cleanup(
     thread_id: &str,
 ) -> Result<ValidatedSessionAttachmentCleanup, String> {
     let thread_id = thread_id.trim();
-    validate_session_attachment_target(codex_home, thread_id)?;
+    // CODEX_HOME may be a migration junction. Pin its resolved directory so
+    // revalidation cannot follow a retargeted source link into different data.
+    let codex_home = fs::canonicalize(codex_home)
+        .map_err(|error| format!("Failed to resolve source CODEX_HOME: {error}"))?;
+    validate_session_attachment_target(&codex_home, thread_id)?;
     Ok(ValidatedSessionAttachmentCleanup {
-        codex_home: codex_home.to_path_buf(),
+        codex_home,
         thread_id: thread_id.to_string(),
     })
 }
@@ -126,7 +130,7 @@ fn validate_real_directory(metadata: &fs::Metadata) -> Result<(), String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use uuid::Uuid;
 
@@ -134,6 +138,69 @@ mod tests {
         let path = std::env::temp_dir().join(format!("{prefix}-{}", Uuid::new_v4()));
         fs::create_dir_all(&path).unwrap();
         path
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn create_directory_junction(target: &Path, link: &Path) {
+        use std::os::windows::process::CommandExt;
+
+        let output = std::process::Command::new("cmd")
+            .args(["/d", "/c", "mklink", "/J"])
+            .arg(link.to_string_lossy().replace('/', "\\"))
+            .arg(target.to_string_lossy().replace('/', "\\"))
+            .creation_flags(0x08000000)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn cleanup_pins_the_resolved_junction_source() {
+        let root = temp_codex_home("session-attachments-junction");
+        let home = root.join("data");
+        let other_home = root.join("other-data");
+        let target = session_attachment_dir(&home, "thread-a").unwrap();
+        let other = session_attachment_dir(&other_home, "thread-a").unwrap();
+        fs::create_dir_all(&target).unwrap();
+        fs::create_dir_all(&other).unwrap();
+        fs::write(other.join("keep.png"), b"keep").unwrap();
+        let link = root.join("codex-home");
+        create_directory_junction(&home, &link);
+
+        let cleanup = validate_session_attachment_cleanup(&link, "thread-a").unwrap();
+        fs::remove_dir(&link).unwrap();
+        create_directory_junction(&other_home, &link);
+        cleanup.delete().unwrap();
+
+        assert!(!target.exists());
+        assert!(other.join("keep.png").exists());
+        fs::remove_dir(&link).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn rejects_junction_attachment_directories() {
+        for level in ["root", "sessions", "target"] {
+            let home = temp_codex_home("session-attachments-nested-junction");
+            let outside = temp_codex_home("session-attachments-outside");
+            fs::write(outside.join("keep.png"), b"keep").unwrap();
+            let link = match level {
+                "root" => attachments_root(&home),
+                "sessions" => attachments_root(&home).join("sessions"),
+                _ => session_attachment_dir(&home, "thread-a").unwrap(),
+            };
+            fs::create_dir_all(link.parent().unwrap()).unwrap();
+            create_directory_junction(&outside, &link);
+
+            assert!(validate_session_attachment_cleanup(&home, "thread-a").is_err());
+            assert!(outside.join("keep.png").exists());
+
+            fs::remove_dir(&link).unwrap();
+            fs::remove_dir_all(home).unwrap();
+            fs::remove_dir_all(outside).unwrap();
+        }
     }
 
     #[test]

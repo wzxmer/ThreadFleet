@@ -1804,6 +1804,16 @@ mod tests {
 
     #[test]
     fn previews_and_immediately_cleans_expired_archives() {
+        check_immediate_cleanup(false);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn previews_and_immediately_cleans_expired_archives_through_junction() {
+        check_immediate_cleanup(true);
+    }
+
+    fn check_immediate_cleanup(use_junction: bool) {
         let runtime_executor = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -1812,12 +1822,30 @@ mod tests {
             let root =
                 std::env::temp_dir().join(format!("codex-monitor-cleanup-now-{}", Uuid::new_v4()));
             let codex_home = root.join("codex-home");
+            fs::create_dir_all(&codex_home).unwrap();
+            let codex_home = if use_junction {
+                let link = root.join("linked-codex-home");
+                #[cfg(windows)]
+                crate::shared::attachment_storage_core::tests::create_directory_junction(
+                    &codex_home,
+                    &link,
+                );
+                link
+            } else {
+                codex_home
+            };
             let archived = codex_home.join("archived_sessions");
             fs::create_dir_all(&archived).unwrap();
             let session_path = archived.join("rollout-thread-expired.jsonl");
             fs::write(
                 &session_path,
                 "{\"type\":\"session_meta\",\"payload\":{\"id\":\"thread-expired\"}}\n",
+            )
+            .unwrap();
+            let recent_path = archived.join("rollout-thread-recent.jsonl");
+            fs::write(
+                &recent_path,
+                "{\"type\":\"session_meta\",\"payload\":{\"id\":\"thread-recent\"}}\n",
             )
             .unwrap();
             let settings = Mutex::new(AppSettings::default());
@@ -1866,6 +1894,10 @@ mod tests {
             assert_eq!(response.failure_count, 0);
             assert!(!session_path.exists());
             assert!(!attachment_dir.exists());
+            assert!(recent_path.exists());
+            if use_junction {
+                fs::remove_dir(&codex_home).unwrap();
+            }
             let _ = fs::remove_dir_all(root);
         });
     }
